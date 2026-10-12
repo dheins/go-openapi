@@ -4,7 +4,7 @@
 Defects in what is implemented: behaviour that is wrong or surprising
 today. Things that are simply not built yet are in [features.md](features.md).
 Each entry says where it lives and how to work around it. Fixed entries are
-checked off under [Fixed](#fixed) until they are released.
+checked off under [Fixed](#fixed), by the release they shipped in.
 
 ## Loader
 
@@ -75,7 +75,7 @@ checked off under [Fixed](#fixed) until they are released.
 
 ## Fixed
 
-Unreleased (after v0.1.0):
+v0.2.0:
 
 - [x] **Headers survived a failed response encoding.** Headers are now
   sent only with a body that encoded; a failure is a clean 500. (2b38b63)

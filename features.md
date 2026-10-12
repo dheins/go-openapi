@@ -3,7 +3,8 @@
 Features that are deliberately not implemented yet, grouped by area, with
 the milestone they are planned for (see [docs/PLAN.md](docs/PLAN.md)).
 Defects in existing behaviour are in [bugs.md](bugs.md). Implemented entries
-are checked off under [Implemented](#implemented) until they are released.
+are checked off under [Implemented](#implemented), by the release they
+shipped in.
 
 ## Out of v1 scope
 
@@ -55,7 +56,7 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 ## Implemented
 
-Unreleased (after v0.1.0):
+v0.2.0:
 
 - [x] **Polymorphism through `allOf` with a discriminator on the base
   schema (3.0 style).** The base becomes a union of the schemas that extend

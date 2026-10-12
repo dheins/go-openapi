@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.2.0
+
+Complete `allOf`/`oneOf`/`anyOf` support, compile-time safe `oneOf` unions,
+hardened generated servers, and fixes found by fuzzing. This release
+changes generated code and runtime signatures: regenerate models and
+servers after upgrading, and see "Changed" for code that uses unions or
+the runtime writers directly.
 
 ### Added
 
