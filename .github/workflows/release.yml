@@ -21,27 +21,36 @@ jobs:
       - name: Test
         run: go test ./... ./codegen/testdata/golden/...
       - name: Build
+        # Outside the checkout: untracked files in it would make Go stamp
+        # the binaries as a modified ("+dirty") build.
         run: |
           set -e
-          mkdir dist
+          dist="$RUNNER_TEMP/dist"
+          mkdir "$dist"
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             os=${target%/*} arch=${target#*/}
             ext=""; [ "$os" = windows ] && ext=.exe
             name="goapi_${GITHUB_REF_NAME}_${os}_${arch}"
-            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/$name/goapi$ext" ./cmd/goapi
-            cp README.md LICENSE* "dist/$name/" 2>/dev/null || true
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$dist/$name/goapi$ext" ./cmd/goapi
+            cp README.md LICENSE "$dist/$name/"
             if [ "$os" = windows ]; then
-              (cd dist && zip -qr "$name.zip" "$name")
+              (cd "$dist" && zip -qr "$name.zip" "$name")
             else
-              tar -C dist -czf "dist/$name.tar.gz" "$name"
+              tar -C "$dist" -czf "$dist/$name.tar.gz" "$name"
             fi
-            rm -r "dist/$name"
+            rm -r "${dist:?}/$name"
           done
-          (cd dist && sha256sum * > checksums.txt)
+          (cd "$dist" && sha256sum * > checksums.txt)
+      - name: Verify version
+        # Binaries are stamped with the tag only from a clean checkout.
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/check-goapi" ./cmd/goapi
+          got=$("$RUNNER_TEMP/check-goapi" version)
+          [ "$got" = "goapi $GITHUB_REF_NAME" ] || { echo "binaries would report: $got"; exit 1; }
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/dist/* \
             --title "$GITHUB_REF_NAME" \
             --notes-file <(awk -v tag="$GITHUB_REF_NAME" '$0 ~ "^## " tag {found=1; next} found && /^## / {exit} found' CHANGELOG.md)
