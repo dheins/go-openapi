@@ -71,16 +71,31 @@ func (u *Hound) DecodeJSON(data []byte, dir oapi.Direction) error {
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
+			return err
+		}
 		v.value = x
 	case found && (value == "pup" || value == "Puppy"):
 		var x Puppy
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
+			return err
+		}
 		v.value = x
 	case found && (value == "Mutt"):
 		var x Mutt
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
+			return err
+		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
 			return err
 		}
 		v.value = x

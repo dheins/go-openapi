@@ -142,10 +142,20 @@ func (u *ListingOneOf) DecodeJSON(data []byte, dir oapi.Direction) error {
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
+			return err
+		}
 		v.value = x
 	case found && (value == "flat" || value == "Flat"):
 		var x Flat
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
+			return err
+		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
 			return err
 		}
 		v.value = x

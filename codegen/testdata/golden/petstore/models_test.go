@@ -233,10 +233,10 @@ func TestDiscriminatedUnion(t *testing.T) {
 	assertMessages(t, json.Unmarshal([]byte(`{"kind": "kitty"}`), &a), "/lives: required property is missing")
 	assertMessages(t, json.Unmarshal([]byte(`{"kind": 7}`), &a), "/kind: expected string, got number")
 
-	if err := json.Unmarshal([]byte(`{"kind": "kitty", "lives": 12}`), &a); err != nil {
-		t.Fatal(err)
-	}
-	assertMessages(t, a.Validate(), "/lives: must be at most 9")
+	// The selected variant is validated while decoding, as an untagged
+	// union's variants are.
+	assertMessages(t, json.Unmarshal([]byte(`{"kind": "kitty", "lives": 12}`), &a), "/lives: must be at most 9")
+	assertMessages(t, NewAnimal(Cat{Kind: "Cat", Lives: 12}).Validate(), "/lives: must be at most 9")
 
 	// The discriminator is written even if the variant leaves it empty.
 	// The documented mapping key is written, not the component name.

@@ -37,6 +37,8 @@
   and read them with `Value()` and a type switch. Variants that cannot have
   methods are held as defined types (`ChoiceInteger`). `anyOf` unions are
   unchanged. Code that set or read the old pointer fields must be updated.
+- Discriminated unions validate the selected variant while decoding, as
+  untagged unions do, so its constraints are reported by `UnmarshalJSON`.
 - Discriminated unions write the first mapping key when encoding (the
   documented value) rather than the alphabetically first value.
 - The runtime writers (`Config.WriteJSON`, `WriteText`, `WriteBytes`,

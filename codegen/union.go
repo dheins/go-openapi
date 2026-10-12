@@ -210,6 +210,15 @@ func (f *fileGen) decodeVariant(w func(int, string, ...any), t *ir.Type, v *ir.V
 	w(depth, "if err := oapi.DecodeField(data, &x, false, dir); err != nil {")
 	w(depth+1, "return err")
 	w(depth, "}")
+	// Validated like the variants of an untagged union, which must pass
+	// to be chosen.
+	if stmts := f.validation("x", v.Type, depth); stmts != "" {
+		w(depth, "var errs oapi.ValidationErrors")
+		w(0, "%s", strings.TrimSuffix(stmts, "\n"))
+		w(depth, "if err := errs.Err(); err != nil {")
+		w(depth+1, "return err")
+		w(depth, "}")
+	}
 	w(depth, "%s", f.store(t, v, "x"))
 }
 

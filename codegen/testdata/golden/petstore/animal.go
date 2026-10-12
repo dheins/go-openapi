@@ -71,10 +71,20 @@ func (u *Animal) DecodeJSON(data []byte, dir oapi.Direction) error {
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
+			return err
+		}
 		v.value = x
 	case found && (value == "Doggo"):
 		var x Doggo
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
+			return err
+		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
 			return err
 		}
 		v.value = x
@@ -83,10 +93,20 @@ func (u *Animal) DecodeJSON(data []byte, dir oapi.Direction) error {
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
+			return err
+		}
 		v.value = x
 	default:
 		var x Unknown
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
+			return err
+		}
+		var errs oapi.ValidationErrors
+		errs.Nested("", x.Validate())
+		if err := errs.Err(); err != nil {
 			return err
 		}
 		v.value = x

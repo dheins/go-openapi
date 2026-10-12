@@ -161,7 +161,10 @@ id := models.IDOrName{Integer: &n}
 if id.String != nil { ... }
 ```
 
-With a discriminator, its property selects the variant when decoding, and
+A union validates the variant it decodes, so constraints such as `maximum`
+inside a variant are reported by `UnmarshalJSON` already, unlike those of a
+plain struct, which `Validate` checks. With a discriminator, its property
+selects the variant when decoding, and
 encoding writes it if the variant left it empty (the first mapping key, or
 the component name). Without one, every variant is decoded and validated;
 `oneOf` must match exactly one (objects that allow additional properties

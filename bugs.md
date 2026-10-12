@@ -45,9 +45,6 @@ Each entry says where it lives and how to work around it.
   properties often matches several of them, which JSON Schema (and the
   generated decoder) rejects. *Workaround:* add a discriminator, or close the
   variants with `additionalProperties: false` or distinct required properties.
-- **A discriminated union only checks the selected variant's structure when
-  decoding.** Constraints such as `maximum` are checked by `Validate()`, not
-  during `UnmarshalJSON` (untagged unions check both while choosing).
 - **`additionalProperties: false` next to a union allows its variants'
   properties.** JSON Schema only counts the adjacent `properties`, so such a
   schema strictly rejects every variant property; the generated decoder
