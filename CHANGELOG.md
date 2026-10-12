@@ -23,6 +23,12 @@
 
 ### Changed
 
+- `oneOf` unions are sealed: instead of a struct with a pointer per variant,
+  they hold exactly one variant in an interface that only the variant types
+  implement. Create them with the generic constructor (`NewAnimal(Cat{})`)
+  and read them with `Value()` and a type switch. Variants that cannot have
+  methods are held as defined types (`ChoiceInteger`). `anyOf` unions are
+  unchanged. Code that set or read the old pointer fields must be updated.
 - Discriminated unions write the first mapping key when encoding (the
   documented value) rather than the alphabetically first value.
 - The runtime writers (`Config.WriteJSON`, `WriteText`, `WriteBytes`,

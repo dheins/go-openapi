@@ -85,7 +85,8 @@ position, for every schema feature it cannot represent; see
 | `type: [T, "null"]` | `oapi.Nullable[T]` |
 | optional and nullable | `oapi.Optional[oapi.Nullable[T]]` |
 | string / integer enum | named type with constants |
-| `oneOf` / `anyOf`, `type: [a, b]` | union struct with a pointer per variant |
+| `oneOf` | sealed union: holds exactly one variant, read with a type switch |
+| `anyOf`, `type: [a, b]` | union struct with a pointer per variant |
 | `allOf` | one struct with the properties of every member |
 | `format: date-time` / `date` / `byte` / `binary` | `time.Time` / `oapi.Date` / `[]byte` / `oapi.File` |
 | `additionalProperties: {schema}` | `AdditionalProperties map[string]T` |
@@ -131,14 +132,33 @@ is written, and required read-only and write-only properties may be absent.
 
 ### Unions
 
-A `oneOf` or `anyOf` becomes a struct with one pointer field per variant:
+A `oneOf` becomes a sealed union: it holds exactly one variant, which the
+compiler enforces. Create one with its generic constructor and read it with
+a type switch:
 
 ```go
-animal := models.Animal{Cat: &models.Cat{Lives: 9}}
-switch {
-case animal.Cat != nil:
-case animal.Dog != nil:
+animal := models.NewAnimal(models.Cat{Lives: 9}) // NewAnimal(42) does not compile
+switch v := animal.Value().(type) {
+case models.Cat:
+	fmt.Println(v.Lives)
+case models.Dog:
+case nil: // the zero Animal holds no variant
 }
+```
+
+Only the variant types implement `AnimalValue` (through an unexported
+method), and the interface carries a `//sumtype:decl` marker, so
+[go-check-sumtype](https://github.com/alecthomas/go-check-sumtype) reports
+switches that miss a variant. A variant that cannot have methods (a string,
+a slice, an alias such as `time.Time`) is held as a defined type named after
+the union: `type ChoiceInteger int64`, used as `NewChoice(ChoiceInteger(3))`.
+
+An `anyOf`, where several variants may match at once, becomes a struct with
+one pointer field per variant instead:
+
+```go
+id := models.IDOrName{Integer: &n}
+if id.String != nil { ... }
 ```
 
 With a discriminator, its property selects the variant when decoding, and
@@ -154,7 +174,7 @@ base's own properties become a `...Base` struct for values that map to the
 base itself:
 
 ```yaml
-Vehicle:            # type Vehicle struct{ VehicleBase *VehicleBase; Car *Car; Bike *Bike }
+Vehicle:            # sealed union of VehicleBase, Car and Bike
   type: object
   properties: {kind: {type: string}, wheels: {type: integer}}
   discriminator: {propertyName: kind}

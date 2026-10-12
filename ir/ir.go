@@ -60,7 +60,9 @@ const (
 	// reference another schema or that need no methods of their own.
 	Alias
 	// Union is a value that matches one (oneOf) or at least one (anyOf) of
-	// several schemas: a struct with a pointer field per variant.
+	// several schemas. A oneOf union is Sealed: it holds its variant in an
+	// interface only the variants implement. Otherwise it is a struct with
+	// a pointer field per variant.
 	Union
 )
 
@@ -106,6 +108,16 @@ type Type struct {
 	// absent or unknown, if set.
 	Discriminator  string
 	DefaultVariant *Variant
+	// Sealed is set for oneOf unions, which hold exactly one variant.
+	Sealed *Sealed
+}
+
+// Sealed names the declarations of a oneOf union, which holds its variant
+// in a field of interface type Interface. Only the variants implement it,
+// through the unexported method Marker. Constraint lists the variant types
+// for the generic constructor Constructor.
+type Sealed struct {
+	Interface, Constraint, Constructor, Marker string
 }
 
 // Variant is one member of a Union.
@@ -116,6 +128,13 @@ type Variant struct {
 	Type *Ref
 	// Values are the discriminator values that select the variant.
 	Values []string
+	// Wrapper names the defined type a sealed union stores the variant as,
+	// "type Wrapper Type", when Type cannot have the marker method (it is
+	// not a named type of the model, is an alias, or is another variant's
+	// type too). WrapperStruct means Type is an interface, so the wrapper is
+	// "struct{ Value Type }" instead.
+	Wrapper       string
+	WrapperStruct bool
 }
 
 // Additional describes what happens to properties not declared in a

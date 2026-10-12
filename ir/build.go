@@ -70,6 +70,7 @@ func Build(spec *loader.Spec, opts Options) *Model {
 	}
 	b.breakAliasCycles()
 	b.breakCycles()
+	b.sealUnions()
 	b.groupByRoot()
 	return b.model
 }
@@ -1187,6 +1188,49 @@ func (b *builder) breakAliasCycles() {
 			seen[cur] = true
 		}
 	}
+}
+
+// sealUnions sets up the oneOf unions, which hold their variant in an
+// interface only the variants implement. A variant whose type cannot have
+// the marker method, or that another variant already uses, is stored as a
+// defined type of its own. It runs once every type is complete, as it
+// depends on their kinds.
+func (b *builder) sealUnions() {
+	for _, t := range b.model.Types {
+		if t.Kind != Union || !t.OneOf {
+			continue
+		}
+		t.Sealed = &Sealed{
+			Interface:   b.names.claim(t.Name + "Value"),
+			Constraint:  b.names.claim(t.Name + "Variants"),
+			Constructor: b.names.claim("New" + t.Name),
+			Marker:      "is" + t.Name,
+		}
+		marked := map[*Type]bool{}
+		for _, v := range t.Variants {
+			r := v.Type
+			if r.Kind == Named && r.Type.Kind != Alias && !marked[r.Type] {
+				marked[r.Type] = true
+				continue
+			}
+			v.Wrapper = b.names.claim(t.Name + v.Name)
+			v.WrapperStruct = isInterface(r)
+		}
+	}
+}
+
+// isInterface reports whether r is an interface type, which a defined
+// type cannot declare methods on.
+func isInterface(r *Ref) bool {
+	switch r.Kind {
+	case Any:
+		return true
+	case Builtin:
+		return r.Name == "any" || r.Name == "interface{}"
+	case Named:
+		return r.Type.Kind == Alias && isInterface(r.Type.Underlying)
+	}
+	return false
 }
 
 // breakCycles makes a field a pointer when its struct type contains the

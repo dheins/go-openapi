@@ -10,16 +10,45 @@ import (
 
 // Animal is generated from the schema at /components/schemas/Animal.
 //
-// Exactly one of the fields is set. The property "kind" selects
-// the variant when decoding.
+// It holds exactly one variant: create it with NewAnimal and read
+// it with Value. The property "kind" selects the
+// variant when decoding.
 type Animal struct {
-	// Cat is set when the value is a Cat (kind "kitty" or "Cat").
-	Cat *Cat
-	// Doggo is set when the value is a Doggo (kind "Doggo").
-	Doggo *Doggo
-	// Unknown is set when the value is a Unknown (kind "Unknown"); it is also used for any other kind.
-	Unknown *Unknown
+	value AnimalValue
 }
+
+// AnimalValue is a variant of Animal. Only the variant types
+// implement it, so a type switch over Animal.Value covers every case.
+//
+//sumtype:decl
+type AnimalValue interface {
+	isAnimal()
+}
+
+// AnimalVariants lists the variant types of Animal.
+type AnimalVariants interface {
+	AnimalValue
+	Cat | Doggo | Unknown
+}
+
+// NewAnimal returns a Animal holding v.
+func NewAnimal[T AnimalVariants](v T) Animal {
+	return Animal{value: v}
+}
+
+// Value returns the variant u holds, or nil if it holds none.
+func (u Animal) Value() AnimalValue {
+	return u.value
+}
+
+// isAnimal makes Cat a variant of Animal (kind "kitty" or "Cat").
+func (Cat) isAnimal() {}
+
+// isAnimal makes Doggo a variant of Animal (kind "Doggo").
+func (Doggo) isAnimal() {}
+
+// isAnimal makes Unknown a variant of Animal (kind "Unknown"); it is also used for any other kind.
+func (Unknown) isAnimal() {}
 
 // UnmarshalJSON decodes the value as the matching variant. Required
 // read-only and write-only properties may be absent; use DecodeJSON to
@@ -42,25 +71,25 @@ func (u *Animal) DecodeJSON(data []byte, dir oapi.Direction) error {
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
-		v.Cat = &x
+		v.value = x
 	case found && (value == "Doggo"):
 		var x Doggo
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
-		v.Doggo = &x
+		v.value = x
 	case found && (value == "Unknown"):
 		var x Unknown
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
-		v.Unknown = &x
+		v.value = x
 	default:
 		var x Unknown
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
-		v.Unknown = &x
+		v.value = x
 	}
 	*u = v
 	return nil
@@ -73,22 +102,21 @@ func (u Animal) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Animal) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	if u.Cat != nil {
-		data, err := oapi.EncodeValue(u.Cat, dir)
+	switch val := u.value.(type) {
+	case Cat:
+		data, err := oapi.EncodeValue(val, dir)
 		if err != nil {
 			return nil, err
 		}
 		return oapi.EnsureProperty(data, "kind", "kitty")
-	}
-	if u.Doggo != nil {
-		data, err := oapi.EncodeValue(u.Doggo, dir)
+	case Doggo:
+		data, err := oapi.EncodeValue(val, dir)
 		if err != nil {
 			return nil, err
 		}
 		return oapi.EnsureProperty(data, "kind", "Doggo")
-	}
-	if u.Unknown != nil {
-		data, err := oapi.EncodeValue(u.Unknown, dir)
+	case Unknown:
+		data, err := oapi.EncodeValue(val, dir)
 		if err != nil {
 			return nil, err
 		}
@@ -97,27 +125,18 @@ func (u Animal) EncodeJSON(dir oapi.Direction) ([]byte, error) {
 	return nil, errors.New("Animal: no variant is set")
 }
 
-// Validate checks that exactly one variant is set, and validates it.
+// Validate checks that a variant is set, and validates it.
 func (u Animal) Validate() error {
 	var errs oapi.ValidationErrors
-	set := 0
-	if u.Cat != nil {
-		set++
-		errs.Nested("", (*u.Cat).Validate())
-	}
-	if u.Doggo != nil {
-		set++
-		errs.Nested("", (*u.Doggo).Validate())
-	}
-	if u.Unknown != nil {
-		set++
-		errs.Nested("", (*u.Unknown).Validate())
-	}
-	if set == 0 {
+	switch val := u.value.(type) {
+	case nil:
 		errs.Add("", "no variant is set")
-	}
-	if set > 1 {
-		errs.Add("", "only one variant may be set")
+	case Cat:
+		errs.Nested("", val.Validate())
+	case Doggo:
+		errs.Nested("", val.Validate())
+	case Unknown:
+		errs.Nested("", val.Validate())
 	}
 	return errs.Err()
 }

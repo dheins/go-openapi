@@ -11,13 +11,43 @@ import (
 
 // Choice is generated from the schema at /components/schemas/Choice.
 //
-// Exactly one of the fields is set.
+// It holds exactly one variant: create it with NewChoice and read
+// it with Value.
 type Choice struct {
-	// ChoiceVariant1 is set when the value is a ChoiceVariant1.
-	ChoiceVariant1 *ChoiceVariant1
-	// Integer is set when the value is a int64.
-	Integer *int64
+	value ChoiceValue
 }
+
+// ChoiceValue is a variant of Choice. Only the variant types
+// implement it, so a type switch over Choice.Value covers every case.
+//
+//sumtype:decl
+type ChoiceValue interface {
+	isChoice()
+}
+
+// ChoiceVariants lists the variant types of Choice.
+type ChoiceVariants interface {
+	ChoiceValue
+	ChoiceVariant1 | ChoiceInteger
+}
+
+// NewChoice returns a Choice holding v.
+func NewChoice[T ChoiceVariants](v T) Choice {
+	return Choice{value: v}
+}
+
+// Value returns the variant u holds, or nil if it holds none.
+func (u Choice) Value() ChoiceValue {
+	return u.value
+}
+
+// isChoice makes ChoiceVariant1 a variant of Choice.
+func (ChoiceVariant1) isChoice() {}
+
+// ChoiceInteger is the int64 variant of Choice.
+type ChoiceInteger int64
+
+func (ChoiceInteger) isChoice() {}
 
 // UnmarshalJSON decodes the value as the matching variant. Required
 // read-only and write-only properties may be absent; use DecodeJSON to
@@ -41,7 +71,7 @@ func (u *Choice) DecodeJSON(data []byte, dir oapi.Direction) error {
 			if err := errs.Err(); err != nil {
 				return err
 			}
-			v.ChoiceVariant1 = &x
+			v.value = x
 			return nil
 		}},
 		oapi.Variant{Name: "Integer", Decode: func(raw json.RawMessage, dir oapi.Direction) error {
@@ -56,7 +86,7 @@ func (u *Choice) DecodeJSON(data []byte, dir oapi.Direction) error {
 			if err := errs.Err(); err != nil {
 				return err
 			}
-			v.Integer = &x
+			v.value = ChoiceInteger(x)
 			return nil
 		}},
 	)
@@ -74,34 +104,27 @@ func (u Choice) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Choice) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	if u.ChoiceVariant1 != nil {
-		return oapi.EncodeValue(u.ChoiceVariant1, dir)
-	}
-	if u.Integer != nil {
-		return oapi.EncodeValue(u.Integer, dir)
+	switch val := u.value.(type) {
+	case ChoiceVariant1:
+		return oapi.EncodeValue(val, dir)
+	case ChoiceInteger:
+		return oapi.EncodeValue(int64(val), dir)
 	}
 	return nil, errors.New("Choice: no variant is set")
 }
 
-// Validate checks that exactly one variant is set, and validates it.
+// Validate checks that a variant is set, and validates it.
 func (u Choice) Validate() error {
 	var errs oapi.ValidationErrors
-	set := 0
-	if u.ChoiceVariant1 != nil {
-		set++
-		errs.Nested("", (*u.ChoiceVariant1).Validate())
-	}
-	if u.Integer != nil {
-		set++
-		if (*u.Integer) < 0 {
+	switch val := u.value.(type) {
+	case nil:
+		errs.Add("", "no variant is set")
+	case ChoiceVariant1:
+		errs.Nested("", val.Validate())
+	case ChoiceInteger:
+		if int64(val) < 0 {
 			errs.Add("", "must be at least 0")
 		}
-	}
-	if set == 0 {
-		errs.Add("", "no variant is set")
-	}
-	if set > 1 {
-		errs.Add("", "only one variant may be set")
 	}
 	return errs.Err()
 }

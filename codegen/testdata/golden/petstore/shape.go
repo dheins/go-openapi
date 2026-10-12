@@ -11,13 +11,41 @@ import (
 
 // Shape is generated from the schema at /components/schemas/Shape.
 //
-// Exactly one of the fields is set.
+// It holds exactly one variant: create it with NewShape and read
+// it with Value.
 type Shape struct {
-	// ShapeVariant1 is set when the value is a ShapeVariant1.
-	ShapeVariant1 *ShapeVariant1
-	// ShapeVariant2 is set when the value is a ShapeVariant2.
-	ShapeVariant2 *ShapeVariant2
+	value ShapeValue
 }
+
+// ShapeValue is a variant of Shape. Only the variant types
+// implement it, so a type switch over Shape.Value covers every case.
+//
+//sumtype:decl
+type ShapeValue interface {
+	isShape()
+}
+
+// ShapeVariants lists the variant types of Shape.
+type ShapeVariants interface {
+	ShapeValue
+	ShapeVariant1 | ShapeVariant2
+}
+
+// NewShape returns a Shape holding v.
+func NewShape[T ShapeVariants](v T) Shape {
+	return Shape{value: v}
+}
+
+// Value returns the variant u holds, or nil if it holds none.
+func (u Shape) Value() ShapeValue {
+	return u.value
+}
+
+// isShape makes ShapeVariant1 a variant of Shape.
+func (ShapeVariant1) isShape() {}
+
+// isShape makes ShapeVariant2 a variant of Shape.
+func (ShapeVariant2) isShape() {}
 
 // UnmarshalJSON decodes the value as the matching variant. Required
 // read-only and write-only properties may be absent; use DecodeJSON to
@@ -41,7 +69,7 @@ func (u *Shape) DecodeJSON(data []byte, dir oapi.Direction) error {
 			if err := errs.Err(); err != nil {
 				return err
 			}
-			v.ShapeVariant1 = &x
+			v.value = x
 			return nil
 		}},
 		oapi.Variant{Name: "ShapeVariant2", Decode: func(raw json.RawMessage, dir oapi.Direction) error {
@@ -54,7 +82,7 @@ func (u *Shape) DecodeJSON(data []byte, dir oapi.Direction) error {
 			if err := errs.Err(); err != nil {
 				return err
 			}
-			v.ShapeVariant2 = &x
+			v.value = x
 			return nil
 		}},
 	)
@@ -72,32 +100,25 @@ func (u Shape) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Shape) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	if u.ShapeVariant1 != nil {
-		return oapi.EncodeValue(u.ShapeVariant1, dir)
-	}
-	if u.ShapeVariant2 != nil {
-		return oapi.EncodeValue(u.ShapeVariant2, dir)
+	switch val := u.value.(type) {
+	case ShapeVariant1:
+		return oapi.EncodeValue(val, dir)
+	case ShapeVariant2:
+		return oapi.EncodeValue(val, dir)
 	}
 	return nil, errors.New("Shape: no variant is set")
 }
 
-// Validate checks that exactly one variant is set, and validates it.
+// Validate checks that a variant is set, and validates it.
 func (u Shape) Validate() error {
 	var errs oapi.ValidationErrors
-	set := 0
-	if u.ShapeVariant1 != nil {
-		set++
-		errs.Nested("", (*u.ShapeVariant1).Validate())
-	}
-	if u.ShapeVariant2 != nil {
-		set++
-		errs.Nested("", (*u.ShapeVariant2).Validate())
-	}
-	if set == 0 {
+	switch val := u.value.(type) {
+	case nil:
 		errs.Add("", "no variant is set")
-	}
-	if set > 1 {
-		errs.Add("", "only one variant may be set")
+	case ShapeVariant1:
+		errs.Nested("", val.Validate())
+	case ShapeVariant2:
+		errs.Nested("", val.Validate())
 	}
 	return errs.Err()
 }

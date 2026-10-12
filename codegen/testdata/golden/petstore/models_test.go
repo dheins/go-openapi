@@ -6,6 +6,7 @@ package petstore
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -222,7 +223,7 @@ func TestDiscriminatedUnion(t *testing.T) {
 			t.Errorf("%s: %v", tt.in, err)
 			continue
 		}
-		got := map[bool]string{a.Cat != nil: "Cat", a.Doggo != nil: "Doggo", a.Unknown != nil: "Unknown"}[true]
+		got := held(a.Value())
 		if got != tt.want {
 			t.Errorf("%s decoded as %s, want %s", tt.in, got, tt.want)
 		}
@@ -239,12 +240,85 @@ func TestDiscriminatedUnion(t *testing.T) {
 
 	// The discriminator is written even if the variant leaves it empty.
 	// The documented mapping key is written, not the component name.
-	out, err := json.Marshal(Animal{Cat: &Cat{Lives: 3}})
+	out, err := json.Marshal(NewAnimal(Cat{Lives: 3}))
 	if err != nil || string(out) != `{"kind":"kitty","lives":3}` {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
 	assertMessages(t, Animal{}.Validate(), "no variant is set")
-	assertMessages(t, Animal{Cat: &Cat{Kind: "Cat"}, Doggo: &Doggo{Kind: "Doggo"}}.Validate(), "only one variant may be set")
+	if _, err := json.Marshal(Animal{}); err == nil || !strings.Contains(err.Error(), "no variant is set") {
+		t.Errorf("marshal of an empty union: %v", err)
+	}
+
+	// A sealed union holds exactly one variant, and a type switch reads it.
+	switch v := NewAnimal(Doggo{Kind: "Doggo"}).Value().(type) {
+	case Doggo:
+		if v.Kind != "Doggo" {
+			t.Errorf("doggo = %+v", v)
+		}
+	default:
+		t.Errorf("holds %T, want Doggo", v)
+	}
+}
+
+// held names the type of the variant a sealed union holds.
+func held(v any) string {
+	name := fmt.Sprintf("%T", v)
+	return name[strings.LastIndex(name, ".")+1:]
+}
+
+func TestSealedWrappers(t *testing.T) {
+	// A builtin variant is held as a defined type of the union.
+	var c Choice
+	if err := json.Unmarshal([]byte(`3`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := c.Value().(ChoiceInteger); !ok || n != 3 {
+		t.Errorf("choice = %#v", c.Value())
+	}
+	out, err := json.Marshal(NewChoice(ChoiceInteger(4)))
+	if err != nil || string(out) != `4` {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+	assertMessages(t, NewChoice(ChoiceInteger(-1)).Validate(), "must be at least 0")
+	roundTrip[Choice](t, []byte(`"auto"`))
+
+	// Slices and aliases are wrapped too; time.Time keeps its encoding.
+	when := time.Date(2026, 10, 12, 8, 30, 0, 0, time.UTC)
+	tests := []struct {
+		in   string
+		want PayloadValue
+	}{
+		{`["a","b"]`, PayloadArray{"a", "b"}},
+		{`true`, PayloadBoolean(true)},
+		{`"2026-10-12T08:30:00Z"`, PayloadWhen(when)},
+	}
+	for _, tt := range tests {
+		var p Payload
+		if err := json.Unmarshal([]byte(tt.in), &p); err != nil {
+			t.Errorf("%s: %v", tt.in, err)
+			continue
+		}
+		if fmt.Sprint(p.Value()) != fmt.Sprint(tt.want) {
+			t.Errorf("%s decoded as %#v, want %#v", tt.in, p.Value(), tt.want)
+		}
+		out, err := json.Marshal(p)
+		if err != nil || string(out) != tt.in {
+			t.Errorf("%s encoded as %s, %v", tt.in, out, err)
+		}
+	}
+
+	// An interface variant is wrapped in a struct.
+	var l Loose
+	if err := json.Unmarshal([]byte(`"x"`), &l); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := l.Value().(LooseVariant2); !ok || v.Value != "x" {
+		t.Errorf("loose = %#v", l.Value())
+	}
+	if out, err := json.Marshal(NewLoose(LooseVariant2{Value: []any{1.0}})); err != nil || string(out) != `[1]` {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+	assertMessages(t, json.Unmarshal([]byte(`5`), &l), "matches several variants (Integer, Variant2), but exactly one is allowed")
 }
 
 func TestUntaggedUnions(t *testing.T) {
@@ -264,7 +338,7 @@ func TestUntaggedUnions(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"choice": "auto", "animals": [{"kind": "Doggo"}]}`), &z); err != nil {
 		t.Fatal(err)
 	}
-	if c := z.Choice.Value; !c.Valid || c.Value.ChoiceVariant1 == nil || z.Animals.Value[0].Doggo == nil {
+	if c := z.Choice.Value; !c.Valid || held(c.Value.Value()) != "ChoiceVariant1" || held(z.Animals.Value[0].Value()) != "Doggo" {
 		t.Errorf("zoo = %+v", z)
 	}
 	if err := json.Unmarshal([]byte(`{"choice": null}`), &z); err != nil || z.Choice.Value.Valid {
@@ -341,7 +415,7 @@ func TestAllOfPolymorphism(t *testing.T) {
 			t.Errorf("%s: %v", tt.in, err)
 			continue
 		}
-		got := map[bool]string{v.Car != nil: "Car", v.Bike != nil: "Bike", v.VehicleBase != nil: "VehicleBase"}[true]
+		got := held(v.Value())
 		if got != tt.want {
 			t.Errorf("%s decoded as %s, want %s", tt.in, got, tt.want)
 		}
@@ -352,8 +426,8 @@ func TestAllOfPolymorphism(t *testing.T) {
 
 	// Subtypes are ordinary structs with the base's properties merged in.
 	car := Car{Kind: "automobile", Wheels: 4, Doors: oapi.Some(int64(9))}
-	assertMessages(t, Vehicle{Car: &car}.Validate(), "/doors: must be at most 5")
-	out, err := json.Marshal(Vehicle{Bike: &Bike{Wheels: 2, Gears: 3}})
+	assertMessages(t, NewVehicle(car).Validate(), "/doors: must be at most 5")
+	out, err := json.Marshal(NewVehicle(Bike{Wheels: 2, Gears: 3}))
 	if err != nil || string(out) != `{"kind":"Bike","wheels":2,"gears":3}` {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
@@ -363,7 +437,7 @@ func TestAllOfPolymorphism(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"vehicles": [{"kind": "automobile", "wheels": 4}, {"kind": "Bike", "wheels": 2, "gears": 1}]}`), &g); err != nil {
 		t.Fatal(err)
 	}
-	if vs := g.Vehicles.Value; vs[0].Car == nil || vs[1].Bike == nil {
+	if vs := g.Vehicles.Value; held(vs[0].Value()) != "Car" || held(vs[1].Value()) != "Bike" {
 		t.Errorf("garage = %+v", vs)
 	}
 }

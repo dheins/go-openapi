@@ -69,6 +69,16 @@ func (m {{.Name}}) Validate() error {
 {{define "union"}}
 {{typeDoc .}}
 //
+{{- if .Sealed}}
+// It holds exactly one variant: create it with {{.Sealed.Constructor}} and read
+// it with Value.
+{{- if .Discriminator}} The property {{printf "%q" .Discriminator}} selects the
+// variant when decoding.{{end}}
+type {{.Name}} struct {
+	value {{.Sealed.Interface}}
+}
+{{sealedDecls .}}
+{{- else}}
 // {{if .OneOf}}Exactly one{{else}}At least one{{end}} of the fields is set.
 {{- if .Discriminator}} The property {{printf "%q" .Discriminator}} selects
 // the variant when decoding.{{end}}
@@ -78,6 +88,7 @@ type {{.Name}} struct {
 	{{.Name}} *{{goType .Type}}
 {{- end}}
 }
+{{- end}}
 
 // UnmarshalJSON decodes the value as the matching variant. Required
 // read-only and write-only properties may be absent; use DecodeJSON to
@@ -102,7 +113,7 @@ func (u {{.Name}}) EncodeJSON(dir oapi.Direction) ([]byte, error) {
 {{unionMarshalStmts .}}
 }
 
-// Validate checks that {{if .OneOf}}exactly one{{else}}at least one{{end}} variant is set, and validates it.
+// Validate checks that {{if .Sealed}}a{{else if .OneOf}}exactly one{{else}}at least one{{end}} variant is set, and validates it.
 func (u {{.Name}}) Validate() error {
 	var errs oapi.ValidationErrors
 {{unionValidateStmts .}}

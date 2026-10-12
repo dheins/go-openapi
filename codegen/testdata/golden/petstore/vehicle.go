@@ -10,16 +10,45 @@ import (
 
 // Vehicle is generated from the schema at /components/schemas/Vehicle.
 //
-// Exactly one of the fields is set. The property "kind" selects
-// the variant when decoding.
+// It holds exactly one variant: create it with NewVehicle and read
+// it with Value. The property "kind" selects the
+// variant when decoding.
 type Vehicle struct {
-	// VehicleBase is set when the value is a VehicleBase (kind "Vehicle").
-	VehicleBase *VehicleBase
-	// Car is set when the value is a Car (kind "automobile" or "Car").
-	Car *Car
-	// Bike is set when the value is a Bike (kind "Bike").
-	Bike *Bike
+	value VehicleValue
 }
+
+// VehicleValue is a variant of Vehicle. Only the variant types
+// implement it, so a type switch over Vehicle.Value covers every case.
+//
+//sumtype:decl
+type VehicleValue interface {
+	isVehicle()
+}
+
+// VehicleVariants lists the variant types of Vehicle.
+type VehicleVariants interface {
+	VehicleValue
+	VehicleBase | Car | Bike
+}
+
+// NewVehicle returns a Vehicle holding v.
+func NewVehicle[T VehicleVariants](v T) Vehicle {
+	return Vehicle{value: v}
+}
+
+// Value returns the variant u holds, or nil if it holds none.
+func (u Vehicle) Value() VehicleValue {
+	return u.value
+}
+
+// isVehicle makes VehicleBase a variant of Vehicle (kind "Vehicle").
+func (VehicleBase) isVehicle() {}
+
+// isVehicle makes Car a variant of Vehicle (kind "automobile" or "Car").
+func (Car) isVehicle() {}
+
+// isVehicle makes Bike a variant of Vehicle (kind "Bike").
+func (Bike) isVehicle() {}
 
 // UnmarshalJSON decodes the value as the matching variant. Required
 // read-only and write-only properties may be absent; use DecodeJSON to
@@ -42,19 +71,19 @@ func (u *Vehicle) DecodeJSON(data []byte, dir oapi.Direction) error {
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
-		v.VehicleBase = &x
+		v.value = x
 	case found && (value == "automobile" || value == "Car"):
 		var x Car
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
-		v.Car = &x
+		v.value = x
 	case found && (value == "Bike"):
 		var x Bike
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
 		}
-		v.Bike = &x
+		v.value = x
 	case !found:
 		return &oapi.ValidationError{Path: "/kind", Message: "required property is missing"}
 	default:
@@ -71,22 +100,21 @@ func (u Vehicle) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Vehicle) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	if u.VehicleBase != nil {
-		data, err := oapi.EncodeValue(u.VehicleBase, dir)
+	switch val := u.value.(type) {
+	case VehicleBase:
+		data, err := oapi.EncodeValue(val, dir)
 		if err != nil {
 			return nil, err
 		}
 		return oapi.EnsureProperty(data, "kind", "Vehicle")
-	}
-	if u.Car != nil {
-		data, err := oapi.EncodeValue(u.Car, dir)
+	case Car:
+		data, err := oapi.EncodeValue(val, dir)
 		if err != nil {
 			return nil, err
 		}
 		return oapi.EnsureProperty(data, "kind", "automobile")
-	}
-	if u.Bike != nil {
-		data, err := oapi.EncodeValue(u.Bike, dir)
+	case Bike:
+		data, err := oapi.EncodeValue(val, dir)
 		if err != nil {
 			return nil, err
 		}
@@ -95,27 +123,18 @@ func (u Vehicle) EncodeJSON(dir oapi.Direction) ([]byte, error) {
 	return nil, errors.New("Vehicle: no variant is set")
 }
 
-// Validate checks that exactly one variant is set, and validates it.
+// Validate checks that a variant is set, and validates it.
 func (u Vehicle) Validate() error {
 	var errs oapi.ValidationErrors
-	set := 0
-	if u.VehicleBase != nil {
-		set++
-		errs.Nested("", (*u.VehicleBase).Validate())
-	}
-	if u.Car != nil {
-		set++
-		errs.Nested("", (*u.Car).Validate())
-	}
-	if u.Bike != nil {
-		set++
-		errs.Nested("", (*u.Bike).Validate())
-	}
-	if set == 0 {
+	switch val := u.value.(type) {
+	case nil:
 		errs.Add("", "no variant is set")
-	}
-	if set > 1 {
-		errs.Add("", "only one variant may be set")
+	case VehicleBase:
+		errs.Nested("", val.Validate())
+	case Car:
+		errs.Nested("", val.Validate())
+	case Bike:
+		errs.Nested("", val.Validate())
 	}
 	return errs.Err()
 }

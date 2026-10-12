@@ -232,6 +232,7 @@ func (f *fileGen) funcs() template.FuncMap {
 		"enumMessage":        enumMessage,
 		"variantDoc":         variantDoc,
 
+		"sealedDecls":        f.sealedDecls,
 		"unionDecodeStmts":   f.unionDecodeStmts,
 		"unionMarshalStmts":  f.unionMarshalStmts,
 		"unionValidateStmts": f.unionValidateStmts,

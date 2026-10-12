@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -339,5 +340,40 @@ components:
 	}
 	if mixed := typeNamed(t, m, "Mixed"); mixed.Kind != Alias || mixed.Underlying.Kind != Any || len(mixed.Underlying.Checks.Enum) != 2 {
 		t.Errorf("Mixed should be any with an enum check, got %+v", mixed)
+	}
+}
+
+func TestSealedUnions(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+components:
+  schemas:
+    Cat: {type: object, properties: {lives: {type: integer}}}
+    CatAlias: {$ref: "#/components/schemas/Cat"}
+    PetValue: {type: string}
+    Pet:
+      oneOf:
+        - $ref: "#/components/schemas/Cat"
+        - $ref: "#/components/schemas/CatAlias"
+        - type: string
+        - {}
+    Either:
+      anyOf: [{type: string}, {type: integer}]
+`, Options{})
+	pet := typeNamed(t, m, "Pet")
+	// Component names win: PetValue is taken, so the interface is PetValue2.
+	if s := pet.Sealed; s == nil || *s != (Sealed{Interface: "PetValue2", Constraint: "PetVariants", Constructor: "NewPet", Marker: "isPet"}) {
+		t.Errorf("Pet.Sealed = %+v", pet.Sealed)
+	}
+	var got []string
+	for _, v := range pet.Variants {
+		got = append(got, fmt.Sprintf("%s:%s:%t", v.Name, v.Wrapper, v.WrapperStruct))
+	}
+	// Cat gets the marker method; an alias, a builtin and any are wrapped.
+	if want := "Cat::false CatAlias:PetCatAlias:false String:PetString:false Variant4:PetVariant4:true"; strings.Join(got, " ") != want {
+		t.Errorf("variants = %s\nwant %s", strings.Join(got, " "), want)
+	}
+	if e := typeNamed(t, m, "Either"); e.Sealed != nil {
+		t.Errorf("anyOf union is sealed: %+v", e.Sealed)
 	}
 }

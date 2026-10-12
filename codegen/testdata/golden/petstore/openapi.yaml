@@ -288,3 +288,16 @@ components:
         - type: object
           properties:
             side: {type: number}
+    When:
+      type: string
+      format: date-time
+    Payload:
+      oneOf:
+        - type: array
+          items: {type: string}
+        - type: boolean
+        - $ref: "#/components/schemas/When"
+    Loose:
+      oneOf:
+        - type: integer
+        - not: {type: integer}
