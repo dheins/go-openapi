@@ -182,6 +182,13 @@ Car:                # type Car struct{ Kind string; Wheels int64; Doors ... }
   allOf: [{$ref: "#/components/schemas/Vehicle"}, {properties: {doors: {type: integer}}}]
 ```
 
+Hierarchies can be deeper. Every schema below the base, at any depth, is a
+variant of it. A subtype with subtypes of its own (`Hound`, extended by
+`Puppy`) inherits the discriminator and becomes a union too. In its
+parent's union it appears as its `HoundBase` struct, since its own subtypes
+are variants there already. A subtype that adds nothing (`Mutt: {allOf:
+[$ref: Hound]}`) is still a type of its own.
+
 `oneOf` or `anyOf` next to `properties` is checked by `Validate` when its
 members only list properties and required ones, the usual way to say
 "exactly one of these fields":

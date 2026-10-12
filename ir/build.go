@@ -28,9 +28,13 @@ type builder struct {
 	following map[*oas.Schema]bool
 	// securityMethods are the method names of the SecurityHandler.
 	securityMethods namespace
-	// subtypes maps a schema with a discriminator to the component schemas
-	// that extend it with allOf; built on first use.
-	subtypes map[*oas.Schema][]*oas.Schema
+	// children maps a schema with a discriminator, its own or inherited,
+	// to the component schemas that extend it directly with allOf; built
+	// on first use.
+	children map[*oas.Schema][]*oas.Schema
+	// bases are the structs of the own properties of polymorphic schemas,
+	// the variants for values the discriminator maps to the schema itself.
+	bases map[*oas.Schema]*Type
 }
 
 // Build maps the schemas of a loaded document to Go types: every
@@ -546,47 +550,103 @@ func rewrap(like, leaf *Ref) *Ref {
 	return leaf
 }
 
-// subtypesOf returns the component schemas that extend s with allOf, if s
-// has a discriminator and no oneOf or anyOf of its own, plus non-component
-// schemas its mapping names.
+// subtypesOf returns the component schemas that extend s with allOf,
+// directly or through other subtypes, if s has a discriminator (its own or
+// inherited) and no oneOf or anyOf of its own. Schemas the mapping names
+// that extend s are included too, components or not.
 func (b *builder) subtypesOf(s *oas.Schema) []*oas.Schema {
-	if s.Discriminator == nil || len(s.OneOf) > 0 || len(s.AnyOf) > 0 {
+	d := discriminatorOf(s)
+	if d == nil || len(s.OneOf) > 0 || len(s.AnyOf) > 0 {
 		return nil
 	}
-	if b.subtypes == nil {
-		b.subtypes = make(map[*oas.Schema][]*oas.Schema)
+	if b.children == nil {
+		b.children = make(map[*oas.Schema][]*oas.Schema)
 		if c := b.spec.Document.Components; c != nil {
 			for _, sub := range c.Schemas.All() {
 				if sub == nil {
 					continue
 				}
 				for _, m := range sub.AllOf {
-					if base := deref(m); base != nil && base.Discriminator != nil && base != sub {
-						b.subtypes[base] = append(b.subtypes[base], sub)
+					if base := deref(m); base != nil && base != sub && discriminatorOf(base) != nil {
+						b.children[base] = append(b.children[base], sub)
 					}
 				}
 			}
 		}
 	}
-	subs := slices.Clone(b.subtypes[s])
-	for _, target := range s.Discriminator.Targets.All() {
-		if t := deref(target); t != s && !slices.Contains(subs, t) {
+	var subs []*oas.Schema
+	var walk func(*oas.Schema)
+	walk = func(base *oas.Schema) {
+		for _, sub := range b.children[base] {
+			if sub != s && !slices.Contains(subs, sub) {
+				subs = append(subs, sub)
+				walk(sub)
+			}
+		}
+	}
+	walk(s)
+	for _, target := range d.Targets.All() {
+		if t := deref(target); t != s && !slices.Contains(subs, t) && (s.Discriminator != nil || extends(t, s)) {
 			subs = append(subs, t)
 		}
 	}
 	return subs
 }
 
+// discriminatorOf returns the discriminator of s, or the one s inherits
+// from a schema it extends with allOf.
+func discriminatorOf(s *oas.Schema) *oas.Discriminator {
+	seen := map[*oas.Schema]bool{}
+	var find func(*oas.Schema) *oas.Discriminator
+	find = func(s *oas.Schema) *oas.Discriminator {
+		if s == nil || seen[s] {
+			return nil
+		}
+		seen[s] = true
+		if s.Discriminator != nil {
+			return s.Discriminator
+		}
+		for _, m := range s.AllOf {
+			if d := find(deref(m)); d != nil {
+				return d
+			}
+		}
+		return nil
+	}
+	return find(s)
+}
+
+// extends reports whether sub extends base with allOf, directly or not.
+func extends(sub, base *oas.Schema) bool {
+	seen := map[*oas.Schema]bool{}
+	var walk func(*oas.Schema) bool
+	walk = func(s *oas.Schema) bool {
+		if s == nil || seen[s] {
+			return false
+		}
+		seen[s] = true
+		for _, m := range s.AllOf {
+			if m := deref(m); m == base || walk(m) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(sub)
+}
+
 // fillPolymorphic makes a schema with a discriminator, which other schemas
 // extend with allOf (the 3.0 way of polymorphism), a union of those
 // schemas. Its own properties become a separate struct, the variant for
 // values the discriminator maps to the base schema itself.
+//
+// A subtype that has subtypes of its own is a polymorphic union too; here
+// it is represented by its base struct, as its own subtypes are variants
+// of t already.
 func (b *builder) fillPolymorphic(t *Type) {
 	s := t.Schema
 	t.Kind, t.OneOf = Union, true
-	base := &Type{Name: b.names.claim(t.Name + "Base"), Schema: s, Root: t.Root, Location: t.Location, Doc: t.Doc}
-	b.model.Types = append(b.model.Types, base)
-	b.fillStruct(base)
+	base := b.baseOf(t)
 
 	fields := namespace{}
 	for _, n := range reservedFieldNames {
@@ -596,10 +656,37 @@ func (b *builder) fillPolymorphic(t *Type) {
 	targets := []*oas.Schema{s}
 	for _, sub := range b.subtypesOf(s) {
 		ref := stripNullable(b.use(sub, b.hintFor(sub, t.Name+"Subtype"), nil))
+		if b.polymorphic(sub) {
+			ref = &Ref{Kind: Named, Type: b.baseOf(b.named[sub])}
+		}
 		t.Variants = append(t.Variants, &Variant{Name: fields.claim(variantName(ref, len(t.Variants))), Type: ref})
 		targets = append(targets, sub)
 	}
 	b.discriminate(t, targets)
+}
+
+// polymorphic reports whether s becomes a union of the schemas that extend
+// it.
+func (b *builder) polymorphic(s *oas.Schema) bool {
+	types, _ := splitTypes(s)
+	return refTarget(s) == nil && nullableInner(s) == nil && !isUnion(s, types) &&
+		enumBase(s, types) == "" && isObject(s, types) && len(b.subtypesOf(s)) > 0
+}
+
+// baseOf returns the struct of the own properties (including inherited
+// ones) of t, a polymorphic schema's type, creating it on first use.
+func (b *builder) baseOf(t *Type) *Type {
+	if base, ok := b.bases[t.Schema]; ok {
+		return base
+	}
+	if b.bases == nil {
+		b.bases = make(map[*oas.Schema]*Type)
+	}
+	base := &Type{Name: b.names.claim(t.Name + "Base"), Schema: t.Schema, Root: t.Root, Location: t.Location, Doc: t.Doc}
+	b.bases[t.Schema] = base
+	b.model.Types = append(b.model.Types, base)
+	b.fillStruct(base)
+	return base
 }
 
 // objectParts returns s and the schemas its allOf members (recursively)
@@ -821,8 +908,10 @@ func refTarget(s *oas.Schema) *oas.Schema {
 	if s.DynamicRef != "" {
 		return s.DynamicResolved
 	}
+	// A subtype that adds nothing to a polymorphic base is still a type of
+	// its own, a variant of the base's union.
 	if len(s.AllOf) == 1 && s.Properties.Len() == 0 && len(s.Required) == 0 && len(s.Type) == 0 &&
-		s.AdditionalProperties == nil && !hasConstraints(s) {
+		s.AdditionalProperties == nil && !hasConstraints(s) && discriminatorOf(deref(s.AllOf[0])) == nil {
 		return s.AllOf[0]
 	}
 	return nil
@@ -1015,10 +1104,12 @@ func variantName(r *Ref, i int) string {
 // mapping key (implicit mapping). If a variant cannot be selected, or is
 // not an object, the union falls back to trying every variant.
 func (b *builder) discriminate(t *Type, targets []*oas.Schema) {
-	d := t.Schema.Discriminator
+	d := discriminatorOf(t.Schema)
 	if d == nil {
 		return
 	}
+	// An inherited mapping also names schemas outside t's subtree.
+	inherited := t.Schema.Discriminator == nil
 	componentNames := make(map[*oas.Schema]string)
 	if c := b.spec.Document.Components; c != nil {
 		for name, s := range c.Schemas.All() {
@@ -1027,6 +1118,9 @@ func (b *builder) discriminate(t *Type, targets []*oas.Schema) {
 	}
 	for key, target := range d.Targets.All() {
 		i := slices.Index(targets, deref(target))
+		if i < 0 && inherited {
+			continue
+		}
 		if i < 0 {
 			b.warn(t.Schema, []string{"discriminator", "mapping", key}, fmt.Sprintf("mapping value %q does not refer to a member of the union", key))
 			continue

@@ -301,3 +301,37 @@ components:
       oneOf:
         - type: integer
         - not: {type: integer}
+    Creature:
+      type: object
+      required: [species]
+      properties:
+        species: {type: string}
+        name: {type: string}
+      discriminator:
+        propertyName: species
+        mapping:
+          pup: "#/components/schemas/Puppy"
+    Hound:
+      allOf:
+        - $ref: "#/components/schemas/Creature"
+        - type: object
+          properties:
+            bark: {type: boolean}
+    Puppy:
+      allOf:
+        - $ref: "#/components/schemas/Hound"
+        - type: object
+          properties:
+            ageWeeks: {type: integer, maximum: 52}
+    Mutt:
+      allOf:
+        - $ref: "#/components/schemas/Hound"
+    Kennel:
+      type: object
+      properties:
+        creatures:
+          type: array
+          items: {$ref: "#/components/schemas/Creature"}
+        hounds:
+          type: array
+          items: {$ref: "#/components/schemas/Hound"}

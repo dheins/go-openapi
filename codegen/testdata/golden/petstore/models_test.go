@@ -497,3 +497,55 @@ func assertMessages(t *testing.T, err error, want ...string) {
 		t.Errorf("errors:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 	}
 }
+
+func TestInheritanceChains(t *testing.T) {
+	// Every schema below Creature, at any depth, is a variant of it; a
+	// schema with subtypes of its own is represented by its base struct.
+	tests := []struct {
+		in, creature, hound string
+	}{
+		{`{"species": "Creature"}`, "CreatureBase", ""},
+		{`{"species": "Hound", "bark": true}`, "HoundBase", "HoundBase"},
+		{`{"species": "pup", "ageWeeks": 8}`, "Puppy", "Puppy"},
+		{`{"species": "Puppy"}`, "Puppy", "Puppy"},
+		{`{"species": "Mutt", "name": "Rex"}`, "Mutt", "Mutt"},
+	}
+	for _, tt := range tests {
+		var c Creature
+		if err := json.Unmarshal([]byte(tt.in), &c); err != nil {
+			t.Errorf("creature %s: %v", tt.in, err)
+		} else if got := held(c.Value()); got != tt.creature {
+			t.Errorf("creature %s decoded as %s, want %s", tt.in, got, tt.creature)
+		}
+		var h Hound
+		err := json.Unmarshal([]byte(tt.in), &h)
+		switch {
+		case tt.hound == "" && err == nil:
+			t.Errorf("hound %s decoded as %s, want an error", tt.in, held(h.Value()))
+		case tt.hound != "" && err != nil:
+			t.Errorf("hound %s: %v", tt.in, err)
+		case tt.hound != "" && held(h.Value()) != tt.hound:
+			t.Errorf("hound %s decoded as %s, want %s", tt.in, held(h.Value()), tt.hound)
+		}
+	}
+	var h Hound
+	// The inherited mapping only offers Hound's own subtree.
+	assertMessages(t, json.Unmarshal([]byte(`{"species": "Creature"}`), &h), `/species: must be one of "Hound", "pup", "Puppy", "Mutt"`)
+
+	// The deepest subtype has every inherited property and its own checks,
+	// and encodes with the documented mapping key.
+	pup := Puppy{Name: oapi.Some("Bo"), Bark: oapi.Some(true), AgeWeeks: oapi.Some(int64(60))}
+	assertMessages(t, NewCreature(pup).Validate(), "/ageWeeks: must be at most 52")
+	out, err := json.Marshal(NewHound(Puppy{AgeWeeks: oapi.Some(int64(8))}))
+	if err != nil || string(out) != `{"species":"pup","ageWeeks":8}` {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+
+	var k Kennel
+	if err := json.Unmarshal([]byte(`{"creatures": [{"species": "Mutt"}, {"species": "Creature"}], "hounds": [{"species": "pup"}]}`), &k); err != nil {
+		t.Fatal(err)
+	}
+	if cs, hs := k.Creatures.Value, k.Hounds.Value; held(cs[0].Value()) != "Mutt" || held(cs[1].Value()) != "CreatureBase" || held(hs[0].Value()) != "Puppy" {
+		t.Errorf("kennel = %+v", k)
+	}
+}

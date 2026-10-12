@@ -5,7 +5,8 @@
 ### Added
 
 - Polymorphism the 3.0 way: a base schema with a discriminator that other
-  schemas extend with `allOf` becomes a union of those schemas.
+  schemas extend with `allOf` becomes a union of those schemas, at any depth
+  of the hierarchy; intermediate schemas inherit the discriminator.
 - `oneOf`/`anyOf` next to `properties` (members listing properties and
   required ones) is checked by `Validate`.
 - `server.BindError`: invalid requests reach the error handler as their own
