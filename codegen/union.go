@@ -241,20 +241,27 @@ func (f *fileGen) unionMarshalStmts(t *ir.Type) string {
 		w(1, "return nil, %s.New(%q)", f.imp("errors", "errors"), t.Name+": no variant is set")
 		return strings.TrimSuffix(b.String(), "\n")
 	}
+	// Every variant that is set is encoded: an anyOf value can match
+	// several, and objects that do are merged.
+	w(1, "var parts [][]byte")
 	for _, v := range t.Variants {
 		w(1, "if u.%s != nil {", v.Name)
+		w(2, "data, err := oapi.EncodeValue(u.%s, dir)", v.Name)
+		w(2, "if err != nil {")
+		w(3, "return nil, err")
+		w(2, "}")
 		if t.Discriminator != "" && len(v.Values) > 0 {
-			w(2, "data, err := oapi.EncodeValue(u.%s, dir)", v.Name)
-			w(2, "if err != nil {")
+			w(2, "if data, err = oapi.EnsureProperty(data, %q, %q); err != nil {", t.Discriminator, v.Values[0])
 			w(3, "return nil, err")
 			w(2, "}")
-			w(2, "return oapi.EnsureProperty(data, %q, %q)", t.Discriminator, v.Values[0])
-		} else {
-			w(2, "return oapi.EncodeValue(u.%s, dir)", v.Name)
 		}
+		w(2, "parts = append(parts, data)")
 		w(1, "}")
 	}
-	w(1, "return nil, %s.New(%q)", f.imp("errors", "errors"), t.Name+": no variant is set")
+	w(1, "if len(parts) == 0 {")
+	w(2, "return nil, %s.New(%q)", f.imp("errors", "errors"), t.Name+": no variant is set")
+	w(1, "}")
+	w(1, "return oapi.MergeObjects(parts...)")
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
@@ -300,10 +307,5 @@ func (f *fileGen) unionValidateStmts(t *ir.Type) string {
 	w(1, "if set == 0 {")
 	w(2, "errs.Add(\"\", \"no variant is set\")")
 	w(1, "}")
-	if t.OneOf {
-		w(1, "if set > 1 {")
-		w(2, "errs.Add(\"\", \"only one variant may be set\")")
-		w(1, "}")
-	}
 	return strings.TrimSuffix(b.String(), "\n")
 }

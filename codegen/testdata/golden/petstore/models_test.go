@@ -549,3 +549,71 @@ func TestInheritanceChains(t *testing.T) {
 		t.Errorf("kennel = %+v", k)
 	}
 }
+
+func TestPropertiesNextToUnions(t *testing.T) {
+	// Common properties are fields of the struct; the oneOf of components
+	// is a union field decoded from the same object.
+	var l Listing
+	if err := json.Unmarshal([]byte(`{"id": 1, "kind": "house", "rooms": 3}`), &l); err != nil {
+		t.Fatal(err)
+	}
+	if h, ok := l.OneOf.Value().(House); !ok || l.ID != 1 || l.Kind != "house" || h.Rooms != 3 {
+		t.Errorf("listing = %+v, variant %#v", l, l.OneOf.Value())
+	}
+	out, err := json.Marshal(l)
+	if want := `{"id":1,"kind":"house","rooms":3}`; err != nil || string(out) != want {
+		t.Errorf("marshal = %s, %v, want %s", out, err, want)
+	}
+	// An empty discriminator property is left to the variant's value.
+	out, err = json.Marshal(Listing{ID: 2, OneOf: NewListingOneOf(Flat{Floor: 4})})
+	if want := `{"id":2,"kind":"flat","floor":4}`; err != nil || string(out) != want {
+		t.Errorf("marshal = %s, %v, want %s", out, err, want)
+	}
+	// The variants' properties are known to additionalProperties: false.
+	assertMessages(t, json.Unmarshal([]byte(`{"id": 1, "kind": "flat", "floor": 2, "garden": true}`), &l), "/garden: property is not allowed")
+	assertMessages(t, json.Unmarshal([]byte(`{"id": 1, "kind": "flat"}`), &l), "/floor: required property is missing")
+	assertMessages(t, json.Unmarshal([]byte(`{"id": 1, "kind": "boat"}`), &l), `/kind: must be one of "house", "House", "flat", "Flat"`)
+	assertMessages(t, Listing{ID: 1, Kind: "house", OneOf: NewListingOneOf(House{Rooms: 0})}.Validate(), "/rooms: must be at least 1")
+	assertMessages(t, Listing{ID: 1}.Validate(), "no variant is set")
+
+	// anyOf next to properties, with a reference and an inline member.
+	var n Notice
+	if err := json.Unmarshal([]byte(`{"title": "t", "url": "https://example.com"}`), &n); err != nil {
+		t.Fatal(err)
+	}
+	if n.AnyOf.House != nil || n.AnyOf.NoticeAnyOfVariant2 == nil || n.AnyOf.NoticeAnyOfVariant2.URL != "https://example.com" {
+		t.Errorf("notice = %+v", n.AnyOf)
+	}
+	assertMessages(t, json.Unmarshal([]byte(`{"title": "t"}`), &n), "matches none of the variants (House: /kind: required property is missing (and 1 more); NoticeAnyOfVariant2: /url: required property is missing)")
+	roundTrip[Notice](t, []byte(`{"title": "t", "kind": "x", "rooms": 2}`))
+
+	// An allOf member that is a union works the same way.
+	var a Advert
+	if err := json.Unmarshal([]byte(`{"title": "Sunny", "kind": "flat", "floor": 3}`), &a); err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := a.OneOf.Value().(Flat); !ok || a.Title != "Sunny" || f.Floor != 3 {
+		t.Errorf("advert = %+v", a)
+	}
+	assertMessages(t, json.Unmarshal([]byte(`{"kind": "flat", "floor": 3}`), &a), "/title: required property is missing")
+	out, err = json.Marshal(Advert{Title: "Big", OneOf: NewAdvertOneOf(House{Rooms: 9})})
+	if want := `{"title":"Big","kind":"house","rooms":9}`; err != nil || string(out) != want {
+		t.Errorf("marshal = %s, %v, want %s", out, err, want)
+	}
+}
+
+func TestAnyOfKeepsEveryVariant(t *testing.T) {
+	// A value matching both anyOf members keeps the properties of both.
+	in := `{"title":"t","kind":"x","rooms":2,"url":"https://example.com"}`
+	var n Notice
+	if err := json.Unmarshal([]byte(in), &n); err != nil {
+		t.Fatal(err)
+	}
+	if n.AnyOf.House == nil || n.AnyOf.NoticeAnyOfVariant2 == nil {
+		t.Fatalf("notice = %+v", n.AnyOf)
+	}
+	out, err := json.Marshal(n)
+	if err != nil || string(out) != in {
+		t.Errorf("marshal = %s, %v, want %s", out, err, in)
+	}
+}

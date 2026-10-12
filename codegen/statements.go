@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -47,6 +48,15 @@ func (f *fileGen) decodeStmts(t *ir.Type) (string, error) {
 		}
 		w("}")
 	}
+	for _, iu := range t.InlineUnions {
+		w("errs.Nested(\"\", v.%s.DecodeJSON(data, dir))", iu.Name)
+		// The variants' properties are not unknown to the object.
+		for _, name := range propertyNames(iu.Type, map[*ir.Type]bool{}) {
+			if quoted := strconv.Quote(name); !slices.Contains(known, quoted) {
+				known = append(known, quoted)
+			}
+		}
+	}
 	if a := t.Additional; a != nil {
 		w("for _, name := range oapi.UnknownFields(fields%s) {", joinArgs(known))
 		if a.Forbidden {
@@ -80,6 +90,23 @@ func (f *fileGen) encodeStmts(t *ir.Type) string {
 		b.WriteByte('\n')
 	}
 	w(1, "enc := oapi.NewObjectEncoder(dir)")
+	// An inline union's properties are merged in, except those the object
+	// writes itself. Its discriminator is often also a property of the
+	// object: an empty one is left to the union, which writes the
+	// variant's value.
+	discriminators := make(map[string]bool)
+	for _, iu := range t.InlineUnions {
+		discriminators[iu.Type.Type.Discriminator] = true
+	}
+	if len(t.InlineUnions) > 0 {
+		var static []string
+		for _, fd := range t.Fields {
+			if !discriminators[fd.JSONName] {
+				static = append(static, strconv.Quote(fd.JSONName))
+			}
+		}
+		w(1, "skip := []string{%s}", strings.Join(static, ", "))
+	}
 	for _, fd := range t.Fields {
 		var conds []string
 		switch {
@@ -100,13 +127,26 @@ func (f *fileGen) encodeStmts(t *ir.Type) string {
 				conds = append(conds, "len(m."+fd.Name+") > 0")
 			}
 		}
+		discriminator := discriminators[fd.JSONName]
+		if discriminator && fd.Required && stringLike(fd.Type) {
+			conds = append(conds, "m."+fd.Name+` != ""`)
+		}
 		if len(conds) == 0 {
 			w(1, "enc.Field(%q, m.%s)", fd.JSONName, fd.Name)
+			if discriminator {
+				w(1, "skip = append(skip, %q)", fd.JSONName)
+			}
 			continue
 		}
 		w(1, "if %s {", strings.Join(conds, " && "))
 		w(2, "enc.Field(%q, m.%s)", fd.JSONName, fd.Name)
+		if discriminator {
+			w(2, "skip = append(skip, %q)", fd.JSONName)
+		}
 		w(1, "}")
+	}
+	for _, iu := range t.InlineUnions {
+		w(1, "enc.Inline(m.%s, skip...)", iu.Name)
 	}
 	if a := t.Additional; a != nil && !a.Forbidden {
 		w(1, "for _, name := range %s.Sorted(%s.Keys(m.%s)) {", f.imp("slices", "slices"), f.imp("maps", "maps"), a.FieldName)
@@ -115,6 +155,50 @@ func (f *fileGen) encodeStmts(t *ir.Type) string {
 	}
 	w(1, "return enc.Bytes()")
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// stringLike reports whether r is a string, or an enum or defined type
+// of strings, whose zero value is "".
+func stringLike(r *ir.Ref) bool {
+	switch r.Kind {
+	case ir.Builtin:
+		return r.Name == "string"
+	case ir.Named:
+		switch r.Type.Kind {
+		case ir.Enum:
+			return stringLike(r.Type.Base)
+		case ir.Defined:
+			return stringLike(r.Type.Underlying)
+		}
+	}
+	return false
+}
+
+// propertyNames returns the names of the properties a value of r, an
+// object or a union of objects, may have.
+func propertyNames(r *ir.Ref, seen map[*ir.Type]bool) []string {
+	if r.Kind != ir.Named || seen[r.Type] {
+		return nil
+	}
+	t := r.Type
+	seen[t] = true
+	var names []string
+	switch t.Kind {
+	case ir.Struct:
+		for _, fd := range t.Fields {
+			names = append(names, fd.JSONName)
+		}
+		for _, iu := range t.InlineUnions {
+			names = append(names, propertyNames(iu.Type, seen)...)
+		}
+	case ir.Union:
+		for _, v := range t.Variants {
+			names = append(names, propertyNames(v.Type, seen)...)
+		}
+	case ir.Alias:
+		names = propertyNames(t.Underlying, seen)
+	}
+	return names
 }
 
 // requiredCondition returns the else clause under which a missing
@@ -168,6 +252,9 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 				v.line(2, "errs.Add(\"\", \"must match at least one of the %d anyOf alternatives\")", len(t.Alternatives))
 			}
 			v.line(1, "}")
+		}
+		for _, iu := range t.InlineUnions {
+			v.line(1, "errs.Nested(\"\", m.%s.Validate())", iu.Name)
 		}
 		v.propertyCount(t)
 		if a := t.Additional; a != nil && !a.Forbidden {

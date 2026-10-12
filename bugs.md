@@ -48,6 +48,10 @@ Each entry says where it lives and how to work around it.
 - **A discriminated union only checks the selected variant's structure when
   decoding.** Constraints such as `maximum` are checked by `Validate()`, not
   during `UnmarshalJSON` (untagged unions check both while choosing).
+- **`additionalProperties: false` next to a union allows its variants'
+  properties.** JSON Schema only counts the adjacent `properties`, so such a
+  schema strictly rejects every variant property; the generated decoder
+  accepts them, as `unevaluatedProperties: false` would.
 - **`oapi.File` in JSON is lossy.** A `format: binary` value inside a JSON
   body is written as a string of its bytes and loses its name and content
   type; non-UTF-8 data is mangled by JSON string encoding.

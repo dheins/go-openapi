@@ -335,3 +335,54 @@ components:
         hounds:
           type: array
           items: {$ref: "#/components/schemas/Hound"}
+    Listing:
+      type: object
+      required: [id, kind]
+      properties:
+        id: {type: integer}
+        kind: {type: string}
+      oneOf:
+        - $ref: "#/components/schemas/House"
+        - $ref: "#/components/schemas/Flat"
+      discriminator:
+        propertyName: kind
+        mapping:
+          house: "#/components/schemas/House"
+          flat: "#/components/schemas/Flat"
+      additionalProperties: false
+    House:
+      type: object
+      required: [kind, rooms]
+      properties:
+        kind: {type: string}
+        rooms: {type: integer, minimum: 1}
+    Flat:
+      type: object
+      required: [kind, floor]
+      properties:
+        kind: {type: string}
+        floor: {type: integer}
+    Notice:
+      type: object
+      properties:
+        title: {type: string}
+      anyOf:
+        - $ref: "#/components/schemas/House"
+        - type: object
+          required: [url]
+          properties:
+            url: {type: string, format: uri}
+    Advert:
+      allOf:
+        - type: object
+          required: [title]
+          properties:
+            title: {type: string}
+        - oneOf:
+            - $ref: "#/components/schemas/House"
+            - $ref: "#/components/schemas/Flat"
+          discriminator:
+            propertyName: kind
+            mapping:
+              house: "#/components/schemas/House"
+              flat: "#/components/schemas/Flat"

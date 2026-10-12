@@ -69,20 +69,33 @@ func (u *IDOrName) DecodeJSON(data []byte, dir oapi.Direction) error {
 	return nil
 }
 
-// MarshalJSON encodes the variant that is set (the first, if several are).
+// MarshalJSON encodes the variant that is set; objects of several
+// variants that are set are merged.
 func (u IDOrName) MarshalJSON() ([]byte, error) {
 	return u.EncodeJSON(oapi.AnyDirection)
 }
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u IDOrName) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	var parts [][]byte
 	if u.Integer != nil {
-		return oapi.EncodeValue(u.Integer, dir)
+		data, err := oapi.EncodeValue(u.Integer, dir)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, data)
 	}
 	if u.String != nil {
-		return oapi.EncodeValue(u.String, dir)
+		data, err := oapi.EncodeValue(u.String, dir)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, data)
 	}
-	return nil, errors.New("IDOrName: no variant is set")
+	if len(parts) == 0 {
+		return nil, errors.New("IDOrName: no variant is set")
+	}
+	return oapi.MergeObjects(parts...)
 }
 
 // Validate checks that at least one variant is set, and validates it.

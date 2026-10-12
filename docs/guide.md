@@ -208,6 +208,29 @@ whose constraints are checked only as part of that alternative. When
 several `allOf` members define the same property, the constraints of all of
 them are checked.
 
+When the members are objects of their own (references, or with a
+discriminator), the shared properties become fields and the members a
+union field, decoded from and encoded into the same JSON object:
+
+```yaml
+Listing:      # type Listing struct{ ID int64; Kind string; OneOf ListingOneOf }
+  type: object
+  required: [id, kind]
+  properties: {id: {type: integer}, kind: {type: string}}
+  oneOf: [{$ref: "#/components/schemas/House"}, {$ref: "#/components/schemas/Flat"}]
+  discriminator: {propertyName: kind}
+```
+
+```go
+l := models.Listing{ID: 1, OneOf: models.NewListingOneOf(models.Flat{Floor: 4})}
+// {"id":1,"kind":"Flat","floor":4}: an empty Kind is left to the variant
+```
+
+The fields win when both define a property. An `allOf` member that is a
+union becomes such a field too (named after the referenced union, or
+`OneOf`/`AnyOf`). An `anyOf` value that matches several object members
+keeps them all and encodes their properties together.
+
 ## Generate a server
 
 ```sh

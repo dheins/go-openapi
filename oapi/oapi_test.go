@@ -231,6 +231,47 @@ func (s secret) EncodeJSON(dir Direction) ([]byte, error) {
 	return enc.Bytes()
 }
 
+func TestMergeObjects(t *testing.T) {
+	tests := []struct {
+		parts []string
+		want  string
+	}{
+		{[]string{`{"a":1}`}, `{"a":1}`},
+		{[]string{`{"kind":"x","rooms":2}`, `{"kind":"y","url":"u"}`}, `{"kind":"x","rooms":2,"url":"u"}`},
+		{[]string{`5`, `"5"`}, `5`},
+		{[]string{`{"a":1}`, `[1]`}, `{"a":1}`},
+	}
+	for _, tt := range tests {
+		var parts [][]byte
+		for _, p := range tt.parts {
+			parts = append(parts, []byte(p))
+		}
+		got, err := MergeObjects(parts...)
+		if err != nil || string(got) != tt.want {
+			t.Errorf("MergeObjects(%v) = %s, %v, want %s", tt.parts, got, err, tt.want)
+		}
+	}
+}
+
+func TestObjectEncoderInline(t *testing.T) {
+	enc := NewObjectEncoder(Response)
+	enc.Field("id", 1)
+	enc.Inline(secret{Name: "a", Password: "p"}, "id")
+	enc.Inline(json.RawMessage(`{"id": 2, "z": [1], "a": {"b": null}}`), "id")
+	out, err := enc.Bytes()
+	// The direction reaches the inlined value; skipped names and the
+	// write-only password are left out; the order is kept.
+	if want := `{"id":1,"name":"a","z":[1],"a":{"b":null}}`; err != nil || string(out) != want {
+		t.Errorf("Inline = %s, %v\nwant %s", out, err, want)
+	}
+
+	enc = NewObjectEncoder(AnyDirection)
+	enc.Inline(json.RawMessage(`[1]`))
+	if _, err := enc.Bytes(); err == nil || !strings.Contains(err.Error(), "not an object") {
+		t.Errorf("Inline of an array: %v", err)
+	}
+}
+
 func TestEncodeFastPaths(t *testing.T) {
 	for _, v := range []any{"plain", `q"uote`, "tab\t", "<html>&", "ünïcode", "\u2028", "", true, int64(-9), int32(7), 42, 1.5} {
 		want, err := json.Marshal(v)

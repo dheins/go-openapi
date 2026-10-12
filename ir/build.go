@@ -124,7 +124,7 @@ func (b *builder) fill(t *Type) {
 		b.fillPolymorphic(t)
 	case isObject(s, types):
 		b.fillStruct(t)
-		if s.Discriminator != nil {
+		if s.Discriminator != nil && len(s.OneOf) == 0 && len(s.AnyOf) == 0 {
 			b.warn(s, []string{"discriminator"}, "no schema extends this one with allOf, so the discriminator selects nothing")
 		}
 	default:
@@ -306,7 +306,8 @@ func (b *builder) fillStruct(t *Type) {
 		schema *oas.Schema
 	}
 	var redefinitions []redefinition
-	for _, part := range b.objectParts(s, s, map[*oas.Schema]bool{}) {
+	var unionMembers []*oas.Schema
+	for _, part := range b.objectParts(s, s, map[*oas.Schema]bool{}, &unionMembers) {
 		for name, ps := range part.Properties.All() {
 			if _, dup := index[name]; dup {
 				redefinitions = append(redefinitions, redefinition{part, name, ps})
@@ -321,7 +322,7 @@ func (b *builder) fillStruct(t *Type) {
 	}
 	// Properties that only oneOf or anyOf members define are optional
 	// fields of the struct; the alternatives check them.
-	alternatives, oneOf := b.alternativeMembers(s)
+	alternatives, oneOf, simple := b.alternativeMembers(s)
 	alternativeOnly := make(map[string]bool)
 	for _, m := range alternatives {
 		for name, ps := range m.Properties.All() {
@@ -391,30 +392,63 @@ func (b *builder) fillStruct(t *Type) {
 		t.Additional = &Additional{Forbidden: true}
 	}
 	b.fillAlternatives(t, alternatives, oneOf, byName)
+
+	if !simple {
+		// The members are objects of their own: a union of them holds
+		// the properties they add to the struct's.
+		keyword := "OneOf"
+		if len(s.OneOf) == 0 {
+			keyword = "AnyOf"
+		}
+		u := &Type{Name: b.names.claim(t.Name + keyword), Schema: s, Root: t.Root, Location: t.Location, Doc: t.Doc}
+		b.model.Types = append(b.model.Types, u)
+		b.fillUnion(u, nil)
+		// The struct is an object, so the union never holds null.
+		u.NullableUse = false
+		t.InlineUnions = append(t.InlineUnions, &InlineUnion{Name: fieldNames.claim(keyword), Type: &Ref{Kind: Named, Type: u}})
+	}
+	for _, m := range unionMembers {
+		// A component union names the field; an inline one is named after
+		// its keyword, like the struct's own.
+		_, component := b.named[m]
+		keyword := "OneOf"
+		if len(m.OneOf) == 0 {
+			keyword = "AnyOf"
+		}
+		r := stripNullable(b.use(m, t.Name+keyword, t.Root))
+		name := keyword
+		if component && r.Kind == Named {
+			name = r.Type.Name
+		}
+		t.InlineUnions = append(t.InlineUnions, &InlineUnion{Name: fieldNames.claim(name), Type: r})
+	}
 }
 
 // alternativeMembers returns the members of a oneOf or anyOf next to the
-// properties of s, if every one only constrains the object (properties,
-// required, annotations), and whether they are oneOf. Otherwise it warns
-// and returns none.
-func (b *builder) alternativeMembers(s *oas.Schema) ([]*oas.Schema, bool) {
-	members, keyword, oneOf := s.OneOf, "oneOf", true
-	if len(members) == 0 {
-		members, keyword, oneOf = s.AnyOf, "anyOf", false
+// properties of s and whether they are oneOf. simple reports whether they
+// are alternatives of the struct: inline members that only constrain the
+// object (properties, required, annotations), without a discriminator.
+// Otherwise (references, a discriminator, other keywords) the members are
+// objects of their own and none are returned; fillStruct makes a union of
+// them.
+func (b *builder) alternativeMembers(s *oas.Schema) (members []*oas.Schema, oneOf, simple bool) {
+	all, oneOf := s.OneOf, true
+	if len(all) == 0 {
+		all, oneOf = s.AnyOf, false
 	}
-	if len(members) == 0 {
-		return nil, false
+	if len(all) == 0 {
+		return nil, false, true
 	}
-	var out []*oas.Schema
-	for i, m := range members {
-		mm := deref(m)
-		if mm == nil || !constrainsObjectOnly(mm) {
-			b.warn(s, []string{keyword, fmt.Sprint(i)}, keyword+" next to properties is only supported when every member just lists properties and required ones; it is not checked")
-			return nil, false
+	if s.Discriminator != nil {
+		return nil, oneOf, false
+	}
+	for _, m := range all {
+		if m == nil || m.Ref != "" || !constrainsObjectOnly(m) {
+			return nil, oneOf, false
 		}
-		out = append(out, mm)
+		members = append(members, m)
 	}
-	return out, oneOf
+	return members, oneOf, true
 }
 
 // constrainsObjectOnly reports whether s has nothing but properties,
@@ -691,7 +725,8 @@ func (b *builder) baseOf(t *Type) *Type {
 
 // objectParts returns s and the schemas its allOf members (recursively)
 // resolve to, whose properties and required lists make up the struct.
-func (b *builder) objectParts(top, s *oas.Schema, seen map[*oas.Schema]bool) []*oas.Schema {
+// Members that are unions are added to unions instead.
+func (b *builder) objectParts(top, s *oas.Schema, seen map[*oas.Schema]bool, unions *[]*oas.Schema) []*oas.Schema {
 	if s == nil || seen[s] {
 		return nil
 	}
@@ -700,6 +735,10 @@ func (b *builder) objectParts(top, s *oas.Schema, seen map[*oas.Schema]bool) []*
 	for i, m := range s.AllOf {
 		member := deref(m)
 		types, _ := splitTypes(member)
+		if member != nil && isUnion(member, types) && len(types) <= 1 {
+			*unions = append(*unions, member)
+			continue
+		}
 		if !objectLike(member, types) {
 			b.warn(s, []string{"allOf", fmt.Sprint(i)}, "allOf member is not an object schema and is not applied")
 			continue
@@ -708,7 +747,7 @@ func (b *builder) objectParts(top, s *oas.Schema, seen map[*oas.Schema]bool) []*
 			// Named members report their own unsupported keywords.
 			b.warnUnsupported(member)
 		}
-		parts = append(parts, b.objectParts(top, member, seen)...)
+		parts = append(parts, b.objectParts(top, member, seen, unions)...)
 	}
 	return parts
 }

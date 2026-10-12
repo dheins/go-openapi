@@ -24,6 +24,11 @@ type {{.Name}} struct {
 {{- end}}
 	{{.Name}} {{goType .Type}} {{tag .}}
 {{- end}}
+{{- range .InlineUnions}}
+	// {{.Name}} holds the variant of the object; its properties are
+	// decoded from and encoded into the object itself.
+	{{.Name}} {{goType .Type}} `json:"-"`
+{{- end}}
 {{- with .Additional}}{{if not .Forbidden}}
 	// {{.FieldName}} holds the properties that are not declared above.
 	{{.FieldName}} map[string]{{goType .Value}} `json:"-"`
@@ -103,7 +108,8 @@ func (u *{{.Name}}) DecodeJSON(data []byte, dir oapi.Direction) error {
 {{unionDecodeStmts .}}
 }
 
-// MarshalJSON encodes the variant that is set{{if not .OneOf}} (the first, if several are){{end}}.
+// MarshalJSON encodes the variant that is set{{if not .OneOf}}; objects of several
+// variants that are set are merged{{end}}.
 func (u {{.Name}}) MarshalJSON() ([]byte, error) {
 	return u.EncodeJSON(oapi.AnyDirection)
 }

@@ -41,7 +41,7 @@ func FuzzModels(f *testing.F) {
 		`{"value": "a", "next": {"value": "b", "next": null}}`, `{"kind": "extensible", "a": 1}`,
 		`{"id": 1, "parent": {"id": 2}, "children": [{"name": "c"}]}`,
 		`{"kind": "automobile", "wheels": 4, "doors": 3}`, `{"vehicles": [{"kind": "Bike", "wheels": 2, "gears": 1}]}`,
-		`{"name": "a", "email": "a@example.com"}`, `{"code": "ABC"}`, `["a"]`, `true`, `"2026-10-12T08:30:00Z"`, `"auto"`, `3`, `{"species": "pup", "ageWeeks": 8}`, `{"hounds": [{"species": "Mutt"}]}`,
+		`{"name": "a", "email": "a@example.com"}`, `{"code": "ABC"}`, `["a"]`, `true`, `"2026-10-12T08:30:00Z"`, `"auto"`, `3`, `{"species": "pup", "ageWeeks": 8}`, `{"hounds": [{"species": "Mutt"}]}`, `{"id": 1, "kind": "flat", "floor": 2}`, `{"title": "t", "url": "u"}`, `{"title": "t", "kind": "house", "rooms": 1}`,
 	} {
 		f.Add([]byte(seed))
 	}
@@ -63,5 +63,8 @@ func FuzzModels(f *testing.F) {
 		roundTrip[Creature](t, data)
 		roundTrip[Hound](t, data)
 		roundTrip[Kennel](t, data)
+		roundTrip[Listing](t, data)
+		roundTrip[Notice](t, data)
+		roundTrip[Advert](t, data)
 	})
 }

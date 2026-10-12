@@ -36,6 +36,45 @@ func DecodeUnion(raw json.RawMessage, dir Direction, oneOf bool, variants ...Var
 	return nil
 }
 
+// MergeObjects joins encoded anyOf variants. An anyOf value that matched
+// several object variants is one object, so their members are merged, the
+// first value of each name winning. If a part is not an object, the first
+// part is returned.
+func MergeObjects(parts ...[]byte) ([]byte, error) {
+	if len(parts) == 1 {
+		return parts[0], nil
+	}
+	for _, p := range parts {
+		if trimmed := bytes.TrimSpace(p); len(trimmed) == 0 || trimmed[0] != '{' {
+			return parts[0], nil
+		}
+	}
+	enc := NewObjectEncoder(AnyDirection)
+	var seen []string
+	for _, p := range parts {
+		names, err := objectNames(p)
+		if err != nil {
+			return nil, err
+		}
+		enc.Inline(json.RawMessage(p), seen...)
+		seen = append(seen, names...)
+	}
+	return enc.Bytes()
+}
+
+// objectNames returns the member names of the JSON object data.
+func objectNames(data []byte) ([]string, error) {
+	fields, err := DecodeObject(data)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
 // firstProblem summarises err by its first problem.
 func firstProblem(err error) string {
 	var list ValidationErrors

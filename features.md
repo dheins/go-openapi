@@ -19,8 +19,7 @@ Defects in existing behaviour are in [bugs.md](bugs.md).
 - Keywords that produce a warning and are not reflected in types: `not`,
   `if`/`then`/`else`, `patternProperties`, `prefixItems`, `contains`,
   `propertyNames`, `dependentSchemas`, `dependentRequired`,
-  `unevaluatedItems`, and `oneOf`/`anyOf` next to `properties` whose members
-  use more than `properties` and `required`. — later
+  `unevaluatedItems`. — later
 - Applying `default` values inside responses and to nested objects of
   parameters (defaults are applied to absent request properties and
   parameters today). — later

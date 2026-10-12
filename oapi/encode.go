@@ -163,6 +163,49 @@ func (e *ObjectEncoder) Field(name string, v any) {
 	e.buf.Write(value)
 }
 
+// Inline adds the properties of v, which must encode as a JSON object, in
+// their order, except those named in skip. Generated code uses it for
+// unions whose properties belong to the enclosing object: skip lists the
+// properties the object has written itself.
+func (e *ObjectEncoder) Inline(v any, skip ...string) {
+	if e.err != nil {
+		return
+	}
+	data, err := EncodeValue(v, e.dir)
+	if err != nil {
+		e.err = err
+		return
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		e.err = fmt.Errorf("inline value is not an object: %s", data)
+		return
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			e.err = err
+			return
+		}
+		name := tok.(string)
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			e.err = err
+			return
+		}
+		if slices.Contains(skip, name) {
+			continue
+		}
+		if e.n > 0 {
+			e.buf.WriteByte(',')
+		}
+		e.n++
+		e.buf.Write(appendString(e.buf.AvailableBuffer(), name))
+		e.buf.WriteByte(':')
+		e.buf.Write(value)
+	}
+}
+
 // appendString appends s as a JSON string. Strings of printable ASCII
 // without quotes, backslashes or HTML characters (what encoding/json
 // escapes by default) are copied; others go through encoding/json.

@@ -91,6 +91,11 @@ type Type struct {
 	// must match exactly one (AlternativesOneOf) or at least one of them.
 	Alternatives      []*Alternative
 	AlternativesOneOf bool
+	// InlineUnions are unions whose properties belong to the object
+	// itself: its oneOf or anyOf when the members are objects of their own,
+	// and allOf members that are unions. They are decoded from the whole
+	// object and their properties are encoded into it.
+	InlineUnions []*InlineUnion
 
 	// Enum
 	Base   *Ref
@@ -135,6 +140,15 @@ type Variant struct {
 	// "struct{ Value Type }" instead.
 	Wrapper       string
 	WrapperStruct bool
+}
+
+// InlineUnion is a union field of a struct whose properties are the
+// struct's own.
+type InlineUnion struct {
+	// Name is the field name.
+	Name string
+	// Type is a Named union.
+	Type *Ref
 }
 
 // Additional describes what happens to properties not declared in a
