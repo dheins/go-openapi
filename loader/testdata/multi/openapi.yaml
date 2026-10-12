@@ -1,0 +1,44 @@
+openapi: 3.2.0
+$self: https://api.example.com/specs/openapi.yaml
+info:
+  title: Multi-file
+  version: "1"
+paths:
+  /pets/{id}:
+    parameters:
+      - $ref: "params.yaml#/PetId"
+    get:
+      parameters:
+        - $ref: "#/components/parameters/Alias"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "schemas/pet.yaml"
+        default:
+          # Written against $self; loaded from the directory of this file.
+          $ref: "https://api.example.com/specs/responses.yaml#/Error"
+components:
+  parameters:
+    Alias:
+      $ref: "#/components/parameters/Limit"
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+  schemas:
+    Node:
+      $id: https://schemas.example.com/node
+      type: object
+      properties:
+        next:
+          $ref: "#"
+        tag:
+          $ref: "#tag"
+      $defs:
+        tagDef:
+          $anchor: tag
+          type: string

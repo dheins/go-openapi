@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./... ./codegen/testdata/golden/...
+      - name: Test
+        # Includes the golden files (TestGolden), and compiling, vetting and
+        # testing the generated golden packages (TestGeneratedCode).
+        run: go test ./... ./codegen/testdata/golden/...
+
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Generated example is up to date
+        run: |
+          go generate ./examples/...
+          git diff --exit-code
+      - name: Race detector
+        run: go test -race ./... ./codegen/testdata/golden/...
+      - name: Vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: Benchmarks still run
+        run: go test -run='^$' -bench=. -benchtime=1x ./loader ./validate ./codegen ./codegen/testdata/golden/petstore ./codegen/testdata/golden/petserver
+
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fuzz every target briefly
+        run: |
+          set -e
+          while read -r pkg target; do
+            echo "::group::$pkg $target"
+            go test -run='^$' -fuzz="^${target}\$" -fuzztime=10s "./$pkg"
+            echo "::endgroup::"
+          done <<'TARGETS'
+          loader FuzzLoadBytes
+          validate FuzzSource
+          oapi FuzzDecode
+          oapi FuzzDecodeScalar
+          oapi FuzzEnsureProperty
+          runtime/server FuzzParamStyles
+          runtime/server FuzzNegotiate
+          runtime/server FuzzMultipart
+          codegen/testdata/golden/petstore FuzzModels
+          TARGETS

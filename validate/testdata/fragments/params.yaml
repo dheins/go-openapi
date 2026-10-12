@@ -1,0 +1,5 @@
+Bad:
+  name: bad
+  in: body
+  schema:
+    type: string

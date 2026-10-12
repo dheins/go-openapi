@@ -1,0 +1,108 @@
+openapi: 3.2.0
+$self: https://example.com/petstore.yaml
+info:
+  title: Petstore
+  version: 1.0.0
+  x-audience: public
+servers:
+  - url: https://{env}.example.com/v1
+    name: primary
+    variables:
+      env:
+        default: api
+        enum: [api, staging]
+tags:
+  - name: pets
+    kind: nav
+  - name: cats
+    parent: pets
+security:
+  - apiKey: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      parameters:
+        - name: limit
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: integer
+            format: int64
+            maximum: 9223372036854775807
+      responses:
+        "200":
+          description: A page of pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+            application/jsonl:
+              itemSchema:
+                $ref: "#/components/schemas/Pet"
+        4XX:
+          $ref: "#/components/responses/Problem"
+        x-rate-limited: true
+    query:
+      operationId: searchPets
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: [string, "null"]
+      responses:
+        default:
+          description: Search results
+  x-internal: false
+webhooks:
+  newPet:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "200":
+          description: Acknowledged
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [id, kind]
+      discriminator:
+        propertyName: kind
+        defaultMapping: "#/components/schemas/Pet"
+      properties:
+        id:
+          type: integer
+          format: int64
+        kind:
+          type: string
+        legacy:
+          const: null
+        anything: true
+      x-go-type: Pet
+      $vocabularyKeyword: kept
+  responses:
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema:
+            type: object
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      name: X-API-Key
+      in: header

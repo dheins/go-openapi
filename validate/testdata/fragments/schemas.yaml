@@ -1,0 +1,6 @@
+Item:
+  type: object
+  properties:
+    count:
+      type: integer
+      minimum: lots

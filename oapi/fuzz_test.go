@@ -1,0 +1,101 @@
+package oapi
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+type fuzzTarget struct {
+	S Optional[string]            `json:"s,omitzero"`
+	N Nullable[int64]             `json:"n"`
+	L []Optional[Nullable[bool]]  `json:"l"`
+	M map[string][]float64        `json:"m"`
+	A any                         `json:"a"`
+	P *fuzzTarget                 `json:"p"`
+	D Optional[Date]              `json:"d,omitzero"`
+	F Optional[map[string]string] `json:"f,omitzero"`
+}
+
+// FuzzDecode checks that decoding never panics, and that a value that
+// decodes encodes to JSON that decodes to the same value.
+func FuzzDecode(f *testing.F) {
+	for _, seed := range []string{
+		`{}`, `null`, `[]`, `{"s":"x","n":null,"l":[true,null],"m":{"a":[1.5]},"a":{"x":[1]},"p":{"n":3},"d":"2024-02-29"}`,
+		`{"l":[1]}`, `{"m":{"a":"b"}}`, `{"p":{"p":{"p":null}}}`, `{"d":"2024-13-01"}`, `{"f":{"k":"v"}}`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var v fuzzTarget
+		if err := Decode(data, &v); err != nil {
+			return
+		}
+		out, err := EncodeValue(v, AnyDirection)
+		if err != nil {
+			t.Fatalf("decoded value does not encode: %v", err)
+		}
+		var again fuzzTarget
+		if err := Decode(out, &again); err != nil {
+			t.Fatalf("encoded value does not decode: %v\n%s", err, out)
+		}
+		if !reflect.DeepEqual(normalize(v), normalize(again)) {
+			t.Fatalf("round trip changed the value:\n%+v\n%+v\n%s", v, again, out)
+		}
+	})
+}
+
+// normalize clears A, whose any value may change representation (for
+// example integers decode as float64 either way, but nested maps of nil
+// slices encode as null); the typed fields are what the round trip checks.
+func normalize(v fuzzTarget) fuzzTarget {
+	v.A = nil
+	if v.P != nil {
+		p := normalize(*v.P)
+		v.P = &p
+	}
+	return v
+}
+
+// FuzzDecodeScalar checks that the fast paths decode exactly what
+// encoding/json does, and reject what it rejects.
+func FuzzDecodeScalar(f *testing.F) {
+	for _, seed := range []string{`"a"`, `"\u00e9"`, `12`, `-0`, `01`, `1e3`, `1.5`, `true`, `null`, `"x`, `9223372036854775808`, `2147483648`, `+1`, `0x1`} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		check := func(fast, slow any) {
+			fastOK := decodeScalar(raw, fast)
+			slowErr := json.Unmarshal(raw, slow)
+			if fastOK && slowErr != nil {
+				t.Fatalf("%T: fast path accepted %q, encoding/json rejects it: %v", fast, raw, slowErr)
+			}
+			if fastOK && !reflect.DeepEqual(fast, slow) {
+				t.Fatalf("%T: %q decoded to %v, encoding/json gives %v", fast, raw, reflect.ValueOf(fast).Elem(), reflect.ValueOf(slow).Elem())
+			}
+		}
+		check(new(string), new(string))
+		check(new(int64), new(int64))
+		check(new(int32), new(int32))
+		check(new(bool), new(bool))
+		check(new(float64), new(float64))
+	})
+}
+
+// FuzzEnsureProperty checks that EnsureProperty never panics and keeps
+// valid JSON objects valid.
+func FuzzEnsureProperty(f *testing.F) {
+	f.Add([]byte(`{"a":1}`), "kind", "cat")
+	f.Add([]byte(`{"kind":""}`), "kind", "cat")
+	f.Add([]byte(`[1]`), "k", "v")
+	f.Fuzz(func(t *testing.T, data []byte, property, value string) {
+		out, err := EnsureProperty(data, property, value)
+		if err != nil {
+			return
+		}
+		var got map[string]any
+		if err := Decode(out, &got); err != nil {
+			t.Fatalf("output is not an object: %v\n%s", err, out)
+		}
+	})
+}

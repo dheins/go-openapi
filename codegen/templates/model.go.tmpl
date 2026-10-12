@@ -1,0 +1,151 @@
+{{- /*
+Templates for model files. Each type gets a declaration, and every named
+type gets a Validate method. Helpers marked "stmts" return Go statements
+built by the generator.
+*/ -}}
+
+{{define "types"}}
+{{- range .}}
+{{- if eq (kind .) "struct"}}{{template "struct" .}}
+{{- else if eq (kind .) "union"}}{{template "union" .}}
+{{- else if eq (kind .) "enum"}}{{template "enum" .}}
+{{- else if eq (kind .) "defined"}}{{template "defined" .}}
+{{- else}}{{template "alias" .}}
+{{- end}}
+{{end}}
+{{- end}}
+
+{{define "struct"}}
+{{typeDoc .}}
+type {{.Name}} struct {
+{{- range .Fields}}
+{{- with fieldDoc .}}
+{{.}}
+{{- end}}
+	{{.Name}} {{goType .Type}} {{tag .}}
+{{- end}}
+{{- with .Additional}}{{if not .Forbidden}}
+	// {{.FieldName}} holds the properties that are not declared above.
+	{{.FieldName}} map[string]{{goType .Value}} `json:"-"`
+{{- end}}{{end}}
+}
+
+// UnmarshalJSON decodes a JSON object, reporting missing required
+// properties and values of the wrong type with their JSON paths.
+// Required read-only and write-only properties may be absent; use
+// DecodeJSON to decode a request or response.
+func (m *{{.Name}}) UnmarshalJSON(data []byte) error {
+	return m.DecodeJSON(data, oapi.AnyDirection)
+}
+
+// DecodeJSON decodes a JSON object like UnmarshalJSON. dir decides whether
+// required read-only properties (responses) and required write-only
+// properties (requests) must be present.
+func (m *{{.Name}}) DecodeJSON(data []byte, dir oapi.Direction) error {
+{{decodeStmts .}}
+}
+
+
+// MarshalJSON encodes every property that is present.
+func (m {{.Name}}) MarshalJSON() ([]byte, error) {
+	return m.EncodeJSON(oapi.AnyDirection)
+}
+
+// EncodeJSON encodes the value for dir: read-only properties are left out
+// of requests and write-only properties out of responses.
+func (m {{.Name}}) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+{{encodeStmts .}}
+}
+
+// Validate checks the values against the constraints of the schema.
+func (m {{.Name}}) Validate() error {
+	var errs oapi.ValidationErrors
+{{validateStmts .}}
+	return errs.Err()
+}
+{{- end}}
+
+{{define "union"}}
+{{typeDoc .}}
+//
+// {{if .OneOf}}Exactly one{{else}}At least one{{end}} of the fields is set.
+{{- if .Discriminator}} The property {{printf "%q" .Discriminator}} selects
+// the variant when decoding.{{end}}
+type {{.Name}} struct {
+{{- range .Variants}}
+{{variantDoc $ .}}
+	{{.Name}} *{{goType .Type}}
+{{- end}}
+}
+
+// UnmarshalJSON decodes the value as the matching variant. Required
+// read-only and write-only properties may be absent; use DecodeJSON to
+// decode a request or response.
+func (u *{{.Name}}) UnmarshalJSON(data []byte) error {
+	return u.DecodeJSON(data, oapi.AnyDirection)
+}
+
+// DecodeJSON decodes the value like UnmarshalJSON, passing dir on to the
+// variants.
+func (u *{{.Name}}) DecodeJSON(data []byte, dir oapi.Direction) error {
+{{unionDecodeStmts .}}
+}
+
+// MarshalJSON encodes the variant that is set{{if not .OneOf}} (the first, if several are){{end}}.
+func (u {{.Name}}) MarshalJSON() ([]byte, error) {
+	return u.EncodeJSON(oapi.AnyDirection)
+}
+
+// EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
+func (u {{.Name}}) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+{{unionMarshalStmts .}}
+}
+
+// Validate checks that {{if .OneOf}}exactly one{{else}}at least one{{end}} variant is set, and validates it.
+func (u {{.Name}}) Validate() error {
+	var errs oapi.ValidationErrors
+{{unionValidateStmts .}}
+	return errs.Err()
+}
+{{- end}}
+
+{{define "enum"}}
+{{typeDoc .}}
+type {{.Name}} {{goType .Base}}
+
+// Values of {{.Name}}.
+const (
+{{- range .Values}}
+{{- if .Doc}}
+	// {{.Name}}: {{.Doc}}
+{{- end}}
+	{{.Name}} {{$.Name}} = {{.Literal}}
+{{- end}}
+)
+
+// Validate checks that the value is one of the constants.
+func (e {{.Name}}) Validate() error {
+	switch e {
+	case {{range $i, $v := .Values}}{{if $i}}, {{end}}{{$v.Name}}{{end}}:
+		return nil
+	}
+	return &oapi.ValidationError{Message: {{enumMessage .}}}
+}
+{{- end}}
+
+{{define "defined"}}
+{{typeDoc .}}
+type {{.Name}} {{goType .Underlying}}
+
+// Validate checks the value against the constraints of the schema.
+func (v {{.Name}}) Validate() error {
+	var errs oapi.ValidationErrors
+{{validateStmts .}}
+	return errs.Err()
+}
+{{- end}}
+
+{{define "alias"}}
+{{typeDoc .}}
+type {{.Name}} = {{goType .Underlying}}
+{{- end}}

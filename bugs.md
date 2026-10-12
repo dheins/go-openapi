@@ -1,0 +1,71 @@
+
+# Known bugs
+
+Defects in what is implemented: behaviour that is wrong or surprising
+today. Things that are simply not built yet are in [features.md](features.md).
+Each entry says where it lives and how to work around it.
+
+## Loader
+
+- **Overlapping external fragments are decoded twice.** If one file is
+  referenced both whole (`pet.yaml`) and at a sub-pointer
+  (`pet.yaml#/properties/id`), the sub-pointer target and the copy inside the
+  whole document can be distinct Go objects. Values are equal; only pointer
+  identity differs. *Workaround:* reference external files consistently.
+- **`$id`/`$anchor` indexing is heuristic in fragments.** Data keywords
+  (`example`, `examples`, `default`, `const`, `enum`, `value`, `dataValue`)
+  are skipped, but any other non-schema mapping holding `$id` would be
+  indexed as a schema resource.
+- **Explicit `false` defaults are dropped on output.** `required: false`,
+  `deprecated: false` and similar disappear when a document is re-marshalled
+  (meaning is unchanged; every such field defaults to false).
+- **`$dynamicRef` is resolved statically.** It points to the
+  `$dynamicAnchor` of its own resource; dynamic scope, which can redirect it
+  (as generic "template" schemas rely on), is ignored, so such schemas are
+  typed as their unspecialised form.
+
+## Validate
+
+- **Schema Objects are not checked structurally under a custom
+  `jsonSchemaDialect`.** Documents that set a dialect other than the OAS
+  default are validated with the plain OAS schema only.
+
+## Models (ir / codegen / oapi)
+
+- **`allOf` property conflicts keep the first definition.** When several
+  `allOf` members define the same property, the first one is used (with a
+  warning) instead of combining the constraints of all of them.
+- **ECMA-262 patterns are not checked.** `pattern` uses Go's RE2 `regexp`;
+  patterns with lookahead, backreferences and similar produce a warning and
+  are skipped in `Validate()`.
+- **`oneOf` of open objects rarely matches exactly one variant.** Without a
+  discriminator, a `oneOf` whose variants are objects that allow additional
+  properties often matches several of them, which JSON Schema (and the
+  generated decoder) rejects. *Workaround:* add a discriminator, or close the
+  variants with `additionalProperties: false` or distinct required properties.
+- **A discriminated union only checks the selected variant's structure when
+  decoding.** Constraints such as `maximum` are checked by `Validate()`, not
+  during `UnmarshalJSON` (untagged unions check both while choosing).
+- **`oapi.File` in JSON is lossy.** A `format: binary` value inside a JSON
+  body is written as a string of its bytes and loses its name and content
+  type; non-UTF-8 data is mangled by JSON string encoding.
+
+## Server (runtime / generated server)
+
+- **Binding errors ignore the document's declared 400 response.** Invalid
+  requests are always answered with `application/problem+json`, even when the
+  operation documents a different body for 400. *Workaround:*
+  `server.WithErrorHandler` can rewrite the `*problem.Problem`.
+- **Headers survive a failed response encoding.** A variant's headers are set
+  before its body is encoded; if encoding fails, the 500 error response still
+  carries them.
+- **Errors in a stream cannot change the status.** JSON Lines and
+  server-sent event responses send 200 before the first item; a later error
+  only ends the stream and is logged.
+- **An allowed empty query value counts as absent.** With
+  `allowEmptyValue`, `?q=` leaves the parameter unset, so a string parameter
+  cannot receive the empty string.
+- **Optional authentication still rejects bad credentials.** When an
+  operation allows anonymous access (`security: [{}, {apiKey: []}]`), a
+  request carrying invalid credentials gets 401 instead of being treated as
+  anonymous. This is deliberate but differs from some frameworks.

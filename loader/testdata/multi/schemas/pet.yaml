@@ -1,0 +1,17 @@
+type: object
+properties:
+  id:
+    type: integer
+    format: int64
+  owner:
+    $ref: "#/$defs/Owner"
+  sibling:
+    $ref: "#"
+$defs:
+  Owner:
+    type: object
+    properties:
+      pets:
+        type: array
+        items:
+          $ref: "pet.yaml"

@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: Legacy
+  version: "1"
+paths:
+  /items:
+    get:
+      parameters:
+        - name: min
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            exclusiveMinimum: true
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+          example: widget
+        price:
+          type: number
+          maximum: 100
+          exclusiveMaximum: false
+        tags:
+          type: array
+          items:
+            type: string
+            nullable: true

@@ -1,0 +1,47 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds goapi for the main platforms and
+# publishes a GitHub release with the binaries. The tag also makes
+# "go install github.com/dheins/go-openapi/cmd/goapi@v0.1.0" work.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go test ./... ./codegen/testdata/golden/...
+      - name: Build
+        run: |
+          set -e
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*} arch=${target#*/}
+            ext=""; [ "$os" = windows ] && ext=.exe
+            name="goapi_${GITHUB_REF_NAME}_${os}_${arch}"
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/$name/goapi$ext" ./cmd/goapi
+            cp README.md LICENSE* "dist/$name/" 2>/dev/null || true
+            if [ "$os" = windows ]; then
+              (cd dist && zip -qr "$name.zip" "$name")
+            else
+              tar -C dist -czf "dist/$name.tar.gz" "$name"
+            fi
+            rm -r "dist/$name"
+          done
+          (cd dist && sha256sum * > checksums.txt)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file <(awk -v tag="$GITHUB_REF_NAME" '$0 ~ "^## " tag {found=1; next} found && /^## / {exit} found' CHANGELOG.md)

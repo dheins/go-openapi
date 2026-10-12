@@ -1,0 +1,886 @@
+package ir
+
+import (
+	"fmt"
+	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/dheins/go-openapi/loader"
+	"github.com/dheins/go-openapi/oas"
+)
+
+// Operation is an operation of the document as a server handles it.
+type Operation struct {
+	// Name is the Go method name, from the operationId; ID is the
+	// operationId as written, or "".
+	Name, ID string
+	Method   string
+	Path     string
+	// Pattern is the http.ServeMux pattern that routes the operation, and
+	// Route its path part.
+	Pattern, Route string
+	// Segments describe the path segments that hold parameters.
+	Segments   []*PathSegment
+	Doc        string
+	Deprecated bool
+	Location   loader.Location
+
+	Params    []*Param
+	Body      *Body
+	Responses []*Response
+
+	// RequestType and ResponseType are the Go names of the request struct
+	// and of the response interface.
+	RequestType, ResponseType string
+
+	// Security lists alternative requirements, one of which a request must
+	// satisfy; nil means the operation is not secured. A requirement
+	// without schemes allows anonymous access.
+	Security [][]*SecurityUse
+
+	// Unsupported says why the operation is not generated; the server
+	// answers it with 501 Not Implemented.
+	Unsupported string
+}
+
+// SecurityScheme is a security scheme a generated server checks through
+// a method of its SecurityHandler.
+type SecurityScheme struct {
+	// Name is the scheme's key in components.securitySchemes, and Method
+	// the SecurityHandler method checking it.
+	Name, Method string
+	// Type is apiKey, http, oauth2, openIdConnect or mutualTLS; for http,
+	// Scheme is its (lower-case) authentication scheme, such as bearer.
+	Type, Scheme string
+	// In and ParamName locate an API key.
+	In, ParamName string
+	Doc           string
+}
+
+// SecurityUse is a scheme in a security requirement, with the scopes (or
+// roles) the requirement asks for.
+type SecurityUse struct {
+	Scheme *SecurityScheme
+	Scopes []string
+}
+
+// PathSegment is a path segment containing parameters, matched by the
+// ServeMux wildcard Wildcard. A segment that is exactly one parameter
+// ("{id}") has no Pattern; a segment mixing text and parameters
+// ("{name}.{ext}") has a regular expression whose groups are Params.
+type PathSegment struct {
+	Wildcard string
+	Pattern  string
+	Params   []string
+}
+
+// Param is a parameter of an operation.
+type Param struct {
+	Name string
+	// In is path, query, header, cookie or querystring.
+	In         string
+	Field      string
+	Doc        string
+	Deprecated bool
+	Required   bool
+	// Style and Explode say how the value is serialized; Content instead
+	// names the media type a parameter with content is serialized as.
+	Style   string
+	Explode bool
+	Content string
+	// Array and Object give the shape of the value; an object's
+	// Properties are primitive values or arrays of them.
+	Array, Object   bool
+	Properties      []ParamProperty
+	AllowEmptyValue bool
+	// Elem is the type of the value, or of each item for an array.
+	Elem *Ref
+	// Type is the field type: Elem or []Elem, made optional if not
+	// required and without a default.
+	Type *Ref
+	// Default is the JSON literal of the default value, used when the
+	// parameter is absent, or "".
+	Default string
+}
+
+// ParamProperty is a property of an object parameter: its JSON Schema
+// type, and whether it is an array of that type.
+type ParamProperty struct {
+	Name  string
+	Type  string
+	Array bool
+}
+
+// Body is the JSON request body of an operation.
+type Body struct {
+	Required bool
+	// Media are the accepted media types, which share one Go type.
+	Media []*BodyMedia
+	Doc   string
+	// Value is the body's type, and Type the field type: Value, made
+	// optional if the body is not required.
+	Value, Type *Ref
+}
+
+// BodyMedia is one media type a request body accepts.
+type BodyMedia struct {
+	MediaType string
+	// Kind is json, form, multipart, text or binary.
+	Kind string
+	// Properties are the object properties, for form and multipart.
+	Properties []ParamProperty
+}
+
+// Response is one declared response, a variant the handler can return.
+type Response struct {
+	// Status is the key in the document: "200", "4XX" or "default".
+	Status string
+	// Code is the status code, or 0 when the handler chooses it (ranges
+	// and default).
+	Code     int
+	TypeName string
+	Doc      string
+	// MediaType is the media type of the body, or "" for none, and Kind
+	// how it is written: json, text, binary, jsonl (JSON Lines, a stream of
+	// Item values) or sse (a stream of server-sent events).
+	MediaType string
+	Kind      string
+	Body      *Ref
+	Item      *Ref
+	// ContentTypeField means MediaType is a range such as "image/*", so
+	// the handler sets the actual type in a ContentType field.
+	ContentTypeField bool
+	Headers          []*Header
+}
+
+// Header is a response header.
+type Header struct {
+	Name     string
+	Field    string
+	Doc      string
+	Required bool
+	Array    bool
+	Elem     *Ref
+	Type     *Ref
+}
+
+// reservedServerNames are exported identifiers the generated server
+// declares, which types must not take.
+var reservedServerNames = []string{"Handler", "NewServer"}
+
+// buildOperations adds the operations of the document's paths.
+func (b *builder) buildOperations() {
+	doc := b.spec.Document
+	if doc.Paths == nil {
+		return
+	}
+	methods := namespace{}
+	mux := http.NewServeMux()
+	for path, item := range doc.Paths.Items.All() {
+		pi := item.Deref()
+		if pi == nil {
+			continue
+		}
+		for method, op := range pi.Operations() {
+			o := b.operation(path, strings.ToUpper(method), pi, op, methods)
+			b.register(mux, o)
+			b.model.Operations = append(b.model.Operations, o)
+		}
+		if len(pi.Servers) > 0 {
+			b.warnAt(pi, []string{"servers"}, "path-level servers are not used by the generated server")
+		}
+	}
+	if doc.Webhooks.Len() > 0 {
+		b.warnAt(doc, []string{"webhooks"}, "webhooks are not generated yet")
+	}
+	b.model.BasePath = basePath(doc)
+}
+
+// basePath returns the path of the first server URL, with its variables
+// replaced by their defaults, without a trailing slash.
+func basePath(doc *oas.Document) string {
+	if len(doc.Servers) == 0 || doc.Servers[0] == nil {
+		return ""
+	}
+	s := doc.Servers[0]
+	raw := templateParam.ReplaceAllStringFunc(s.URL, func(m string) string {
+		if v, ok := s.Variables.Get(m[1 : len(m)-1]); ok && v != nil {
+			return v.Default
+		}
+		return m
+	})
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(u.Path, "/")
+}
+
+// register adds the route of o to a scratch ServeMux to find patterns
+// that ServeMux rejects as conflicting (it panics), which OpenAPI allows.
+func (b *builder) register(mux *http.ServeMux, o *Operation) {
+	if o.Pattern == "" {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			o.Unsupported = fmt.Sprintf("the route %q conflicts with another operation's route", o.Pattern)
+			b.warnOperation(o, fmt.Sprint(r))
+			// The generated server could not register it either.
+			o.Pattern, o.Route = "", ""
+		}
+	}()
+	mux.Handle(o.Pattern, http.NotFoundHandler())
+}
+
+func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Operation, methods namespace) *Operation {
+	o := &Operation{Method: method, Path: path, ID: op.OperationID, Deprecated: op.Deprecated}
+	o.Location, _ = b.spec.Location(op)
+	o.Doc = strings.TrimSpace(strings.Join(nonEmpty(op.Summary, op.Description), "\n\n"))
+
+	name := op.OperationID
+	if name == "" {
+		name = strings.ToLower(method) + " " + path
+	}
+	o.Name = methods.claim(GoName(name))
+	o.RequestType = b.names.claim(o.Name + "Request")
+	o.ResponseType = b.names.claim(o.Name + "Response")
+
+	var err error
+	o.Pattern, o.Segments, err = routePattern(method, path)
+	o.Route = strings.TrimPrefix(o.Pattern, method+" ")
+	if err != nil {
+		o.Unsupported = err.Error()
+		b.warnOperation(o, err.Error())
+		return o
+	}
+
+	fields := namespace{"Body": true, "ContentType": true}
+	for _, p := range effectiveParameters(pi, op) {
+		param, why := b.param(o, p.Deref(), fields)
+		if why != "" {
+			b.unsupported(o, p, why)
+			continue
+		}
+		if param != nil {
+			o.Params = append(o.Params, param)
+		}
+	}
+	for _, s := range o.Segments {
+		for _, name := range s.Params {
+			if !slices.ContainsFunc(o.Params, func(p *Param) bool { return p.In == "path" && p.Name == name }) && o.Unsupported == "" {
+				o.Unsupported = fmt.Sprintf("path parameter %q is not declared", name)
+				b.warnOperation(o, o.Unsupported)
+			}
+		}
+	}
+
+	if rb := op.RequestBody.Deref(); rb != nil {
+		o.Body = b.body(o, op, rb)
+	}
+	var responses *oas.OrderedMap[*oas.Response]
+	if op.Responses != nil {
+		responses = &op.Responses.Items
+	}
+	if responses.Len() == 0 {
+		// 3.1 made responses optional. With nothing declared, the handler
+		// chooses the status and sends no body.
+		o.Responses = []*Response{{Status: "default", TypeName: b.names.claim(o.Name + "DefaultResponse")}}
+		b.warnOperation(o, "the operation declares no responses; its handler can only choose a status code")
+	}
+	for status, resp := range responses.All() {
+		o.Responses = append(o.Responses, b.response(o, status, resp)...)
+	}
+	if len(o.Responses) == 0 && o.Unsupported == "" {
+		o.Unsupported = "no response can be generated"
+		b.warnOperation(o, o.Unsupported)
+	}
+
+	b.security(o, op)
+	if op.Callbacks.Len() > 0 {
+		b.warnAt(op, []string{"callbacks"}, "callbacks are not generated yet")
+	}
+	return o
+}
+
+// unsupported marks o as not generated because of obj.
+func (b *builder) unsupported(o *Operation, obj any, why string) {
+	if o.Unsupported == "" {
+		o.Unsupported = why
+	}
+	b.warnAt(obj, nil, why+"; the operation is answered with 501 Not Implemented")
+}
+
+// ignoredHeaders are header parameters the specification says to ignore.
+var ignoredHeaders = []string{"accept", "content-type", "authorization"}
+
+// param maps a parameter. It returns why the operation cannot be
+// generated, or a nil Param for a parameter that is ignored.
+func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Param, string) {
+	if p.In == "header" && slices.Contains(ignoredHeaders, strings.ToLower(p.Name)) {
+		return nil, ""
+	}
+	param := &Param{
+		Name:            p.Name,
+		In:              p.In,
+		Doc:             strings.TrimSpace(p.Description),
+		Deprecated:      p.Deprecated,
+		Required:        p.Required || p.In == "path",
+		AllowEmptyValue: p.AllowEmptyValue,
+	}
+	hint := o.Name + GoName(p.Name)
+
+	var ref *Ref
+	schema := p.Schema
+	if p.Content.Len() > 0 || p.In == "querystring" {
+		// The value is serialized as a whole with a media type.
+		for mt, m := range p.Content.All() {
+			param.Content = strings.ToLower(mt)
+			schema = m.Deref().Schema
+			break
+		}
+		formQuery := p.In == "querystring" && param.Content == "application/x-www-form-urlencoded"
+		if !isJSONMediaType(param.Content) && !formQuery {
+			return nil, fmt.Sprintf("parameter %q has content of type %q, which is not supported yet", p.Name, param.Content)
+		}
+		ref = stripNullable(b.use(schema, hint, nil))
+		param.Elem = ref
+		if formQuery {
+			if !b.objectParam(param, ref) {
+				return nil, fmt.Sprintf("querystring parameter %q must be an object of primitive values or arrays of them", p.Name)
+			}
+		}
+	} else {
+		param.Style = p.Style
+		if param.Style == "" {
+			param.Style = map[string]string{"path": "simple", "query": "form", "header": "simple", "cookie": "form"}[p.In]
+		}
+		param.Explode = param.Style == "form"
+		if p.Explode != nil {
+			param.Explode = *p.Explode
+		}
+		ref = stripNullable(b.use(schema, hint, nil))
+		if ref.Kind == Named && ref.Type.Kind == Defined && ref.Type.Underlying.Kind == Slice {
+			// A named array type: bind its underlying []T, keeping the
+			// array's own constraints.
+			ref = ref.Type.Underlying
+		}
+		switch {
+		case isScalar(ref):
+			param.Elem = ref
+		case ref.Kind == Slice && isScalar(stripNullable(ref.Elem)):
+			param.Array = true
+			param.Elem = stripNullable(ref.Elem)
+		case b.objectParam(param, ref):
+			param.Elem = ref
+		default:
+			return nil, fmt.Sprintf("parameter %q is not a primitive value, an array of them, or an object of them, which is not supported yet", p.Name)
+		}
+		if why := checkStyle(param); why != "" {
+			return nil, why
+		}
+	}
+
+	param.Type = param.Elem
+	if param.Array {
+		param.Type = &Ref{Kind: Slice, Elem: param.Elem, Checks: ref.Checks}
+	}
+	if !param.Required {
+		// A parameter with a default always has a value.
+		if param.Default = defaultLiteral(schema); param.Default == "" {
+			param.Type = b.optional(param.Type)
+		}
+	}
+	param.Field = fields.claim(GoName(p.Name))
+	return param, ""
+}
+
+// styles lists the styles each location supports and the value shapes
+// each style can carry.
+var styles = map[string]map[string][]string{
+	"path":   {"simple": {"scalar", "array", "object"}, "label": {"scalar", "array", "object"}, "matrix": {"scalar", "array", "object"}},
+	"query":  {"form": {"scalar", "array", "object"}, "spaceDelimited": {"array"}, "pipeDelimited": {"array"}, "deepObject": {"object"}},
+	"header": {"simple": {"scalar", "array", "object"}},
+	"cookie": {"form": {"scalar", "array", "object"}},
+}
+
+// checkStyle returns why the style of p cannot be used, or "".
+func checkStyle(p *Param) string {
+	shape := "scalar"
+	switch {
+	case p.Array:
+		shape = "array"
+	case p.Object:
+		shape = "object"
+	}
+	shapes, ok := styles[p.In][p.Style]
+	switch {
+	case !ok:
+		return fmt.Sprintf("parameter %q: the %s style cannot be used in %s", p.Name, p.Style, p.In)
+	case !slices.Contains(shapes, shape):
+		return fmt.Sprintf("parameter %q: the %s style cannot carry an %s value", p.Name, p.Style, shape)
+	case p.Style == "deepObject" && !p.Explode:
+		return fmt.Sprintf("parameter %q: deepObject requires explode", p.Name)
+	}
+	return ""
+}
+
+// objectParam reports whether ref is an object whose properties are
+// primitive values or arrays of them, and if so records them on p.
+func (b *builder) objectParam(p *Param, ref *Ref) bool {
+	props, ok := objectProperties(ref, false)
+	if ok {
+		p.Object, p.Properties = true, props
+	}
+	return ok
+}
+
+// objectProperties returns the properties of an object whose properties
+// are primitive values or arrays of them; with files, oapi.File values
+// (type "file") are allowed too.
+func objectProperties(ref *Ref, files bool) ([]ParamProperty, bool) {
+	for ref.Kind == Named && ref.Type.Kind == Alias {
+		ref = ref.Type.Underlying
+	}
+	if ref.Kind != Named || ref.Type.Kind != Struct {
+		return nil, false
+	}
+	var props []ParamProperty
+	for _, f := range ref.Type.Fields {
+		r := f.Type
+		for r.Kind == Optional || r.Kind == Nullable || r.Kind == Pointer {
+			r = r.Elem
+		}
+		prop := ParamProperty{Name: f.JSONName}
+		if r.Kind == Slice {
+			prop.Array = true
+			r = stripNullable(r.Elem)
+		}
+		if files && r.Kind == Builtin && r.Name == "oapi.File" {
+			prop.Type = "file"
+		} else if prop.Type = jsonType(r); prop.Type == "" {
+			return nil, false
+		}
+		props = append(props, prop)
+	}
+	return props, true
+}
+
+// jsonType returns the JSON Schema type of a scalar, or "".
+func jsonType(r *Ref) string {
+	switch r.Kind {
+	case Builtin:
+		switch r.Name {
+		case "string", "time.Time", "oapi.Date":
+			return "string"
+		case "int32", "int64":
+			return "integer"
+		case "float32", "float64":
+			return "number"
+		case "bool":
+			return "boolean"
+		}
+	case Named:
+		switch r.Type.Kind {
+		case Enum:
+			return jsonType(r.Type.Base)
+		case Defined, Alias:
+			return jsonType(r.Type.Underlying)
+		}
+	}
+	return ""
+}
+
+// isScalar reports whether r is a value a parameter or header can carry:
+// a string, number, boolean, date or date-time, or a named type over one.
+func isScalar(r *Ref) bool {
+	switch r.Kind {
+	case Builtin:
+		switch r.Name {
+		case "string", "int32", "int64", "float32", "float64", "bool", "time.Time", "oapi.Date":
+			return true
+		}
+	case Named:
+		switch r.Type.Kind {
+		case Enum:
+			return true
+		case Defined, Alias:
+			return isScalar(r.Type.Underlying)
+		}
+	}
+	return false
+}
+
+func stripNullable(r *Ref) *Ref {
+	if r.Kind == Nullable {
+		return r.Elem
+	}
+	return r
+}
+
+// mediaKind classifies a media type for bodies: json, form, multipart,
+// jsonl, sse, text or binary. Other multipart types are "".
+func mediaKind(mt string) string {
+	mt = strings.ToLower(strings.TrimSpace(mt))
+	if base, _, ok := strings.Cut(mt, ";"); ok {
+		mt = strings.TrimSpace(base)
+	}
+	switch {
+	case isJSONMediaType(mt):
+		return "json"
+	case mt == "application/x-www-form-urlencoded":
+		return "form"
+	case mt == "multipart/form-data":
+		return "multipart"
+	case strings.HasPrefix(mt, "multipart/"):
+		return ""
+	case mt == "application/jsonl" || mt == "application/x-ndjson":
+		return "jsonl"
+	case mt == "text/event-stream":
+		return "sse"
+	case strings.HasPrefix(mt, "text/"):
+		return "text"
+	}
+	return "binary"
+}
+
+// structured reports whether a body kind decodes into a schema's type.
+func structured(kind string) bool {
+	return kind == "json" || kind == "form" || kind == "multipart"
+}
+
+func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Body {
+	body := &Body{Required: rb.Required, Doc: strings.TrimSpace(rb.Description)}
+	var first *oas.Schema
+	var group string
+	var rejected []string
+	for mt, m := range rb.Content.All() {
+		kind := mediaKind(mt)
+		schema := m.Deref().Schema
+		if kind == "" || kind == "jsonl" || kind == "sse" {
+			b.warnAt(m, nil, fmt.Sprintf("request bodies of type %s are not supported yet and are answered with 415", mt))
+			rejected = append(rejected, mt)
+			continue
+		}
+		if m.Deref().Encoding.Len() > 0 {
+			b.warnAt(m, []string{"encoding"}, "the encoding object is not applied yet")
+		}
+		g := kind
+		if structured(kind) {
+			g = "structured"
+		}
+		switch {
+		case body.Value == nil:
+			group, first = g, deref(schema)
+			body.Value = b.bodyValue(o, kind, schema)
+		case g != group || (g == "structured" && deref(schema) != first):
+			b.warnAt(m, nil, fmt.Sprintf("request body type %s cannot share a Go type with the operation's first media type and is answered with 415", mt))
+			rejected = append(rejected, mt)
+			continue
+		}
+		media := &BodyMedia{MediaType: mt, Kind: kind}
+		if kind == "form" || kind == "multipart" {
+			props, ok := objectProperties(body.Value, kind == "multipart")
+			if !ok {
+				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects of primitive values or arrays of them; %s is answered with 415", kind, mt))
+				rejected = append(rejected, mt)
+				continue
+			}
+			media.Properties = props
+		}
+		body.Media = append(body.Media, media)
+	}
+	if len(body.Media) == 0 {
+		b.unsupported(o, op.RequestBody, fmt.Sprintf("request bodies of type %s are not supported yet", strings.Join(rejected, ", ")))
+		return nil
+	}
+	body.Type = body.Value
+	if !body.Required {
+		body.Type = b.optional(body.Value)
+	}
+	return body
+}
+
+// bodyValue returns the Go type of a body of the given kind: the schema's
+// type for structured bodies, a string for text and bytes for binary.
+func (b *builder) bodyValue(o *Operation, kind string, schema *oas.Schema) *Ref {
+	switch kind {
+	case "text":
+		if s := deref(schema); s != nil && slices.Equal([]string(s.Type), []string{"string"}) {
+			return b.stringRef(s)
+		}
+		return &Ref{Kind: Builtin, Name: "string"}
+	case "binary":
+		return &Ref{Kind: Builtin, Name: "[]byte"}
+	}
+	return b.use(schema, o.Name+"RequestBody", nil)
+}
+
+func (b *builder) response(o *Operation, status string, resp *oas.Response) []*Response {
+	r := resp.Deref()
+	if r == nil {
+		return nil
+	}
+	doc := strings.TrimSpace(strings.Join(nonEmpty(r.Summary, r.Description), "\n\n"))
+	code := 0
+	if c, err := strconv.Atoi(status); err == nil {
+		code = c
+	}
+	statusName := strings.ToUpper(status)
+	if status == "default" {
+		statusName = "Default"
+	}
+	headers := b.responseHeaders(o, statusName, r)
+
+	if r.Content.Len() == 0 {
+		return []*Response{{Status: status, Code: code, Doc: doc, Headers: headers,
+			TypeName: b.names.claim(o.Name + statusName + "Response")}}
+	}
+	var out []*Response
+	seen := map[string]bool{}
+	for mt, m := range r.Content.All() {
+		kind := mediaKind(mt)
+		media := m.Deref()
+		v := &Response{Status: status, Code: code, Doc: doc, Headers: headers, MediaType: mt, Kind: kind}
+		var suffix string
+		switch kind {
+		case "json":
+			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
+			if strings.Contains(mt, "*") {
+				v.MediaType = "application/json"
+			}
+			suffix = "JSON"
+		case "text":
+			v.Body = b.bodyValue(o, kind, media.Schema)
+			suffix = "Text"
+		case "binary":
+			v.Body = &Ref{Kind: Builtin, Name: "[]byte"}
+			v.ContentTypeField = strings.Contains(mt, "*")
+			_, sub, _ := strings.Cut(mt, "/")
+			suffix = GoName(sub)
+			if sub == "*" {
+				suffix = GoName(strings.TrimSuffix(mt, "/*"))
+			}
+		case "jsonl":
+			item := media.ItemSchema
+			if item == nil && media.Schema != nil {
+				item = deref(media.Schema).Items
+			}
+			v.Item = b.use(item, o.Name+statusName+"Item", nil)
+			suffix = "JSONLines"
+		case "sse":
+			suffix = "Events"
+		default:
+			b.warnAt(m, nil, fmt.Sprintf("response %s of type %s is not supported yet and cannot be returned", status, mt))
+			continue
+		}
+		if seen[suffix] {
+			b.warnAt(m, nil, fmt.Sprintf("response %s already has a %s variant; %s cannot be returned", status, suffix, mt))
+			continue
+		}
+		seen[suffix] = true
+		v.TypeName = b.names.claim(o.Name + statusName + suffix + "Response")
+		out = append(out, v)
+	}
+	return out
+}
+
+// responseHeaders maps the headers of a response.
+func (b *builder) responseHeaders(o *Operation, statusName string, r *oas.Response) []*Header {
+	var headers []*Header
+	fields := namespace{"Body": true, "StatusCode": true, "ContentType": true, "Items": true, "Events": true}
+	for name, h := range r.Headers.All() {
+		if strings.EqualFold(name, "Content-Type") {
+			continue
+		}
+		hdr := h.Deref()
+		if hdr == nil || hdr.Content.Len() > 0 {
+			b.warnAt(h, nil, fmt.Sprintf("header %q with content is not supported yet and is not sent", name))
+			continue
+		}
+		ref := stripNullable(b.use(hdr.Schema, o.Name+statusName+GoName(name), nil))
+		header := &Header{Name: name, Doc: strings.TrimSpace(hdr.Description), Required: hdr.Required}
+		switch {
+		case isScalar(ref):
+			header.Elem = ref
+			header.Type = ref
+		case ref.Kind == Slice && isScalar(stripNullable(ref.Elem)):
+			header.Array = true
+			header.Elem = stripNullable(ref.Elem)
+			header.Type = &Ref{Kind: Slice, Elem: header.Elem}
+		default:
+			b.warnAt(h, nil, fmt.Sprintf("header %q is not a primitive value or an array of them and is not sent", name))
+			continue
+		}
+		if !header.Required {
+			header.Type = b.optional(header.Type)
+		}
+		header.Field = fields.claim(GoName(name))
+		headers = append(headers, header)
+	}
+	return headers
+}
+
+// isJSONMediaType reports whether a content key is JSON: application/json
+// or a +json structured syntax suffix.
+func isJSONMediaType(mt string) bool {
+	mt = strings.ToLower(strings.TrimSpace(mt))
+	if base, _, ok := strings.Cut(mt, ";"); ok {
+		mt = strings.TrimSpace(base)
+	}
+	return mt == "application/json" || strings.HasSuffix(mt, "+json")
+}
+
+var templateParam = regexp.MustCompile(`\{([^{}]+)\}`)
+
+// routePattern converts a path template to a ServeMux pattern. Parameters
+// get the wildcards p0, p1, ... because parameter names need not be valid
+// wildcard names, and a segment mixing text with parameters is matched as
+// a whole and split by a regular expression.
+func routePattern(method, path string) (string, []*PathSegment, error) {
+	if !strings.HasPrefix(path, "/") {
+		return "", nil, fmt.Errorf("path %q does not start with /", path)
+	}
+	segments := strings.Split(path[1:], "/")
+	var out []*PathSegment
+	for i, seg := range segments {
+		matches := templateParam.FindAllStringSubmatchIndex(seg, -1)
+		if len(matches) == 0 {
+			if strings.ContainsAny(seg, "{}") {
+				return "", nil, fmt.Errorf("path segment %q has unbalanced braces", seg)
+			}
+			continue
+		}
+		ps := &PathSegment{Wildcard: "p" + strconv.Itoa(len(out))}
+		if len(matches) == 1 && matches[0][0] == 0 && matches[0][1] == len(seg) {
+			ps.Params = []string{seg[matches[0][2]:matches[0][3]]}
+		} else {
+			var re strings.Builder
+			re.WriteString("^")
+			last := 0
+			for _, m := range matches {
+				re.WriteString(regexp.QuoteMeta(seg[last:m[0]]))
+				// Greedy, so "archive.tar.gz" against "{name}.{ext}"
+				// gives "archive.tar" and "gz".
+				re.WriteString("(.+)")
+				ps.Params = append(ps.Params, seg[m[2]:m[3]])
+				last = m[1]
+			}
+			re.WriteString(regexp.QuoteMeta(seg[last:]) + "$")
+			ps.Pattern = re.String()
+		}
+		segments[i] = "{" + ps.Wildcard + "}"
+		out = append(out, ps)
+	}
+	route := "/" + strings.Join(segments, "/")
+	if strings.HasSuffix(route, "/") {
+		// A trailing slash would make ServeMux match the whole subtree.
+		route += "{$}"
+	}
+	return method + " " + route, out, nil
+}
+
+// effectiveParameters merges path-level parameters with an operation's,
+// which override them by name and location.
+func effectiveParameters(pi *oas.PathItem, op *oas.Operation) []*oas.Parameter {
+	key := func(p *oas.Parameter) string {
+		d := p.Deref()
+		if d.In == "header" {
+			return d.In + ":" + strings.ToLower(d.Name)
+		}
+		return d.In + ":" + d.Name
+	}
+	overridden := make(map[string]bool)
+	for _, p := range op.Parameters {
+		overridden[key(p)] = true
+	}
+	var params []*oas.Parameter
+	for _, p := range pi.Parameters {
+		if !overridden[key(p)] {
+			params = append(params, p)
+		}
+	}
+	return append(params, op.Parameters...)
+}
+
+// effectiveSecurity returns the security requirements of op: its own if
+// it declares any (even an empty list), otherwise the document's.
+func effectiveSecurity(doc *oas.Document, op *oas.Operation) []oas.SecurityRequirement {
+	if op.Security != nil {
+		return op.Security
+	}
+	return doc.Security
+}
+
+// security maps the security requirements of op.
+func (b *builder) security(o *Operation, op *oas.Operation) {
+	reqs := effectiveSecurity(b.spec.Document, op)
+	if len(reqs) == 0 {
+		return
+	}
+	o.Security = [][]*SecurityUse{}
+	for _, req := range reqs {
+		uses := []*SecurityUse{}
+		for name, scopes := range req.All() {
+			scheme, why := b.securityScheme(name)
+			if why != "" {
+				b.unsupported(o, op, why)
+				return
+			}
+			uses = append(uses, &SecurityUse{Scheme: scheme, Scopes: scopes})
+		}
+		o.Security = append(o.Security, uses)
+	}
+}
+
+// securityScheme returns the scheme named name, mapping it on first use.
+func (b *builder) securityScheme(name string) (*SecurityScheme, string) {
+	for _, s := range b.model.SecuritySchemes {
+		if s.Name == name {
+			return s, ""
+		}
+	}
+	var def *oas.SecurityScheme
+	if c := b.spec.Document.Components; c != nil {
+		def, _ = c.SecuritySchemes.Get(name)
+	}
+	if def = def.Deref(); def == nil {
+		return nil, fmt.Sprintf("security scheme %q is not a component (URI references to schemes are not supported yet)", name)
+	}
+	s := &SecurityScheme{Name: name, Type: def.Type, Scheme: strings.ToLower(def.Scheme), Doc: strings.TrimSpace(def.Description)}
+	switch def.Type {
+	case "apiKey":
+		s.In, s.ParamName = def.In, def.Name
+	case "http", "oauth2", "openIdConnect", "mutualTLS":
+	default:
+		return nil, fmt.Sprintf("security scheme %q has the unknown type %q", name, def.Type)
+	}
+	s.Method = b.securityMethods.claim(GoName(name))
+	b.model.SecuritySchemes = append(b.model.SecuritySchemes, s)
+	return s, ""
+}
+
+func nonEmpty(ss ...string) []string {
+	var out []string
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, strings.TrimSpace(s))
+		}
+	}
+	return out
+}
+
+// warnAt adds a warning at the location of obj, a model object.
+func (b *builder) warnAt(obj any, tokens []string, msg string) {
+	loc, _ := b.spec.Location(obj)
+	loc.Pointer = oas.JoinPointer(loc.Pointer, tokens...)
+	b.model.Warnings = append(b.model.Warnings, Warning{Location: loc, Position: b.spec.Position(loc), Message: msg})
+}
+
+func (b *builder) warnOperation(o *Operation, msg string) {
+	b.model.Warnings = append(b.model.Warnings, Warning{Location: o.Location, Position: b.spec.Position(o.Location), Message: msg})
+}

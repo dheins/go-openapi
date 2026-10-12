@@ -1,0 +1,16 @@
+openapi: 3.2.0
+info:
+  title: Invalid fragment
+  version: "1"
+paths:
+  /items:
+    get:
+      parameters:
+        - $ref: "params.yaml#/Bad"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "schemas.yaml#/Item"

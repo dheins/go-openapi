@@ -1,0 +1,225 @@
+openapi: 3.2.0
+info:
+  title: Petstore models
+  version: "1.0"
+paths: {}
+components:
+  schemas:
+    Pet:
+      description: A pet in the store.
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: integer
+          format: int64
+          readOnly: true
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: "^[A-Za-z][A-Za-z ]*$"
+        status:
+          $ref: "#/components/schemas/PetStatus"
+        tag:
+          type: [string, "null"]
+          description: |-
+            Free-form tag.
+            Null clears it.
+        birthday:
+          type: string
+          format: date
+        createdAt:
+          type: string
+          format: date-time
+        weight:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 200
+          multipleOf: 0.5
+        photoUrls:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+        owner:
+          type: object
+          required: [email]
+          properties:
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+              deprecated: true
+        size:
+          type: integer
+          enum: [1, 2, 3]
+          x-enum-varnames: [Small, Medium, Large]
+        labels:
+          $ref: "#/components/schemas/Labels"
+        petType:
+          type: string
+          x-go-name: Kind
+        validate:
+          type: boolean
+    PetStatus:
+      type: string
+      enum: [available, pending, sold]
+      x-enum-descriptions: [Ready to adopt, Adoption in progress, Adopted]
+    Labels:
+      type: object
+      maxProperties: 10
+      additionalProperties:
+        type: string
+        maxLength: 20
+    Category:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int32
+          minimum: 1
+        name:
+          type: string
+        parent:
+          $ref: "#/components/schemas/Category"
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+    Dog:
+      allOf:
+        - $ref: "#/components/schemas/Pet"
+        - type: object
+          required: [barks]
+          properties:
+            barks:
+              type: boolean
+    Extensible:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          const: extensible
+      additionalProperties:
+        type: integer
+        minimum: 0
+    MaybePet:
+      oneOf:
+        - $ref: "#/components/schemas/Pet"
+        - type: "null"
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+    Score:
+      type: number
+      format: float
+      minimum: 0
+      maximum: 1
+    Matrix:
+      type: array
+      items:
+        type: array
+        maxItems: 3
+        items:
+          type: integer
+          minimum: -10
+    Timestamp:
+      type: string
+      format: date-time
+    Anything: {}
+    Node:
+      type: object
+      required: [value, next]
+      properties:
+        value:
+          type: string
+        next:
+          anyOf:
+            - $ref: "#/components/schemas/Node"
+            - type: "null"
+    Account:
+      type: object
+      required: [id, username, password]
+      minProperties: 3
+      maxProperties: 4
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+        role:
+          type: string
+          default: user
+        limit:
+          type: integer
+          default: 10
+    Animal:
+      oneOf:
+        - $ref: "#/components/schemas/Cat"
+        - $ref: "#/components/schemas/Doggo"
+        - $ref: "#/components/schemas/Unknown"
+      discriminator:
+        propertyName: kind
+        mapping:
+          kitty: "#/components/schemas/Cat"
+        defaultMapping: Unknown
+    Cat:
+      type: object
+      required: [kind, lives]
+      properties:
+        kind:
+          type: string
+        lives:
+          type: integer
+          maximum: 9
+    Doggo:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+        good:
+          type: boolean
+    Unknown:
+      type: object
+      properties:
+        kind:
+          type: string
+    IDOrName:
+      type: [integer, string]
+      minimum: 1
+      minLength: 2
+    Choice:
+      oneOf:
+        - type: string
+          enum: [auto]
+        - type: integer
+          minimum: 0
+        - type: "null"
+    Zoo:
+      type: object
+      properties:
+        animals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Animal"
+        choice:
+          $ref: "#/components/schemas/Choice"
+    Shape:
+      oneOf:
+        - type: object
+          properties:
+            radius: {type: number}
+        - type: object
+          properties:
+            side: {type: number}

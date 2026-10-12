@@ -1,0 +1,153 @@
+{{- /*
+Templates for the server: the Handler interface and NewServer, and per
+operation its request and response types and HTTP handler.
+*/ -}}
+
+{{define "server"}}
+// Handler is implemented by the application, with one method per
+// operation. The server decodes and validates each request before calling
+// it. The context carries the *http.Request (see server.HTTPRequest).
+//
+// A method returns one of the operation's response types, or an error: a
+// *problem.Problem is sent as it is, anything else is logged and answered
+// with 500 Internal Server Error.
+type Handler interface {
+{{- range .Operations}}{{if not .Unsupported}}
+{{handlerDoc .}}
+	{{.Name}}(ctx {{imp "context" "context"}}.Context, req *{{.RequestType}}) ({{.ResponseType}}, error)
+{{- end}}{{end}}
+}
+
+{{- if .SecuritySchemes}}
+
+// SecurityHandler checks the credentials of requests, with one method per
+// security scheme of the document. A method returns the context the
+// operation runs with (for example carrying the authenticated user), or
+// an error: a *problem.Problem (such as 403 for missing scopes) is sent as
+// it is, any other error as 401 without details.
+//
+// A method is only called when the request carries credentials for its
+// scheme; requests without any are answered with 401 unless the operation
+// allows anonymous access.
+type SecurityHandler interface {
+{{- range .SecuritySchemes}}
+{{securityDoc .}}
+	{{.Method}}(ctx {{imp "context" "context"}}.Context, {{securityParams .}}, scopes []string) (context.Context, error)
+{{- end}}
+}
+{{- end}}
+
+// BasePath is the path of the document's first server URL. Routes are
+// served below it unless server.WithBasePath says otherwise.
+const BasePath = {{quote .BasePath}}
+
+// NewServer returns an http.Handler that serves the operations of the
+// document with h{{if .SecuritySchemes}}, checking credentials with sec{{end}}.
+func NewServer(h Handler{{if .SecuritySchemes}}, sec SecurityHandler{{end}}, opts ...server.Option) http.Handler {
+	s := &apiServer{handler: h{{if .SecuritySchemes}}, sec: sec{{end}}, cfg: server.NewConfig(append([]server.Option{server.WithBasePath(BasePath)}, opts...)...)}
+{{- range .Operations}}
+{{- if .Unsupported}}{{if .Route}}
+	s.cfg.Handle({{opInfo .}}, {{quote .Route}}, server.NotImplemented({{quote .Unsupported}}))
+{{- end}}{{else}}
+	s.cfg.Handle({{opInfo .}}, {{quote .Route}}, http.HandlerFunc(s.handle{{.Name}}))
+{{- end}}
+{{- end}}
+{{- if .Document}}
+	s.cfg.ServeDocument(openAPIDocument)
+{{- end}}
+	return s.cfg.Handler()
+}
+{{- if .Document}}
+
+// openAPIDocument is the document the server was generated from, served
+// with server.WithDocument.
+//
+//go:embed openapi.json
+var openAPIDocument []byte
+{{- end}}
+
+type apiServer struct {
+	handler Handler
+{{- if .SecuritySchemes}}
+	sec SecurityHandler
+{{- end}}
+	cfg *server.Config
+}
+{{- end}}
+
+{{define "operation"}}
+// {{.RequestType}} holds the decoded and validated inputs of {{.Name}}.
+type {{.RequestType}} struct {
+{{- range .Params}}
+{{paramDoc .}}
+	{{.Field}} {{goType .Type}}
+{{- end}}
+{{- with .Body}}
+{{bodyDoc .}}
+	Body {{goType .Type}}
+{{- if gt (len .Media) 1}}
+	// ContentType is the media type the body was sent as: one of
+	// {{range $i, $m := .Media}}{{if $i}}, {{end}}{{printf "%q" $m.MediaType}}{{end}}.
+	ContentType string
+{{- end}}
+{{- end}}
+}
+
+// {{.ResponseType}} is one of the responses of {{.Name}}:
+{{- range .Responses}}
+//   - [{{.TypeName}}]
+{{- end}}
+type {{.ResponseType}} interface {
+	write{{.ResponseType}}(w http.ResponseWriter, req *http.Request, c *server.Config) error
+}
+{{range $r := .Responses}}
+{{responseDoc $ $r}}
+type {{.TypeName}} struct {
+{{- if eq .Code 0}}
+	// StatusCode is the status code to send, {{statusHint .}}.
+	StatusCode int
+{{- end}}
+{{- if .ContentTypeField}}
+	// ContentType is the media type of Body, which must match {{printf "%q" .MediaType}}.
+	ContentType string
+{{- end}}
+{{- if .Body}}
+	Body {{goType .Body}}
+{{- end}}
+{{- if eq .Kind "jsonl"}}
+	// Items are sent as JSON Lines, one per line, as they are produced.
+	// An error ends the stream; it cannot change the status any more.
+	Items {{imp "iter" "iter"}}.Seq2[{{goType .Item}}, error]
+{{- end}}
+{{- if eq .Kind "sse"}}
+	// Events are sent as server-sent events as they are produced. An
+	// error ends the stream; it cannot change the status any more.
+	Events {{imp "iter" "iter"}}.Seq2[server.Event, error]
+{{- end}}
+{{- range .Headers}}
+{{headerDoc .}}
+	{{.Field}} {{goType .Type}}
+{{- end}}
+}
+
+func (r {{.TypeName}}) write{{$.ResponseType}}(w http.ResponseWriter, req *http.Request, c *server.Config) error {
+{{writeStmts $r}}
+}
+{{end}}
+func (s *apiServer) handle{{.Name}}(w http.ResponseWriter, r *http.Request) {
+{{- if .Security}}
+{{securityStmts .}}
+{{- end}}
+{{bindStmts .}}
+	resp, err := s.handler.{{.Name}}({{if .Security}}ctx{{else}}server.RequestContext(r){{end}}, &req)
+	if err == nil && resp == nil {
+		err = {{imp "errors" "errors"}}.New("{{.Name}} returned neither a response nor an error")
+	}
+	if err == nil {
+		err = resp.write{{.ResponseType}}(w, r, s.cfg)
+	}
+	if err != nil {
+		s.cfg.HandleError(w, r, err)
+	}
+}
+{{- end}}

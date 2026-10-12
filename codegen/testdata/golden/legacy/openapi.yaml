@@ -1,0 +1,46 @@
+openapi: 3.0.3
+info:
+  title: Legacy 3.0 models
+  version: "1"
+paths: {}
+components:
+  schemas:
+    Item:
+      type: object
+      required: [sku, price]
+      properties:
+        sku:
+          type: string
+          example: AB-1
+        price:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        note:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+        supplier:
+          description: The supplier, annotated next to the reference the 3.0 way.
+          allOf:
+            - $ref: "#/components/schemas/Supplier"
+        replacement:
+          $ref: "#/components/schemas/Supplier"
+          nullable: true
+    Supplier:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
