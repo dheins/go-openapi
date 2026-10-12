@@ -2,7 +2,8 @@
 
 Features that are deliberately not implemented yet, grouped by area, with
 the milestone they are planned for (see [docs/PLAN.md](docs/PLAN.md)).
-Defects in existing behaviour are in [bugs.md](bugs.md).
+Defects in existing behaviour are in [bugs.md](bugs.md). Implemented entries
+are checked off under [Implemented](#implemented) until they are released.
 
 ## Out of v1 scope
 
@@ -51,3 +52,26 @@ Defects in existing behaviour are in [bugs.md](bugs.md).
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
+
+## Implemented
+
+Unreleased (after v0.1.0):
+
+- [x] **Polymorphism through `allOf` with a discriminator on the base
+  schema (3.0 style).** The base becomes a union of the schemas that extend
+  it (2b38b63), at any depth of the hierarchy (24eb01f).
+- [x] **`oneOf`/`anyOf` next to `properties`.** Members that list
+  properties and required ones are checked as alternatives (2b38b63);
+  members that are objects of their own become a union field decoded from
+  the same object, as do `allOf` members that are unions (865e57f).
+
+Added along the way:
+
+- [x] Sealed `oneOf` unions: exactly one variant, enforced by the compiler,
+  with a generic constructor and a type switch. (eb9d920)
+- [x] Panic recovery in generated servers, and a production guide.
+  (2b38b63)
+- [x] `oneOf`/`anyOf` next to a non-object `type` is checked by
+  `Validate`. (638bdc2)
+- [x] `goapi validate` rule `oneof-ambiguous` for `oneOf`s one value can
+  match several times. (a3f52c3)

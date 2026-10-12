@@ -3,7 +3,8 @@
 
 Defects in what is implemented: behaviour that is wrong or surprising
 today. Things that are simply not built yet are in [features.md](features.md).
-Each entry says where it lives and how to work around it.
+Each entry says where it lives and how to work around it. Fixed entries are
+checked off under [Fixed](#fixed) until they are released.
 
 ## Loader
 
@@ -81,3 +82,34 @@ Each entry says where it lives and how to work around it.
   operation allows anonymous access (`security: [{}, {apiKey: []}]`), a
   request carrying invalid credentials gets 401 instead of being treated as
   anonymous. This is deliberate but differs from some frameworks.
+
+## Fixed
+
+Unreleased (after v0.1.0):
+
+- [x] **Headers survived a failed response encoding.** Headers are now
+  sent only with a body that encoded; a failure is a clean 500. (2b38b63)
+- [x] **Binding errors ignored the document's declared 400 response.**
+  Invalid requests reach the error handler as a `*server.BindError`, which
+  can answer in the documented format. Problem details remain the default
+  (see above). (2b38b63)
+- [x] **`allOf` property conflicts kept the first definition.** The
+  constraints of every member that defines a property are checked
+  (2b38b63); members giving it disjoint types are reported by `goapi
+  validate` as `allof-conflict` (a3f52c3). Only differently typed
+  definitions still keep the first (see above).
+- [x] **A discriminated union only checked the selected variant's
+  structure when decoding.** The variant is validated while decoding, as in
+  untagged unions. (32d4323)
+
+Found and fixed along the way:
+
+- [x] **An `anyOf` value matching several object variants encoded only the
+  first**, losing the others' properties; they are merged now. (865e57f)
+- [x] **An `allOf` of non-object schemas was typed as `any`**, and keywords
+  next to a 3.1 `$ref` were ignored; they become one checked type. (638bdc2)
+- [x] **`type: string` with a `oneOf` of untyped members (`{format:
+  email}`) rejected every value**, as each member was `any`; the members
+  are checked as alternatives of the string. (638bdc2)
+- [x] **`minProperties`/`maxProperties` on `allOf` members were ignored**;
+  the strictest applies to the combined object. (a3f52c3)
