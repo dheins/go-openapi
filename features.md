@@ -54,7 +54,24 @@ shipped in.
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
+## Telemetry
+
+- Exporting logs through OpenTelemetry (OTLP logs); today logs go to slog
+  or zap and carry trace and span IDs (`goapiotel.LogHandler`). — later
+- Request and response body size metrics (`http.server.request.body.size`,
+  `http.server.response.body.size`). — later
+- Spans for the phases of a request (binding, the handler, writing the
+  response) as children of the server span. — later
+
 ## Implemented
+
+Unreleased (after v0.3.0):
+
+- [x] Zap logging for generated servers (`contrib/zaplog`), an access log
+  (`server.WithAccessLog`) and request observers (`server.WithObserver`).
+- [x] OpenTelemetry traces and metrics for generated servers
+  (`contrib/otel`), for several vendors at once through OTLP, Prometheus
+  or stdout, off unless configured.
 
 v0.2.0:
 

@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
@@ -25,6 +26,7 @@ var listPetsSortParam = server.Param{Name: "sort", Style: "form", Explode: true,
 // request, calls h.ListPets and sends the response it returns.
 func HandleListPets(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req ListPetsRequest
 		var b server.Binder
 		query := r.URL.Query()
@@ -95,6 +97,7 @@ func HandleListPets(c *server.Config, h Handler, sec SecurityHandler) http.Handl
 			err = errors.New("ListPets returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeListPetsResponse(w, r, c)
 		}
 		if err != nil {

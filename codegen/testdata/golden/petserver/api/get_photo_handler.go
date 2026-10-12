@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/runtime/server"
@@ -17,6 +18,7 @@ var getPhotoPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: f
 // request, calls h.GetPhoto and sends the response it returns.
 func HandleGetPhoto(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req GetPhotoRequest
 		var b server.Binder
 		if vals, err := getPhotoPetIDParam.PathValues(r.PathValue("p0")); err != nil {
@@ -37,6 +39,7 @@ func HandleGetPhoto(c *server.Config, h Handler, sec SecurityHandler) http.Handl
 			err = errors.New("GetPhoto returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeGetPhotoResponse(w, r, c)
 		}
 		if err != nil {

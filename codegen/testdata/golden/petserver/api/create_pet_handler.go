@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -16,6 +17,7 @@ import (
 // request, calls h.CreatePet and sends the response it returns.
 func HandleCreatePet(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req CreatePetRequest
 		var b server.Binder
 		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"application/json"}, true); ok {
@@ -39,6 +41,7 @@ func HandleCreatePet(c *server.Config, h Handler, sec SecurityHandler) http.Hand
 			err = errors.New("CreatePet returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeCreatePetResponse(w, r, c)
 		}
 		if err != nil {

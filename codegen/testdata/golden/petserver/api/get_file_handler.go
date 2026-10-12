@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"regexp"
 
@@ -24,6 +25,7 @@ var getFileExtParam = server.Param{Name: "ext", Style: "simple", Explode: false,
 // request, calls h.GetFile and sends the response it returns.
 func HandleGetFile(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req GetFileRequest
 		var b server.Binder
 		seg0 := getFileSegment0.FindStringSubmatch(r.PathValue("p0"))
@@ -61,6 +63,7 @@ func HandleGetFile(c *server.Config, h Handler, sec SecurityHandler) http.Handle
 			err = errors.New("GetFile returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeGetFileResponse(w, r, c)
 		}
 		if err != nil {

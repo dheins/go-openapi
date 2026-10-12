@@ -43,6 +43,9 @@ type Config struct {
 	ValidateResponses bool
 	// Middleware wraps the handler of every operation, the first outermost.
 	Middleware []Middleware
+	// Observers are told about every request, outside the middleware and
+	// panic recovery; see Observer.
+	Observers []Observer
 	// DocumentPath, if set, serves the OpenAPI document there, below the
 	// base path.
 	DocumentPath string
@@ -128,12 +131,17 @@ func NewConfig(opts ...Option) *Config {
 }
 
 // Handle routes op, at route (a ServeMux path pattern) below the base
-// path, to h wrapped in the middleware and in panic recovery.
+// path, to h wrapped in the middleware, in panic recovery and, if there
+// are any, in the observers.
 func (c *Config) Handle(op Operation, route string, h http.Handler) {
 	for i := len(c.Middleware) - 1; i >= 0; i-- {
 		h = c.Middleware[i](op, h)
 	}
-	c.Mux.Handle(op.Method+" "+c.BasePath+route, c.recoverPanics(op, h))
+	h = c.recoverPanics(op, h)
+	if len(c.Observers) > 0 {
+		h = c.observe(op, h)
+	}
+	c.Mux.Handle(op.Method+" "+c.BasePath+route, withOperation(op, h))
 }
 
 // recoverPanics turns a panic in an operation's handler or middleware
@@ -148,14 +156,17 @@ func (c *Config) recoverPanics(op Operation, next http.Handler) http.Handler {
 			if v == nil {
 				return
 			}
+			recordPanic(r.Context(), v)
 			if v == http.ErrAbortHandler {
 				panic(v)
 			}
-			c.Logger.ErrorContext(r.Context(), "panic serving request",
-				"operation", op.ID, "method", r.Method, "path", r.URL.Path,
+			c.Log(r.Context(), slog.LevelError, "panic serving request",
+				"method", r.Method, "path", r.URL.Path,
 				"panic", v, "stack", string(debug.Stack()))
 			if !tw.wrote {
-				c.HandleError(tw, r, problem.New(http.StatusInternalServerError, ""))
+				// The panic is logged above, with its stack; HandleError
+				// would log it again as a failed request.
+				c.ErrorHandler(tw, r, problem.New(http.StatusInternalServerError, ""))
 			}
 		}()
 		next.ServeHTTP(tw, r)
@@ -163,21 +174,33 @@ func (c *Config) recoverPanics(op Operation, next http.Handler) http.Handler {
 }
 
 // trackingWriter records whether a response has started, so recovery
-// does not write a second status line. It passes flushing on, which
-// streaming responses need.
+// does not write a second status line, and the status and body size the
+// observers report. It passes flushing on, which streaming responses
+// need.
 type trackingWriter struct {
 	http.ResponseWriter
-	wrote bool
+	wrote  bool
+	status int
+	bytes  int64
 }
 
 func (w *trackingWriter) WriteHeader(status int) {
+	// Informational responses (1xx) precede the final status.
+	if w.status == 0 && status >= 200 {
+		w.status = status
+	}
 	w.wrote = true
 	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w *trackingWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
 	w.wrote = true
-	return w.ResponseWriter.Write(b)
+	n, err := w.ResponseWriter.Write(b)
+	w.bytes += int64(n)
+	return n, err
 }
 
 func (w *trackingWriter) Flush() {
@@ -261,21 +284,24 @@ func (r *recorder) WriteHeader(status int) {
 	}
 }
 
-// HandleError writes the response for err.
+// HandleError logs err (see Config.Log for the levels) and writes the
+// response for it, which the observers then see in Result.Err.
 func (c *Config) HandleError(w http.ResponseWriter, r *http.Request, err error) {
+	recordError(r.Context(), err)
+	c.logError(r, err)
 	c.ErrorHandler(w, r, err)
 }
 
 // defaultErrorHandler sends a *problem.Problem as it is. Any other error
-// is logged and answered with a bare 500, so internal details do not leak.
+// (logged by HandleError) is answered with a bare 500, so internal
+// details do not leak.
 func (c *Config) defaultErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	var p *problem.Problem
 	if !errors.As(err, &p) {
-		c.Logger.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "error", err)
 		p = problem.New(http.StatusInternalServerError, "")
 	}
 	if werr := problem.Write(w, p); werr != nil {
-		c.Logger.ErrorContext(r.Context(), "writing error response", "error", werr)
+		c.Log(r.Context(), slog.LevelError, "writing error response", "error", werr)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }

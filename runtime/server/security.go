@@ -66,15 +66,17 @@ func Authorize(ctx context.Context, w http.ResponseWriter, requirements []Requir
 	}
 	var p *problem.Problem
 	if errors.As(rejected, &p) {
-		return nil, p
+		return nil, &AuthError{Problem: p}
 	}
 	for _, c := range challenges {
 		w.Header().Add("WWW-Authenticate", c)
 	}
 	if rejected != nil {
-		return nil, problem.New(http.StatusUnauthorized, "the credentials are not valid")
+		// The reason stays in the log; the client only learns that the
+		// credentials were not accepted.
+		return nil, &AuthError{Problem: problem.New(http.StatusUnauthorized, "the credentials are not valid"), Err: rejected}
 	}
-	return nil, problem.New(http.StatusUnauthorized, "authentication is required")
+	return nil, &AuthError{Problem: problem.New(http.StatusUnauthorized, "authentication is required")}
 }
 
 // satisfy runs every check of req, passing the context along.

@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -16,6 +17,7 @@ import (
 // request, calls h.SearchPets and sends the response it returns.
 func HandleSearchPets(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req SearchPetsRequest
 		var b server.Binder
 		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"application/json"}, false); ok {
@@ -41,6 +43,7 @@ func HandleSearchPets(c *server.Config, h Handler, sec SecurityHandler) http.Han
 			err = errors.New("SearchPets returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeSearchPetsResponse(w, r, c)
 		}
 		if err != nil {

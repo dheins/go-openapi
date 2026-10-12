@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
@@ -33,6 +34,7 @@ var getReportsPrefsParam = server.Param{Name: "prefs", Style: "form", Explode: t
 // request, calls h.GetReports and sends the response it returns.
 func HandleGetReports(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req GetReportsRequest
 		var b server.Binder
 		query := r.URL.Query()
@@ -121,6 +123,7 @@ func HandleGetReports(c *server.Config, h Handler, sec SecurityHandler) http.Han
 			err = errors.New("GetReports returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeGetReportsResponse(w, r, c)
 		}
 		if err != nil {

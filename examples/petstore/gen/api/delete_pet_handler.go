@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/runtime/server"
@@ -18,6 +19,7 @@ var deletePetPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: 
 // request, calls h.DeletePet and sends the response it returns.
 func HandleDeletePet(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		ctx, err := server.Authorize(server.RequestContext(r), w, []server.Requirement{
 			{
 				server.APIKeyCheck(r, "header", "X-API-Key", func(ctx context.Context, key string) (context.Context, error) {
@@ -49,6 +51,7 @@ func HandleDeletePet(c *server.Config, h Handler, sec SecurityHandler) http.Hand
 			err = errors.New("DeletePet returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeDeletePetResponse(w, r, c)
 		}
 		if err != nil {

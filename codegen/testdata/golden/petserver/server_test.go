@@ -753,3 +753,31 @@ func TestSecurity(t *testing.T) {
 		})
 	}
 }
+
+func TestHandlerLogs(t *testing.T) {
+	// Generated handlers log each request at Debug, and the runtime logs
+	// how it ended, all tagged with the operation.
+	var out strings.Builder
+	h := NewServer(newStore(), auth{}, server.WithLogger(slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+	do(t, h, "GET", "/pets/1", "", "")
+	do(t, h, "GET", "/pets/abc", "", "")
+
+	type entry struct{ Level, Msg, Operation, Response string }
+	var got []entry
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var e entry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("%v: %s", err, line)
+		}
+		got = append(got, e)
+	}
+	want := []entry{
+		{"DEBUG", "handling request", "getPet", ""},
+		{"DEBUG", "sending response", "getPet", "GetPet200JSONResponse"},
+		{"DEBUG", "handling request", "getPet", ""},
+		{"INFO", "invalid request", "getPet", ""},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("log entries:\n%+v\nwant\n%+v", got, want)
+	}
+}

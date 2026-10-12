@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
@@ -21,6 +22,7 @@ var uploadPhotoMultipartProperties = map[string]server.Property{"caption": {Type
 // request, calls h.UploadPhoto and sends the response it returns.
 func HandleUploadPhoto(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req UploadPhotoRequest
 		var b server.Binder
 		if vals, err := uploadPhotoPetIDParam.PathValues(r.PathValue("p0")); err != nil {
@@ -54,6 +56,7 @@ func HandleUploadPhoto(c *server.Config, h Handler, sec SecurityHandler) http.Ha
 			err = errors.New("UploadPhoto returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeUploadPhotoResponse(w, r, c)
 		}
 		if err != nil {

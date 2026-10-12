@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -191,12 +192,12 @@ func WriteJSONLines[T any](c *Config, w http.ResponseWriter, r *http.Request, st
 	}
 	for item, err := range items {
 		if err != nil {
-			c.Logger.ErrorContext(r.Context(), "streaming response failed", "path", r.URL.Path, "error", err)
+			c.Log(r.Context(), slog.LevelError, "streaming response failed", "path", r.URL.Path, "error", err)
 			break
 		}
 		data, err := oapi.EncodeResponse(item)
 		if err != nil {
-			c.Logger.ErrorContext(r.Context(), "encoding streamed item", "path", r.URL.Path, "error", err)
+			c.Log(r.Context(), slog.LevelError, "encoding streamed item", "path", r.URL.Path, "error", err)
 			break
 		}
 		bw.Write(data)
@@ -252,7 +253,7 @@ func WriteEvents(c *Config, w http.ResponseWriter, r *http.Request, status int, 
 	}
 	for ev, err := range events {
 		if err != nil {
-			c.Logger.ErrorContext(r.Context(), "event stream failed", "path", r.URL.Path, "error", err)
+			c.Log(r.Context(), slog.LevelError, "event stream failed", "path", r.URL.Path, "error", err)
 			break
 		}
 		if ev.ID != "" {

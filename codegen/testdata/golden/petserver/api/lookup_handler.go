@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
@@ -19,6 +20,7 @@ var lookupCriteriaProperties = map[string]server.Property{"role": {Type: "string
 // request, calls h.Lookup and sends the response it returns.
 func HandleLookup(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req LookupRequest
 		var b server.Binder
 		query := r.URL.Query()
@@ -45,6 +47,7 @@ func HandleLookup(c *server.Config, h Handler, sec SecurityHandler) http.Handler
 			err = errors.New("Lookup returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeLookupResponse(w, r, c)
 		}
 		if err != nil {

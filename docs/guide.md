@@ -16,6 +16,7 @@ complete server.
 - [Security](#security)
 - [Server options](#server-options)
 - [Running in production](#running-in-production)
+- [Logging and telemetry](#logging-and-telemetry)
 - [Using the libraries directly](#using-the-libraries-directly)
 
 ## Install
@@ -435,6 +436,8 @@ credentials that are present and wrong are still rejected.
 | `server.WithMaxBodyBytes(n)` | request body limit (default 10 MiB) |
 | `server.WithErrorHandler(f)` | write errors yourself |
 | `server.WithLogger(l)` | where unexpected errors are logged (default `slog.Default()`) |
+| `server.WithAccessLog(level)` | log every request: operation, route, status, duration, error |
+| `server.WithObserver(o...)` | be told when each request starts and ends, with its status, error and panic |
 | `server.WithMux(m)` | route with something other than a new `http.ServeMux` |
 
 ## Running in production
@@ -495,8 +498,151 @@ server.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) 
 })
 ```
 
-Cross-cutting concerns (request IDs, CORS, metrics, rate limits) go in
+Cross-cutting concerns (request IDs, CORS, rate limits) go in
 `server.WithMiddleware`, which sees the operation each request is for.
+Logs, traces and metrics are covered next.
+
+## Logging and telemetry
+
+Generated code has no logging or telemetry dependencies: it takes options.
+The runtime logs through `log/slog`, and `server.WithAccessLog` adds one
+record per request. Zap and OpenTelemetry support live in modules of their
+own, so a project that does not use them does not download them.
+
+### What a server logs
+
+Every entry carries the `operation` (its operationId) of the request it
+is about, at a level that says whose problem it is:
+
+| Level | Message | When |
+|---|---|---|
+| Debug | `handling request` | a generated handler starts on a request |
+| Debug | `sending response` | it sends the response your method returned (`response`: its type, such as `GetPet404Response`) |
+| Debug | `answering with a problem` | your method returned a 4xx `*problem.Problem` (`status`, `detail`) |
+| Info | `invalid request` | parameters or body are invalid (`status`, `invalid`: where, such as `query limit`; at Debug also `problems` with the details) |
+| Info | `request not authorized` | authentication failed (`status`, and `reason` when the `SecurityHandler` gave one) |
+| Error | `request failed` | your method returned another error, or a response failed to encode (`error`) |
+| Error | `panic serving request` | a handler or middleware panicked (`panic`, `stack`) |
+| Error | `streaming response failed`, `event stream failed` | a stream ended with an error |
+| Info (configurable) | `request` | every request, with `server.WithAccessLog` |
+
+Request bodies, headers and credentials are never logged, and the values
+of an invalid request only at Debug: the problem details quote them.
+
+In your own code, `cfg.Log(ctx, level, msg, args...)` logs the same way,
+adding the operation from the context; `server.OperationFromContext(ctx)`
+returns it.
+
+### Zap
+
+```sh
+go get github.com/dheins/go-openapi/contrib/zaplog
+```
+
+```go
+zl, _ := zap.NewProduction()
+h := gen.NewServer(store, auth,
+	zaplog.WithZap(zl),                   // runtime errors and panics as zap entries
+	server.WithAccessLog(slog.LevelInfo), // and one entry per request
+)
+```
+
+Any `*zap.Logger` works; build it from a `zap.Config` to choose the level,
+encoding, outputs and fields. Two settings matter for a server:
+
+- **Sampling** (on in `zap.NewProduction`) keeps a few entries per message
+  and second. Every access log entry has the message `request`, so turn
+  sampling off (`Sampling: nil`) when the access log is on.
+- **Stack traces**: zap's slog handler adds one to every Error entry, so to
+  each 5xx access entry. Pass `zapslog.AddStacktraceAt(level)` to
+  `zaplog.WithZap` to raise the threshold; the runtime logs a panic's
+  stack itself.
+
+The example's `zapConfig` in `examples/petstore/observability.go` shows a
+complete configuration.
+
+An access entry:
+
+```json
+{"level":"info","msg":"request","operation":"getPet","method":"GET","route":"/pets/{petId}",
+ "path":"/v1/pets/42","status":404,"duration":0.00041,"bytes":63,"error":"404 Not Found: no pet with id 42",
+ "trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"c6fe442e3b6f1c33"}
+```
+
+### OpenTelemetry
+
+```sh
+go get github.com/dheins/go-openapi/contrib/otel
+```
+
+`goapiotel.Setup` builds the providers, `ServerOption` instruments the
+server, and `Shutdown` flushes on exit:
+
+```go
+tel, err := goapiotel.Setup(ctx, goapiotel.Config{ServiceName: "petstore"})
+if err != nil { ... }
+defer tel.Shutdown(context.Background())
+
+logger := slog.New(goapiotel.LogHandler(zaplog.Logger(zl).Handler())) // trace_id/span_id in logs
+h := gen.NewServer(store, auth, server.WithLogger(logger), tel.ServerOption())
+```
+
+Every request gets a server span named after its route (`GET
+/pets/{petId}`), continuing the trace the caller sent in `traceparent`,
+with the HTTP semantic convention attributes and `goapi.operation.id`;
+5xx responses and panics mark it as an error. The metrics
+`http.server.request.duration` and `http.server.active_requests` are
+recorded per method, route and status. To use providers you set up
+yourself, pass `goapiotel.WithTelemetry(tp, mp)` instead.
+
+**Choosing vendors.** `Config.Traces` and `Config.Metrics` list exporters,
+any number of each, so data can go to several vendors at once. Left empty,
+the standard variables decide:
+
+```sh
+OTEL_TRACES_EXPORTER=otlp,console   # comma-separated: otlp, console, none
+OTEL_METRICS_EXPORTER=prometheus    # otlp, console, prometheus, none
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com
+OTEL_EXPORTER_OTLP_HEADERS=api-key=...
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf   # or grpc
+OTEL_SERVICE_NAME=petstore
+```
+
+| Vendor | Exporter |
+|---|---|
+| Datadog | `otlp` to the Datadog Agent's OTLP receiver (`http://localhost:4318`) |
+| New Relic | `otlp`, endpoint `https://otlp.nr-data.net`, header `api-key` |
+| Honeycomb | `otlp`, endpoint `https://api.honeycomb.io`, header `x-honeycomb-team` |
+| Grafana Cloud | `otlp`, the stack's OTLP endpoint, header `Authorization: Basic ...` |
+| Jaeger, Tempo, an OpenTelemetry Collector | `otlp` to its endpoint (`http://localhost:4318`, or 4317 with `grpc`) |
+| Elastic, Dynatrace, Splunk | `otlp` with the endpoint and token header they document |
+| Prometheus | metrics exporter `prometheus`; serve `tel.Prometheus` (for example on `:9464/metrics`) |
+| Debugging | `stdout` (or `console`): spans and metrics as JSON |
+
+In code:
+
+```go
+goapiotel.Config{
+	Traces: []goapiotel.Exporter{
+		{Kind: "otlp", Endpoint: "https://api.honeycomb.io", Headers: map[string]string{"x-honeycomb-team": key}},
+		{Kind: "otlp", Endpoint: "http://localhost:4318"}, // and a local collector
+	},
+	Metrics:     []goapiotel.Exporter{{Kind: "prometheus"}},
+	SampleRatio: 0.1, // sample a tenth of new traces
+}
+```
+
+**Turning it off.** Telemetry is opt-in: with no exporters configured
+anywhere, or `none`, or `Config.Disabled`, or `OTEL_SDK_DISABLED=true`,
+`Setup` returns no-op providers and `ServerOption` adds nothing, so there
+is no overhead. When enabled, `Setup` also installs the providers and the
+W3C trace context propagator as the OpenTelemetry globals, so other
+instrumented libraries report to the same place.
+
+The petstore example wires all of this, with an explicit `zap.Config` in
+`examples/petstore/observability.go` (level, encoding, time and duration
+formats, fields, sampling) and the flags `-log-level`, `-log-encoding`,
+`-traces`, `-metrics` and `-prometheus-addr`.
 
 ## Using the libraries directly
 

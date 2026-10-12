@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
@@ -19,6 +20,7 @@ var submitFormFormProperties = map[string]server.Property{"role": {Type: "string
 // request, calls h.SubmitForm and sends the response it returns.
 func HandleSubmitForm(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req SubmitFormRequest
 		var b server.Binder
 		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"application/x-www-form-urlencoded", "application/json"}, true); ok {
@@ -54,6 +56,7 @@ func HandleSubmitForm(c *server.Config, h Handler, sec SecurityHandler) http.Han
 			err = errors.New("SubmitForm returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeSubmitFormResponse(w, r, c)
 		}
 		if err != nil {

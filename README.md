@@ -94,11 +94,16 @@ func (a *auth) BearerAuth(ctx context.Context, token string, scopes []string) (c
 http.ListenAndServe(":8080", gen.NewServer(&petStore{}, &auth{}))
 ```
 
+Logging and telemetry are options: `server.WithAccessLog`, zap through
+[`contrib/zaplog`](contrib/zaplog), and OpenTelemetry traces and metrics,
+for any OTLP vendor, Prometheus or stdout, through
+[`contrib/otel`](contrib/otel). Telemetry is off unless configured.
+
 ## Documentation
 
 - [Guide](docs/guide.md): validation, models, servers, security, options
 - [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-enum-varnames`, `x-enum-descriptions`
-- [Example](examples/petstore): a complete server (`go run ./examples/petstore -key secret`)
+- [Example](examples/petstore): a complete server with zap logging and OpenTelemetry (`cd examples/petstore && go run . -key secret`)
 - [Benchmarks](docs/benchmarks.md)
 - [Changelog](CHANGELOG.md), [known bugs](bugs.md), [planned work](features.md)
 

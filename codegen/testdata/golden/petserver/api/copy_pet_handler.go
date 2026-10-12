@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/runtime/server"
@@ -19,6 +20,7 @@ var copyPetDestinationParam = server.Param{Name: "Destination", Style: "simple",
 // request, calls h.CopyPet and sends the response it returns.
 func HandleCopyPet(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req CopyPetRequest
 		var b server.Binder
 		if vals, err := copyPetPetIDParam.PathValues(r.PathValue("p0")); err != nil {
@@ -50,6 +52,7 @@ func HandleCopyPet(c *server.Config, h Handler, sec SecurityHandler) http.Handle
 			err = errors.New("CopyPet returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeCopyPetResponse(w, r, c)
 		}
 		if err != nil {

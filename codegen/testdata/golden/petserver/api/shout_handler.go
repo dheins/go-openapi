@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -16,6 +17,7 @@ import (
 // request, calls h.Shout and sends the response it returns.
 func HandleShout(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req ShoutRequest
 		var b server.Binder
 		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"text/plain"}, false); ok {
@@ -40,6 +42,7 @@ func HandleShout(c *server.Config, h Handler, sec SecurityHandler) http.Handler 
 			err = errors.New("Shout returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeShoutResponse(w, r, c)
 		}
 		if err != nil {

@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/runtime/server"
@@ -16,6 +17,7 @@ import (
 // request, calls h.Admin and sends the response it returns.
 func HandleAdmin(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		ctx, err := server.Authorize(server.RequestContext(r), w, []server.Requirement{
 			{
 				server.BearerCheck(r, func(ctx context.Context, token string) (context.Context, error) {
@@ -43,6 +45,7 @@ func HandleAdmin(c *server.Config, h Handler, sec SecurityHandler) http.Handler 
 			err = errors.New("Admin returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeAdminResponse(w, r, c)
 		}
 		if err != nil {

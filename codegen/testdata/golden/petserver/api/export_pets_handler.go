@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/runtime/server"
@@ -15,6 +16,7 @@ import (
 // request, calls h.ExportPets and sends the response it returns.
 func HandleExportPets(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req ExportPetsRequest
 		var b server.Binder
 		if b.Failed() {
@@ -26,6 +28,7 @@ func HandleExportPets(c *server.Config, h Handler, sec SecurityHandler) http.Han
 			err = errors.New("ExportPets returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeExportPetsResponse(w, r, c)
 		}
 		if err != nil {

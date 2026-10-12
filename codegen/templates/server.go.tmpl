@@ -143,6 +143,7 @@ func (r {{.TypeName}}) write{{$.ResponseType}}(w http.ResponseWriter, req *http.
 // request, calls h.{{.Name}} and sends the response it returns.
 func Handle{{.Name}}(c *server.Config, h Handler{{if .Secured}}, sec SecurityHandler{{end}}) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), {{imp "log/slog" "slog"}}.LevelDebug, "handling request")
 {{- if .Security}}
 {{securityStmts .Operation}}
 {{- end}}
@@ -152,6 +153,7 @@ func Handle{{.Name}}(c *server.Config, h Handler{{if .Secured}}, sec SecurityHan
 			err = {{imp "errors" "errors"}}.New("{{.Name}} returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.write{{.ResponseType}}(w, r, c)
 		}
 		if err != nil {

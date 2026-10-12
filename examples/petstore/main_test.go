@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -12,7 +13,16 @@ import (
 	"testing"
 	"time"
 
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
+	goapiotel "github.com/dheins/go-openapi/contrib/otel"
+	"github.com/dheins/go-openapi/contrib/zaplog"
 	"github.com/dheins/go-openapi/examples/petstore/gen/model"
+	"github.com/dheins/go-openapi/runtime/server"
 )
 
 func newTestServer(t *testing.T) *httptest.Server {
@@ -126,5 +136,73 @@ func TestHealth(t *testing.T) {
 	}
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
 		t.Errorf("content type = %q", ct)
+	}
+}
+
+func TestTelemetry(t *testing.T) {
+	spans := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
+	srv := httptest.NewServer(newHandler(newStore(), "secret", slog.New(slog.DiscardHandler),
+		goapiotel.WithTelemetry(tp, metricnoop.NewMeterProvider())))
+	t.Cleanup(srv.Close)
+
+	send(t, srv, "POST", "/v1/pets", "secret", `{"name":"Rex","status":"available"}`)
+	send(t, srv, "GET", "/v1/pets", "", "")
+	send(t, srv, "GET", "/v1/pets/99", "", "")
+
+	var names []string
+	for _, s := range spans.Ended() {
+		names = append(names, s.Name())
+	}
+	if got, want := strings.Join(names, ", "), "POST /pets, GET /pets, GET /pets/{petId}"; got != want {
+		t.Errorf("spans = %s, want %s", got, want)
+	}
+}
+
+func TestZapConfig(t *testing.T) {
+	cfg, err := zapConfig("debug", "console")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Level.Level() != zapcore.DebugLevel || cfg.Encoding != "console" || cfg.Sampling != nil || cfg.InitialFields["service"] != "petstore" {
+		t.Errorf("config = %+v", cfg)
+	}
+	if _, err := cfg.Build(); err != nil {
+		t.Errorf("build: %v", err)
+	}
+	for _, bad := range [][2]string{{"loud", "json"}, {"info", "xml"}} {
+		if _, err := zapConfig(bad[0], bad[1]); err == nil {
+			t.Errorf("zapConfig(%q, %q) accepted", bad[0], bad[1])
+		}
+	}
+}
+
+func TestZapAccessLog(t *testing.T) {
+	// The configured encoder, writing to a buffer instead of stderr.
+	cfg, err := zapConfig("info", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	core := zapcore.NewCore(zapcore.NewJSONEncoder(cfg.EncoderConfig), zapcore.AddSync(&out), cfg.Level)
+	logger := zaplog.Logger(zap.New(core).With(zap.String("service", "petstore")))
+	srv := httptest.NewServer(newHandler(newStore(), "secret", logger, server.WithAccessLog(slog.LevelInfo)))
+	t.Cleanup(srv.Close)
+	send(t, srv, "GET", "/v1/pets/42", "", "")
+
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &entry); err != nil {
+		t.Fatalf("%v: %s", err, out.String())
+	}
+	for k, want := range map[string]any{"level": "info", "msg": "request", "service": "petstore", "operation": "getPet", "status": 404.0} {
+		if entry[k] != want {
+			t.Errorf("%s = %v, want %v", k, entry[k], want)
+		}
+	}
+	if _, ok := entry["time"].(string); !ok {
+		t.Errorf("time is not an ISO 8601 string: %v", entry["time"])
+	}
+	if d, ok := entry["duration"].(string); !ok || !strings.HasSuffix(d, "s") {
+		t.Errorf("duration is not a string duration: %v", entry["duration"])
 	}
 }

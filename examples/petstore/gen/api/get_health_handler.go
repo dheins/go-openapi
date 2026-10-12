@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/runtime/server"
@@ -15,6 +16,7 @@ import (
 // request, calls h.GetHealth and sends the response it returns.
 func HandleGetHealth(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req GetHealthRequest
 		var b server.Binder
 		if b.Failed() {
@@ -26,6 +28,7 @@ func HandleGetHealth(c *server.Config, h Handler, sec SecurityHandler) http.Hand
 			err = errors.New("GetHealth returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeGetHealthResponse(w, r, c)
 		}
 		if err != nil {

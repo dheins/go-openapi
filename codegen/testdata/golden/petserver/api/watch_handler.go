@@ -4,6 +4,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/dheins/go-openapi/runtime/server"
@@ -15,6 +16,7 @@ import (
 // request, calls h.Watch and sends the response it returns.
 func HandleWatch(c *server.Config, h Handler, sec SecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req WatchRequest
 		var b server.Binder
 		if b.Failed() {
@@ -26,6 +28,7 @@ func HandleWatch(c *server.Config, h Handler, sec SecurityHandler) http.Handler 
 			err = errors.New("Watch returned neither a response nor an error")
 		}
 		if err == nil {
+			c.LogResponse(r.Context(), resp)
 			err = resp.writeWatchResponse(w, r, c)
 		}
 		if err != nil {
