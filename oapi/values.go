@@ -50,11 +50,11 @@ func (o Optional[T]) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON is only called when the property is present, so it marks
-// the value as set. Whether null is acceptable is decided by the
-// enclosing object's decoder.
+// the value as set. Null is accepted only if T can hold it (Nullable, any),
+// as when generated code decodes the property; otherwise it would leave a
+// set zero value that may not encode to valid JSON for T.
 func (o *Optional[T]) UnmarshalJSON(data []byte) error {
-	o.Set = true
-	return json.Unmarshal(data, &o.Value)
+	return o.decodeInto(data, AnyDirection)
 }
 
 // Nullable holds a value that may be null. As with sql.NullString, the

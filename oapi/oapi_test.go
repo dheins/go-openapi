@@ -272,6 +272,23 @@ func TestObjectEncoderInline(t *testing.T) {
 	}
 }
 
+func TestOptionalNull(t *testing.T) {
+	// With plain encoding/json, null is accepted only where the value can
+	// hold it, as in generated decoders; it used to leave a set zero Date
+	// that encoded as "0000-00-00".
+	var v struct {
+		D Optional[Date]           `json:"d"`
+		N Optional[Nullable[Date]] `json:"n"`
+		A Optional[any]            `json:"a"`
+	}
+	if err := json.Unmarshal([]byte(`{"d": null}`), &v); err == nil || !strings.Contains(err.Error(), "must not be null") {
+		t.Errorf("null into Optional[Date]: %v", err)
+	}
+	if err := json.Unmarshal([]byte(`{"n": null, "a": null}`), &v); err != nil || !v.N.Set || v.N.Value.Valid || !v.A.Set {
+		t.Errorf("null into nullable values = %+v, %v", v, err)
+	}
+}
+
 func TestEncodeFastPaths(t *testing.T) {
 	for _, v := range []any{"plain", `q"uote`, "tab\t", "<html>&", "ünïcode", "\u2028", "", true, int64(-9), int32(7), 42, 1.5} {
 		want, err := json.Marshal(v)
