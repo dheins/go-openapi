@@ -438,8 +438,13 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 		}
 		fmt.Fprintf(&b, ", Properties: %s", stringSlice(names))
 	}
-	if p.AllowEmptyValue {
+	switch {
+	case p.AllowEmptyValue && (p.Array || (!p.Object && stringLike(p.Elem))):
 		b.WriteString(", AllowEmptyValue: true")
+	case p.AllowEmptyValue:
+		// An empty string is no number, boolean or object: the empty
+		// value means the parameter is not given.
+		b.WriteString(", EmptyIsAbsent: true")
 	}
 	b.WriteString("}")
 	return f.declareVar(lowerFirst(o.Name)+p.Field+"Param", b.String())

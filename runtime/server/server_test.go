@@ -84,6 +84,31 @@ func TestQueryStyles(t *testing.T) {
 	}
 }
 
+func TestEmptyQueryValues(t *testing.T) {
+	q, _ := url.ParseQuery("e=")
+	tests := []struct {
+		p       Param
+		want    Values
+		present bool
+		err     bool
+	}{
+		// An allowed empty value is the empty string, or no items.
+		{Param{Name: "e", Style: "form", AllowEmptyValue: true}, Values{Items: []string{""}}, true, false},
+		{Param{Name: "e", Style: "form", Shape: Array, AllowEmptyValue: true}, Values{}, true, false},
+		{Param{Name: "e", Style: "pipeDelimited", Shape: Array, AllowEmptyValue: true}, Values{}, true, false},
+		// For a number or boolean it means the parameter is not given.
+		{Param{Name: "e", Style: "form", EmptyIsAbsent: true}, Values{}, false, false},
+		// Otherwise it is an error.
+		{Param{Name: "e", Style: "form"}, Values{}, true, true},
+	}
+	for _, tt := range tests {
+		got, ok, err := tt.p.QueryValues(q)
+		if ok != tt.present || (err != nil) != tt.err || !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%+v = %+v, %v, %v", tt.p, got, ok, err)
+		}
+	}
+}
+
 func TestHeaderAndCookieStyles(t *testing.T) {
 	h := http.Header{}
 	h.Add("X-Ids", "1, 2")

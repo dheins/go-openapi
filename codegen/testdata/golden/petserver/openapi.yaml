@@ -204,6 +204,11 @@ paths:
           allowEmptyValue: true
           schema:
             type: string
+        - name: limit
+          in: query
+          allowEmptyValue: true
+          schema:
+            type: integer
         - name: X-Meta
           in: header
           content:

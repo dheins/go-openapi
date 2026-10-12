@@ -32,9 +32,12 @@ type Param struct {
 	// they are not prefixed with the parameter name (query objects in the
 	// exploded form style).
 	Properties []string
-	// AllowEmptyValue accepts an empty query value (?q=), which then
-	// counts as absent. Otherwise an empty value is an error.
+	// AllowEmptyValue accepts an empty query value (?q=) as the empty
+	// string, or for an array as no items. EmptyIsAbsent accepts it as if
+	// the parameter were absent, for types an empty string is no value of
+	// (numbers, booleans, objects). Otherwise an empty value is an error.
 	AllowEmptyValue bool
+	EmptyIsAbsent   bool
 }
 
 // Values is a parsed parameter value: Items for a scalar (one item) or an
@@ -160,7 +163,12 @@ func (p Param) QueryValues(q url.Values) (Values, bool, error) {
 		return Values{}, false, nil
 	}
 	if len(vals) == 1 && vals[0] == "" {
-		if p.AllowEmptyValue {
+		switch {
+		case p.AllowEmptyValue && p.Shape == Array:
+			return Values{}, true, nil
+		case p.AllowEmptyValue:
+			return Values{Items: []string{""}}, true, nil
+		case p.EmptyIsAbsent:
 			return Values{}, false, nil
 		}
 		return Values{}, true, fmt.Errorf("must not be empty")

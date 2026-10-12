@@ -483,7 +483,7 @@ func TestPartialPathSegment(t *testing.T) {
 
 func TestParameterStyles(t *testing.T) {
 	s, h := newTestServer()
-	req := httptest.NewRequest("GET", "/v1/reports/;ids=1;ids=2?filter[role]=admin&filter[age]=3&filter[tags]=a&filter[tags]=b&fields=x|y&q=", nil)
+	req := httptest.NewRequest("GET", "/v1/reports/;ids=1;ids=2?filter[role]=admin&filter[age]=3&filter[tags]=a&filter[tags]=b&fields=x|y&q=&limit=", nil)
 	req.Header.Set("X-Meta", `{"role": "meta", "tags": ["t"]}`)
 	req.Header.Set("Cookie", "theme=dark; compact=true")
 	rec := httptest.NewRecorder()
@@ -498,8 +498,11 @@ func TestParameterStyles(t *testing.T) {
 	if f := got.Filter.Value; f.Role != "admin" || f.Age.Value != 3 || !slices.Equal(f.Tags.Value, []string{"a", "b"}) {
 		t.Errorf("deepObject filter = %+v", f)
 	}
-	if !slices.Equal(got.Fields.Value, []string{"x", "y"}) || got.Q.Set {
-		t.Errorf("fields = %v, q = %+v (an allowed empty value counts as absent)", got.Fields, got.Q)
+	if !slices.Equal(got.Fields.Value, []string{"x", "y"}) || !got.Q.Set || got.Q.Value != "" {
+		t.Errorf("fields = %v, q = %+v (an allowed empty value is the empty string)", got.Fields, got.Q)
+	}
+	if got.Limit.Set {
+		t.Errorf("limit = %+v (an allowed empty integer counts as absent)", got.Limit)
 	}
 	if got.XMeta.Value.Role != "meta" || got.XMeta.Value.Tags.Value[0] != "t" {
 		t.Errorf("JSON header = %+v", got.XMeta)

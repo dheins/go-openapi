@@ -20,6 +20,8 @@ var getReportsFieldsParam = server.Param{Name: "fields", Style: "pipeDelimited",
 
 var getReportsQParam = server.Param{Name: "q", Style: "form", Explode: true, Shape: server.Scalar, AllowEmptyValue: true}
 
+var getReportsLimitParam = server.Param{Name: "limit", Style: "form", Explode: true, Shape: server.Scalar, EmptyIsAbsent: true}
+
 var getReportsPrefsProperties = map[string]server.Property{"theme": {Type: "string", Array: false}, "compact": {Type: "boolean", Array: false}}
 
 var getReportsPrefsParam = server.Param{Name: "prefs", Style: "form", Explode: true, Shape: server.Object, Properties: []string{"theme", "compact"}}
@@ -34,6 +36,8 @@ type GetReportsRequest struct {
 	Fields oapi.Optional[[]string]
 	// Q is the query parameter "q".
 	Q oapi.Optional[string]
+	// Limit is the query parameter "limit".
+	Limit oapi.Optional[int64]
 	// XMeta is the header parameter "X-Meta".
 	XMeta oapi.Optional[Filter]
 	// Prefs is the cookie parameter "prefs".
@@ -99,6 +103,15 @@ func (s *apiServer) handleGetReports(w http.ResponseWriter, r *http.Request) {
 			b.Param("query", "q", err)
 		} else {
 			req.Q = oapi.Some(v)
+		}
+	}
+	if vals, ok, err := getReportsLimitParam.QueryValues(query); err != nil {
+		b.Param("query", "limit", err)
+	} else if ok {
+		if v, err := server.ParseScalar[int64](vals.Items); err != nil {
+			b.Param("query", "limit", err)
+		} else {
+			req.Limit = oapi.Some(v)
 		}
 	}
 	if raw, ok := server.ContentValue(r, nil, "header", "X-Meta"); ok {
