@@ -14,6 +14,11 @@
   gets a union field whose properties are decoded from and encoded into
   the object itself.
 - `oapi.ObjectEncoder.Inline` and `oapi.MergeObjects`.
+- ECMA-262 patterns: `oapi.Pattern` checks patterns Go's `regexp` cannot
+  compile (lookarounds, backreferences) with `github.com/dlclark/regexp2`,
+  bounded by a timeout per match. `goapi validate` rule `pattern` reports
+  invalid patterns.
+- `server.Param.EmptyIsAbsent`.
 - Compositions of non-object values: an `allOf` of strings, numbers, enums
   or arrays, and keywords next to a 3.1 `$ref`, become one defined type
   that checks every member's constraints.
@@ -34,6 +39,15 @@
 
 ### Fixed
 
+- `allowEmptyValue` query parameters receive `?q=` as the empty string
+  (no items for an array) instead of counting as absent; numbers, booleans
+  and objects still treat it as absent.
+- A `oneOf` of untyped members without a type anywhere (`[{format: email},
+  {format: uri}]`) rejected every value; schemas with only a format or
+  numeric keywords were typed as `any`.
+- Patterns with lookarounds or backreferences were not checked.
+- `Optional[T]` decoded from null with plain `encoding/json` became a set
+  zero value that could fail to encode or decode again.
 - An `allOf` of non-object schemas was typed as `any`, and the keywords next
   to a 3.1 `$ref` were ignored.
 - `type: string` with a `oneOf` of members without a type (such as
@@ -48,6 +62,10 @@
 
 ### Changed
 
+- Encoding an `oapi.File` whose data is not UTF-8 into JSON is an error
+  instead of silently replacing the invalid bytes.
+- Generated pattern checks use `oapi.MustCompilePattern` and
+  `Pattern.Check` instead of `regexp`. Regenerate after upgrading.
 - `oneOf` unions are sealed: instead of a struct with a pointer per variant,
   they hold exactly one variant in an interface that only the variant types
   implement. Create them with the generic constructor (`NewAnimal(Cat{})`)

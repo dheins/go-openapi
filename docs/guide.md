@@ -108,7 +108,10 @@ if name, ok := pet.Nickname.Get(); ok { ... }  // read
 
 `json.Unmarshal` into a generated type reports every problem with a JSON
 pointer, and `Validate` checks the remaining constraints (lengths,
-patterns, bounds, formats, enums, unique items, ...):
+patterns, bounds, formats, enums, unique items, ...). Patterns are
+ECMA-262: those Go's `regexp` cannot compile (lookarounds,
+backreferences) are matched by a backtracking engine, with a 100 ms limit
+per match so that a crafted value cannot tie up the server.
 
 ```go
 var pet models.Pet
@@ -302,11 +305,16 @@ Supported parameters: path (`simple`, `label`, `matrix`), query (`form`,
 `spaceDelimited`, `pipeDelimited`, `deepObject`), header (`simple`) and
 cookie (`form`), each as a value, an array or an object of values, with or
 without `explode`; parameters with JSON `content`; the 3.2 `querystring`
-location (form-encoded or JSON); `allowEmptyValue`; defaults.
+location (form-encoded or JSON); `allowEmptyValue` (`?q=` is the empty
+string, or no items for an array; for numbers and booleans it means the
+parameter is not given); defaults.
 
 Supported request bodies: JSON (`application/json`, `*+json`),
 `application/x-www-form-urlencoded`, `multipart/form-data` (files become
-`oapi.File`), `text/*` (a string) and anything else as bytes. When an
+`oapi.File`), `text/*` (a string) and anything else as bytes. In a JSON
+body, an `oapi.File` is a string: its data must be UTF-8, or encoding fails
+(use `contentEncoding: base64` for binary data in JSON, generated as
+`[]byte`). When an
 operation accepts several media types with the same schema, `req.Body` holds
 the decoded value and `req.ContentType` says which one arrived.
 

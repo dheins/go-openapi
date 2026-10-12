@@ -75,3 +75,5 @@ Added along the way:
   `Validate`. (638bdc2)
 - [x] `goapi validate` rule `oneof-ambiguous` for `oneOf`s one value can
   match several times. (a3f52c3)
+- [x] `goapi validate` rule `pattern` for patterns that are not valid
+  regular expressions. (d2a1726)

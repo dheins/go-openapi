@@ -39,9 +39,6 @@ checked off under [Fixed](#fixed) until they are released.
   its own (properties, items): then the first definition is used, with a
   warning. When no value can satisfy both, `goapi validate` reports an
   `allof-conflict` error.
-- **ECMA-262 patterns are not checked.** `pattern` uses Go's RE2 `regexp`;
-  patterns with lookahead, backreferences and similar produce a warning and
-  are skipped in `Validate()`.
 - **`oneOf` of open objects rarely matches exactly one variant.** Without a
   discriminator, a `oneOf` whose variants are objects that allow additional
   properties often matches several of them, which JSON Schema (and the
@@ -53,18 +50,14 @@ checked off under [Fixed](#fixed) until they are released.
   so `false` there rejects every property another member adds; the generator
   warns and ignores them. *Workaround:* put `unevaluatedProperties: false`
   next to the `allOf`.
-- **A `oneOf` of members without a type, next to no type, never matches.**
-  `oneOf: [{format: email}, {format: uri}]` alone gives no Go type, so every
-  member becomes `any` and every value matches all of them. *Workaround:*
-  add `type: string` next to the `oneOf`, which is then checked as
-  alternatives of a string.
 - **`additionalProperties: false` next to a union allows its variants'
   properties.** JSON Schema only counts the adjacent `properties`, so such a
   schema strictly rejects every variant property; the generated decoder
   accepts them, as `unevaluatedProperties: false` would.
-- **`oapi.File` in JSON is lossy.** A `format: binary` value inside a JSON
-  body is written as a string of its bytes and loses its name and content
-  type; non-UTF-8 data is mangled by JSON string encoding.
+- **`oapi.File` in JSON keeps only its data.** A `format: binary` value
+  inside a JSON body is a string of its bytes; its name and content type
+  are not part of the JSON. *Workaround:* model them as properties next to
+  the data, and use `contentEncoding: base64` for data that is not UTF-8.
 
 ## Server (runtime / generated server)
 
@@ -75,9 +68,6 @@ checked off under [Fixed](#fixed) until they are released.
 - **Errors in a stream cannot change the status.** JSON Lines and
   server-sent event responses send 200 before the first item; a later error
   only ends the stream and is logged.
-- **An allowed empty query value counts as absent.** With
-  `allowEmptyValue`, `?q=` leaves the parameter unset, so a string parameter
-  cannot receive the empty string.
 - **Optional authentication still rejects bad credentials.** When an
   operation allows anonymous access (`security: [{}, {apiKey: []}]`), a
   request carrying invalid credentials gets 401 instead of being treated as
@@ -101,6 +91,21 @@ Unreleased (after v0.1.0):
 - [x] **A discriminated union only checked the selected variant's
   structure when decoding.** The variant is validated while decoding, as in
   untagged unions. (32d4323)
+- [x] **`oapi.File` in JSON mangled data that is not UTF-8.** Encoding such
+  data is an error pointing to `contentEncoding: base64` instead of
+  silently replacing bytes with U+FFFD. That the name and content type are
+  not in the JSON stays open (see above). (13e0ed3)
+- [x] **An allowed empty query value counted as absent.** `?q=` is the
+  empty string (no items for an array); numbers, booleans and objects keep
+  treating it as absent (`server.Param.EmptyIsAbsent`). (3896cc1)
+- [x] **A `oneOf` of members without a type, next to no type, never
+  matched.** The type is inferred from inline members that agree
+  (`{format: email}` is a string), and the members are checked as
+  alternatives of it. (42133a4)
+- [x] **ECMA-262 patterns were not checked.** Patterns Go's `regexp` cannot
+  compile are matched by `dlclark/regexp2` in ECMAScript mode, with a
+  timeout per match; `goapi validate` reports patterns neither engine
+  accepts (rule `pattern`). (d2a1726)
 
 Found and fixed along the way:
 
@@ -113,3 +118,10 @@ Found and fixed along the way:
   are checked as alternatives of the string. (638bdc2)
 - [x] **`minProperties`/`maxProperties` on `allOf` members were ignored**;
   the strictest applies to the combined object. (a3f52c3)
+- [x] **`Optional[T]` decoded from null with plain `encoding/json` was a set
+  zero value**, which for `Optional[oapi.Date]` encoded as `"0000-00-00"`
+  and did not decode again. Null is accepted only where `T` can hold it,
+  as in generated decoders. Found by `FuzzDecode`. (325beb5)
+- [x] **A schema with only a format or numeric keywords (`{format: email}`,
+  `{minimum: 0}`) was typed as `any`** and its checks dropped; the type is
+  inferred from them. (42133a4)
