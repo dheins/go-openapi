@@ -538,7 +538,9 @@ func TestAliasBomb(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "expands to more than") {
 			t.Errorf("err = %v", err)
 		}
-		if d := time.Since(start); d > 10*time.Second {
+		// Unbounded expansion would take hours; the generous limit keeps
+		// slow runs (such as under the race detector) from failing.
+		if d := time.Since(start); d > time.Minute {
 			t.Errorf("rejecting the document took %v", d)
 		}
 	}
