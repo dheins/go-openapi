@@ -68,10 +68,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 Unreleased (after v0.3.0):
 
 - [x] Zap logging for generated servers (`contrib/zaplog`), an access log
-  (`server.WithAccessLog`) and request observers (`server.WithObserver`).
+  (`server.WithAccessLog`), request observers (`server.WithObserver`) and
+  logs in generated handlers. (bfa3830)
 - [x] OpenTelemetry traces and metrics for generated servers
   (`contrib/otel`), for several vendors at once through OTLP, Prometheus
-  or stdout, off unless configured.
+  or stdout, off unless configured. (bfa3830)
 
 v0.2.0:
 
