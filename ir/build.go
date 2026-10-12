@@ -853,6 +853,14 @@ func (b *builder) stringRef(s *oas.Schema) *Ref {
 	return &Ref{Kind: Builtin, Name: "string", Checks: nilIfEmpty(c)}
 }
 
+// stringFormats are the other formats that only strings have.
+var stringFormats = map[string]bool{
+	"date": true, "date-time": true, "byte": true, "binary": true, "password": true,
+	"duration": true, "idn-email": true, "idn-hostname": true, "iri": true,
+	"iri-reference": true, "uri-template": true, "json-pointer": true,
+	"relative-json-pointer": true,
+}
+
 // checkedFormats are the string formats Validate checks; the others are
 // either represented by a Go type or not checked.
 var checkedFormats = map[string]bool{
@@ -1391,6 +1399,9 @@ func (b *builder) fillScalarAlternatives(t *Type, types []string) bool {
 	if len(members) == 0 {
 		members, oneOf = s.AnyOf, false
 	}
+	if len(types) == 0 && len(members) > 0 {
+		types = alternativesType(s, members)
+	}
 	if len(members) == 0 || len(types) != 1 || types[0] == "object" || s.Properties.Len() > 0 ||
 		len(s.AllOf) > 0 || s.Discriminator != nil {
 		return false
@@ -1420,6 +1431,37 @@ func (b *builder) fillScalarAlternatives(t *Type, types []string) bool {
 	t.Underlying = base
 	t.Alternatives, t.AlternativesOneOf = alts, oneOf
 	return true
+}
+
+// alternativesType infers the type of s, which has none, from its own
+// keywords or, failing that, from its oneOf/anyOf members, if they are all
+// inline and agree: oneOf: [{format: email}, {format: uri}] is a string.
+// Members that are references keep making a union of named types.
+func alternativesType(s *oas.Schema, members []*oas.Schema) []string {
+	own := *s
+	own.OneOf, own.AnyOf = nil, nil
+	if typ := inferType(&own); typ != "" {
+		return []string{typ}
+	}
+	typ := ""
+	for _, m := range members {
+		if m == nil || m.Ref != "" {
+			return nil
+		}
+		mt, _ := splitTypes(m)
+		t := ""
+		switch len(mt) {
+		case 0:
+			t = inferType(m)
+		case 1:
+			t = mt[0]
+		}
+		if t == "" || (typ != "" && t != typ) {
+			return nil
+		}
+		typ = t
+	}
+	return []string{typ}
 }
 
 // isObject reports whether s becomes a struct.
@@ -1461,8 +1503,18 @@ func inferType(s *oas.Schema) string {
 		return "object"
 	case s.Items != nil:
 		return "array"
-	case s.MinLength != nil || s.MaxLength != nil || s.Pattern != "":
+	case s.MinLength != nil || s.MaxLength != nil || s.Pattern != "" ||
+		checkedFormats[s.Format] || stringFormats[s.Format] || s.ContentEncoding != "" || s.ContentMediaType != "":
 		return "string"
+	case s.Format == "int32" || s.Format == "int64":
+		return "integer"
+	case s.Format == "float" || s.Format == "double" || s.Minimum != "" || s.Maximum != "" ||
+		s.ExclusiveMinimum != "" || s.ExclusiveMaximum != "" || s.MultipleOf != "":
+		return "number"
+	case s.MinItems != nil || s.MaxItems != nil || s.UniqueItems:
+		return "array"
+	case s.MinProperties != nil || s.MaxProperties != nil:
+		return "object"
 	case s.Const != nil:
 		return literalType(s.Const)
 	case len(s.Enum) > 0:

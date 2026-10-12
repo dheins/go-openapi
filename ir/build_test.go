@@ -460,3 +460,36 @@ components:
 		t.Errorf("Base.Additional = %+v, Sub.Additional = %+v", typeNamed(t, m, "Base").Additional, typeNamed(t, m, "Sub").Additional)
 	}
 }
+
+func TestInferredTypes(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+components:
+  schemas:
+    Email: {format: email}
+    Count: {minimum: 0}
+    Contact:
+      oneOf: [{format: email}, {format: uri}]
+    Mixed:
+      oneOf: [{format: email}, {minimum: 1}]
+    Named:
+      oneOf: [{$ref: "#/components/schemas/Email"}, {format: uri}]
+`, Options{})
+	// A format or a numeric keyword alone gives the type.
+	if e := typeNamed(t, m, "Email"); e.Kind != Defined || e.Underlying.Name != "string" {
+		t.Errorf("Email = %+v", e)
+	}
+	if c := typeNamed(t, m, "Count"); c.Kind != Defined || c.Underlying.Name != "float64" {
+		t.Errorf("Count = %+v", c)
+	}
+	// Inline members that agree make checked alternatives of that type.
+	if c := typeNamed(t, m, "Contact"); c.Kind != Defined || len(c.Alternatives) != 2 || !c.AlternativesOneOf {
+		t.Errorf("Contact = %+v", c)
+	}
+	// Members that disagree, or refer to named types, stay a union.
+	for _, name := range []string{"Mixed", "Named"} {
+		if u := typeNamed(t, m, name); u.Kind != Union {
+			t.Errorf("%s = %+v, want a union", name, u)
+		}
+	}
+}

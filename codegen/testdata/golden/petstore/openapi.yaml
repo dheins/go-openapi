@@ -432,3 +432,7 @@ components:
           maxProperties: 2
         - type: object
           minProperties: 1
+    Contactable:
+      oneOf:
+        - format: email
+        - format: uri

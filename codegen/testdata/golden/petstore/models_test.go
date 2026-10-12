@@ -706,3 +706,22 @@ func TestAmbiguousOneOf(t *testing.T) {
 		t.Errorf("vehicle: %v", err)
 	}
 }
+
+func TestUntypedAlternatives(t *testing.T) {
+	// oneOf: [{format: email}, {format: uri}] has no type anywhere; the
+	// members agree on string, so the value is a string checked against
+	// both. It used to be a union of any values that matched every member.
+	for _, ok := range []Contactable{"rex@example.com", "https://example.com"} {
+		if err := ok.Validate(); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	assertMessages(t, Contactable("neither").Validate(), "must match exactly one of the 2 oneOf alternatives, matches 0")
+	var c Contactable
+	if err := json.Unmarshal([]byte(`"rex@example.com"`), &c); err != nil || c != "rex@example.com" {
+		t.Errorf("decode = %q, %v", c, err)
+	}
+	if err := json.Unmarshal([]byte(`5`), &c); err == nil {
+		t.Error("a number decoded as Contactable")
+	}
+}
