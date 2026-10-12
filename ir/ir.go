@@ -103,6 +103,11 @@ type Type struct {
 
 	// Defined and Alias
 	Underlying *Ref
+	// Extra are further checks on a Defined type's value, from the other
+	// members of the allOf it composes, or the keywords next to its $ref.
+	// A Defined type's Alternatives come from a oneOf or anyOf next to its
+	// type; each has one check (Field nil) on the value.
+	Extra []*Ref
 
 	// Union
 	Variants []*Variant
@@ -210,8 +215,9 @@ type Alternative struct {
 	Checks             []*AlternativeCheck
 }
 
-// AlternativeCheck is a check an Alternative puts on a field's value; Ref
-// has the shape of the field's type.
+// AlternativeCheck is a check an Alternative puts on a field's value, or
+// on the value of a Defined type if Field is nil; Ref has the shape of
+// the field's (or Defined type's) type.
 type AlternativeCheck struct {
 	Field *Field
 	Ref   *Ref

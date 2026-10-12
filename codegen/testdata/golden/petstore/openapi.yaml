@@ -386,3 +386,39 @@ components:
             mapping:
               house: "#/components/schemas/House"
               flat: "#/components/schemas/Flat"
+    Code:
+      type: string
+      pattern: "^[A-Z]+$"
+    ShortCode:
+      allOf:
+        - $ref: "#/components/schemas/Code"
+        - maxLength: 4
+    PinnedCode:
+      $ref: "#/components/schemas/Code"
+      minLength: 2
+    Level:
+      type: string
+      enum: [low, mid, high]
+    LowLevel:
+      allOf:
+        - $ref: "#/components/schemas/Level"
+        - enum: [low, mid]
+    Tags:
+      allOf:
+        - type: array
+          items: {type: string}
+          maxItems: 3
+        - minItems: 1
+    Handle:
+      type: string
+      maxLength: 40
+      oneOf:
+        - format: email
+        - pattern: "^@[a-z]+$"
+    Label:
+      type: object
+      properties:
+        code:
+          allOf:
+            - $ref: "#/components/schemas/Code"
+            - maxLength: 2

@@ -233,26 +233,7 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 				v.ref("m."+fd.Name, pointerLiteral(fd.JSONName), extra, fd.Name, 1)
 			}
 		}
-		if len(t.Alternatives) > 0 {
-			calls := make([]string, len(t.Alternatives))
-			for i := range t.Alternatives {
-				calls[i] = fmt.Sprintf("m.matchesAlternative%d()", i)
-			}
-			v.line(1, "matches := 0")
-			v.line(1, "for _, ok := range []bool{%s} {", strings.Join(calls, ", "))
-			v.line(2, "if ok {")
-			v.line(3, "matches++")
-			v.line(2, "}")
-			v.line(1, "}")
-			if t.AlternativesOneOf {
-				v.line(1, "if matches != 1 {")
-				v.line(2, "errs.Addf(\"\", \"must match exactly one of the %d oneOf alternatives, matches %%d\", matches)", len(t.Alternatives))
-			} else {
-				v.line(1, "if matches == 0 {")
-				v.line(2, "errs.Add(\"\", \"must match at least one of the %d anyOf alternatives\")", len(t.Alternatives))
-			}
-			v.line(1, "}")
-		}
+		v.matches(t, "m")
 		for _, iu := range t.InlineUnions {
 			v.line(1, "errs.Nested(\"\", m.%s.Validate())", iu.Name)
 		}
@@ -268,8 +249,38 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 		}
 	case ir.Defined:
 		v.ref(underlyingExpr("v", t.Underlying), `""`, t.Underlying, "", 1)
+		for _, extra := range t.Extra {
+			v.ref(underlyingExpr("v", extra), `""`, extra, "", 1)
+		}
+		v.matches(t, "v")
 	}
 	return strings.TrimSuffix(v.b.String(), "\n")
+}
+
+// matches checks that the value, recv, matches exactly one (oneOf) or at
+// least one (anyOf) of the alternatives of t.
+func (v *validator) matches(t *ir.Type, recv string) {
+	if len(t.Alternatives) == 0 {
+		return
+	}
+	calls := make([]string, len(t.Alternatives))
+	for i := range t.Alternatives {
+		calls[i] = fmt.Sprintf("%s.matchesAlternative%d()", recv, i)
+	}
+	v.line(1, "matches := 0")
+	v.line(1, "for _, ok := range []bool{%s} {", strings.Join(calls, ", "))
+	v.line(2, "if ok {")
+	v.line(3, "matches++")
+	v.line(2, "}")
+	v.line(1, "}")
+	if t.AlternativesOneOf {
+		v.line(1, "if matches != 1 {")
+		v.line(2, "errs.Addf(\"\", \"must match exactly one of the %d oneOf alternatives, matches %%d\", matches)", len(t.Alternatives))
+	} else {
+		v.line(1, "if matches == 0 {")
+		v.line(2, "errs.Add(\"\", \"must match at least one of the %d anyOf alternatives\")", len(t.Alternatives))
+	}
+	v.line(1, "}")
 }
 
 // propertyCount checks minProperties and maxProperties of a struct by
@@ -312,10 +323,14 @@ func (v *validator) propertyCount(t *ir.Type) {
 // with oneOf or anyOf alternatives next to its properties.
 func (f *fileGen) alternativeMethods(t *ir.Type) string {
 	var b strings.Builder
+	recv, what := "m", "the properties it requires are present and its checks pass"
+	if t.Kind == ir.Defined {
+		recv, what = "v", "its checks pass"
+	}
 	for i, alt := range t.Alternatives {
 		fmt.Fprintf(&b, "\n// matchesAlternative%d reports whether the value matches alternative %d of the\n", i, i+1)
-		fmt.Fprintf(&b, "// %s: the properties it requires are present and its checks pass.\n", map[bool]string{true: "oneOf", false: "anyOf"}[t.AlternativesOneOf])
-		fmt.Fprintf(&b, "func (m %s) matchesAlternative%d() bool {\n", t.Name, i)
+		fmt.Fprintf(&b, "// %s: %s.\n", map[bool]string{true: "oneOf", false: "anyOf"}[t.AlternativesOneOf], what)
+		fmt.Fprintf(&b, "func (%s %s) matchesAlternative%d() bool {\n", recv, t.Name, i)
 		for _, fd := range alt.Required {
 			if cond := absent("m."+fd.Name, fd); cond != "" {
 				fmt.Fprintf(&b, "\tif %s {\n\t\treturn false\n\t}\n", cond)
@@ -326,6 +341,10 @@ func (f *fileGen) alternativeMethods(t *ir.Type) string {
 		}
 		v := &validator{file: f, typeName: t.Name}
 		for _, c := range alt.Checks {
+			if c.Field == nil {
+				v.ref(underlyingExpr(recv, c.Ref), `""`, c.Ref, "Alternative", 1)
+				continue
+			}
 			v.ref("m."+c.Field.Name, pointerLiteral(c.Field.JSONName), c.Ref, c.Field.Name+"Alternative", 1)
 		}
 		if v.b.Len() > 0 {
@@ -361,8 +380,13 @@ func absent(expr string, fd *ir.Field) string {
 // underlying builtin type, so that comparisons and helper calls type
 // check. Slices and maps work unconverted.
 func underlyingExpr(recv string, r *ir.Ref) string {
-	if r.Kind == ir.Builtin {
+	switch {
+	case r.Kind == ir.Builtin:
 		return r.Name + "(" + recv + ")"
+	case r.Kind == ir.Named && r.Type.Kind != ir.Alias:
+		// A type defined as another named type does not have its
+		// methods, so its Validate is reached by conversion.
+		return r.Type.Name + "(" + recv + ")"
 	}
 	return recv
 }

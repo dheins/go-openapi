@@ -617,3 +617,47 @@ func TestAnyOfKeepsEveryVariant(t *testing.T) {
 		t.Errorf("marshal = %s, %v, want %s", out, err, in)
 	}
 }
+
+func TestScalarComposition(t *testing.T) {
+	// allOf of a reference and a constraint: both apply.
+	assertMessages(t, ShortCode("ABCDE").Validate(), "length must be at most 4")
+	assertMessages(t, ShortCode("ab").Validate(), "must match the pattern ^[A-Z]+$")
+	if err := ShortCode("ABC").Validate(); err != nil {
+		t.Errorf("ABC: %v", err)
+	}
+	// Keywords next to a 3.1 $ref constrain the target further.
+	assertMessages(t, PinnedCode("A").Validate(), "length must be at least 2")
+	assertMessages(t, PinnedCode("a1").Validate(), "must match the pattern ^[A-Z]+$")
+	// An enum narrowed by another member keeps its own check too.
+	assertMessages(t, LowLevel(LevelHigh).Validate(), `must be one of "low", "mid"`)
+	assertMessages(t, LowLevel("none").Validate(), `must be one of "low", "mid", "high"`, `must be one of "low", "mid"`)
+	if err := LowLevel(LevelMid).Validate(); err != nil {
+		t.Errorf("mid: %v", err)
+	}
+	// Arrays combine their item counts.
+	assertMessages(t, Tags{}.Validate(), "must have at least 1 item")
+	assertMessages(t, Tags{"a", "b", "c", "d"}.Validate(), "must have at most 3 items")
+	// A composed property is checked through its struct.
+	var l Label
+	if err := json.Unmarshal([]byte(`{"code": "ABC"}`), &l); err != nil {
+		t.Fatal(err)
+	}
+	assertMessages(t, l.Validate(), "/code: length must be at most 2")
+	roundTrip[Label](t, []byte(`{"code": "AB"}`))
+}
+
+func TestScalarAlternatives(t *testing.T) {
+	// oneOf next to a type: exactly one member's checks must pass, and
+	// the type's own checks apply to every value.
+	for _, ok := range []Handle{"rex@example.com", "@rex"} {
+		if err := ok.Validate(); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	assertMessages(t, Handle("rex").Validate(), "must match exactly one of the 2 oneOf alternatives, matches 0")
+	assertMessages(t, Handle("@"+strings.Repeat("a", 40)).Validate(), "length must be at most 40")
+	var h Handle
+	if err := json.Unmarshal([]byte(`"@rex"`), &h); err != nil || h != "@rex" {
+		t.Errorf("decode = %q, %v", h, err)
+	}
+}

@@ -377,3 +377,48 @@ components:
 		t.Errorf("anyOf union is sealed: %+v", e.Sealed)
 	}
 }
+
+func TestComposedScalars(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+components:
+  schemas:
+    Code: {type: string, pattern: "^[A-Z]+$"}
+    Pet: {type: object, properties: {name: {type: string}}}
+    Mixed:
+      allOf: [{$ref: "#/components/schemas/Code"}, {type: integer, minimum: 1}]
+    When:
+      allOf: [{type: string, format: date-time}, {maxLength: 30}]
+    PetRef:
+      $ref: "#/components/schemas/Pet"
+      required: [name]
+    Plain:
+      allOf: [{$ref: "#/components/schemas/Code"}]
+      description: only annotations, so an alias
+    Choice:
+      type: string
+      oneOf: [{type: integer}, {maxLength: 2}]
+`, Options{})
+	var got []string
+	for _, w := range m.Warnings {
+		got = append(got, w.Location.Pointer+": "+w.Message)
+	}
+	want := []string{
+		"/components/schemas/Mixed: a member describes a different kind of value than the first; its constraints are not checked",
+		"/components/schemas/When: constraints next to a value of an imported Go type are not checked",
+		"/components/schemas/PetRef: keywords next to $ref are not applied to the generated type",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("warnings:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if ty := typeNamed(t, m, "Mixed"); ty.Kind != Alias || ty.Underlying.Kind != Named || ty.Underlying.Type.Name != "Code" {
+		t.Errorf("Mixed = %+v", ty)
+	}
+	if ty := typeNamed(t, m, "Plain"); ty.Kind != Alias {
+		t.Errorf("Plain = %+v", ty)
+	}
+	// A member of another type makes it a union, as before.
+	if ty := typeNamed(t, m, "Choice"); ty.Kind != Union {
+		t.Errorf("Choice = %+v", ty)
+	}
+}

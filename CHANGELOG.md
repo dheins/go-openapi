@@ -14,6 +14,11 @@
   gets a union field whose properties are decoded from and encoded into
   the object itself.
 - `oapi.ObjectEncoder.Inline` and `oapi.MergeObjects`.
+- Compositions of non-object values: an `allOf` of strings, numbers, enums
+  or arrays, and keywords next to a 3.1 `$ref`, become one defined type
+  that checks every member's constraints.
+- `oneOf`/`anyOf` next to a non-object `type`, whose members only add
+  checks, is checked by `Validate`, which counts the members that match.
 - `server.BindError`: invalid requests reach the error handler as their own
   error type, so they can be answered in the format the document declares.
 - Generated servers recover from panics in handlers and middleware: the
@@ -22,6 +27,11 @@
 
 ### Fixed
 
+- An `allOf` of non-object schemas was typed as `any`, and the keywords next
+  to a 3.1 `$ref` were ignored.
+- `type: string` with a `oneOf` of members without a type (such as
+  `{format: email}`) became a union of `any` values that matched every
+  member, so no value was valid.
 - An `anyOf` value matching several object variants encoded only the first,
   losing the properties of the others; they are now merged.
 - Response headers were set before the body was encoded, so an encoding

@@ -45,6 +45,11 @@ Each entry says where it lives and how to work around it.
   properties often matches several of them, which JSON Schema (and the
   generated decoder) rejects. *Workaround:* add a discriminator, or close the
   variants with `additionalProperties: false` or distinct required properties.
+- **A `oneOf` of members without a type, next to no type, never matches.**
+  `oneOf: [{format: email}, {format: uri}]` alone gives no Go type, so every
+  member becomes `any` and every value matches all of them. *Workaround:*
+  add `type: string` next to the `oneOf`, which is then checked as
+  alternatives of a string.
 - **`additionalProperties: false` next to a union allows its variants'
   properties.** JSON Schema only counts the adjacent `properties`, so such a
   schema strictly rejects every variant property; the generated decoder

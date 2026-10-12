@@ -229,6 +229,26 @@ l := models.Listing{ID: 1, OneOf: models.NewListingOneOf(models.Flat{Floor: 4})}
 // {"id":1,"kind":"Flat","floor":4}: an empty Kind is left to the variant
 ```
 
+Compositions of values that are not objects combine their constraints into
+one defined type with a `Validate` method: an `allOf` of strings, numbers or
+arrays, and keywords next to a `$ref` (3.1 and later). An enum narrowed this
+way keeps its own check:
+
+```yaml
+ShortCode:          # type ShortCode string: Code's pattern and maxLength 4
+  allOf: [{$ref: "#/components/schemas/Code"}, {maxLength: 4}]
+PinnedCode:         # type PinnedCode string: Code's pattern and minLength 2
+  $ref: "#/components/schemas/Code"
+  minLength: 2
+Handle:             # type Handle string; Validate counts the members that match
+  type: string
+  oneOf: [{format: email}, {pattern: "^@[a-z]+$"}]
+```
+
+Members of a different kind than the first, and constraints on a value of
+an imported Go type such as `time.Time`, produce a warning and are not
+checked.
+
 The fields win when both define a property. An `allOf` member that is a
 union becomes such a field too (named after the referenced union, or
 `OneOf`/`AnyOf`). An `anyOf` value that matches several object members

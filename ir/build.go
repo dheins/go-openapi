@@ -115,6 +115,9 @@ func (b *builder) fill(t *Type) {
 	types, nullable := splitTypes(s)
 	t.NullableUse = nullable
 	switch {
+	case composesScalar(s):
+		b.fillComposed(t)
+	case b.fillScalarAlternatives(t, types):
 	case isUnion(s, types):
 		b.fillUnion(t, types)
 	case enumBase(s, types) != "":
@@ -166,7 +169,7 @@ func (b *builder) use(s *oas.Schema, hint string, root *Type) *Ref {
 		return wrapNullable(b.use(inner, hint, root))
 	}
 	types, nullable := splitTypes(s)
-	if isUnion(s, types) || enumBase(s, types) != "" || isObject(s, types) {
+	if isUnion(s, types) || enumBase(s, types) != "" || isObject(s, types) || composesScalar(s) {
 		t := b.declare(s, hint, root)
 		b.fill(t)
 		return namedRef(t)
@@ -942,6 +945,10 @@ func goTypeOverride(s *oas.Schema) *Ref {
 // reference).
 func refTarget(s *oas.Schema) *oas.Schema {
 	if s.Ref != "" {
+		if composesScalar(s) {
+			// Keywords next to the $ref constrain the target further.
+			return nil
+		}
 		return s.Resolved
 	}
 	if s.DynamicRef != "" {
@@ -1194,6 +1201,205 @@ func (b *builder) discriminate(t *Type, targets []*oas.Schema) {
 		}
 	}
 	t.Discriminator = d.PropertyName
+}
+
+// composesScalar reports whether s combines schemas of a value that is not
+// an object or a union: an allOf of them, or a $ref with constraints next
+// to it (as 3.1 allows). fillComposed builds such a type.
+func composesScalar(s *oas.Schema) bool {
+	return composes(s, map[*oas.Schema]bool{})
+}
+
+func composes(s *oas.Schema, seen map[*oas.Schema]bool) bool {
+	if seen[s] {
+		return false
+	}
+	seen[s] = true
+	var members []*oas.Schema
+	switch {
+	case s.Ref != "":
+		if s.Resolved == nil || !hasConstraints(s) {
+			return false
+		}
+		members = []*oas.Schema{s.Resolved}
+	case len(s.AllOf) > 0 && s.Properties.Len() == 0 && len(s.Required) == 0 && len(s.OneOf) == 0 && len(s.AnyOf) == 0:
+		if len(s.AllOf) == 1 && !hasConstraints(s) && len(s.Type) == 0 && s.AdditionalProperties == nil {
+			// A plain reference through allOf: an alias (refTarget).
+			return false
+		}
+		members = s.AllOf
+	default:
+		return false
+	}
+	if types, _ := splitTypes(s); len(types) > 1 || (len(types) == 1 && types[0] == "object") || s.AdditionalProperties != nil {
+		return false
+	}
+	for _, m := range members {
+		m = deref(m)
+		if m == nil {
+			continue
+		}
+		mt, _ := splitTypes(m)
+		if isUnion(m, mt) || (objectLike(m, mt) && !composes(m, seen)) {
+			return false
+		}
+	}
+	return true
+}
+
+// fillComposed builds a type from a composition of non-object schemas
+// (composesScalar). The first member with a type gives it: an enum stays
+// itself, anything else is reduced to its Go type and checks. The keywords
+// of the other members and of the schema itself are further checks
+// (Extra), so the type is a Defined one with a Validate method of its own.
+func (b *builder) fillComposed(t *Type) {
+	s := t.Schema
+	members := s.AllOf
+	if s.Ref != "" {
+		members = []*oas.Schema{s.Resolved}
+	}
+	own := *s
+	own.Ref, own.Resolved, own.AllOf = "", nil, nil
+
+	var primaryRef, base *Ref
+	primary := -1
+	for i, m := range members {
+		r := b.use(m, fmt.Sprintf("%sAllOf%d", t.Name, i+1), t.Root)
+		if r.Kind == Nullable {
+			t.NullableUse = true
+			r = r.Elem
+		}
+		if vb := valueBase(r); vb.Kind != Any {
+			primaryRef, base, primary = r, vb, i
+			break
+		}
+	}
+	var parts []*oas.Schema
+	for i, m := range members {
+		if i != primary {
+			parts = append(parts, composedParts(m, map[*oas.Schema]bool{})...)
+		}
+	}
+	if base == nil {
+		// No member has a type: the schema's own keywords give it.
+		types, _ := splitTypes(&own)
+		base = b.inline(&own, types, t.Name, t.Root)
+	} else if hasConstraints(&own) {
+		parts = append(parts, &own)
+	}
+	for _, p := range parts {
+		extra, ok := b.extraChecks(base, p)
+		if !ok {
+			b.warn(s, nil, "a member describes a different kind of value than the first; its constraints are not checked")
+			continue
+		}
+		if extra != nil {
+			t.Extra = append(t.Extra, extra)
+		}
+	}
+
+	switch {
+	case len(t.Extra) == 0 && primaryRef != nil:
+		t.Kind = Alias
+		t.Underlying = primaryRef
+	case base.Kind == Any || (base.Kind == Builtin && base.Import != ""):
+		// A defined type would drop the methods of time.Time, oapi.Date
+		// or an x-go-type, including their JSON encoding.
+		if len(t.Extra) > 0 {
+			b.warn(s, nil, "constraints next to a value of an imported Go type are not checked")
+			t.Extra = nil
+		}
+		t.Kind = Alias
+		t.Underlying = base
+		if primaryRef != nil {
+			t.Underlying = primaryRef
+		}
+	default:
+		t.Kind = Defined
+		t.Underlying = base
+	}
+}
+
+// valueBase returns the type that holds a value of r, with its checks:
+// aliases and defined types are reduced to what they are defined as;
+// enums stay themselves.
+func valueBase(r *Ref) *Ref {
+	for r.Kind == Named {
+		switch r.Type.Kind {
+		case Alias, Defined:
+			r = r.Type.Underlying
+		default:
+			return r
+		}
+	}
+	return r
+}
+
+// composedParts returns the schemas whose keywords apply to a value of a
+// member of a composition: the member, or the parts of a composition it
+// is itself.
+func composedParts(m *oas.Schema, seen map[*oas.Schema]bool) []*oas.Schema {
+	if m == nil || seen[m] {
+		return nil
+	}
+	seen[m] = true
+	if !composesScalar(m) {
+		return []*oas.Schema{deref(m)}
+	}
+	var parts []*oas.Schema
+	if m.Ref != "" {
+		parts = composedParts(m.Resolved, seen)
+	}
+	for _, sub := range m.AllOf {
+		parts = append(parts, composedParts(sub, seen)...)
+	}
+	own := *m
+	own.Ref, own.Resolved, own.AllOf = "", nil, nil
+	if hasConstraints(&own) {
+		parts = append(parts, &own)
+	}
+	return parts
+}
+
+// fillScalarAlternatives makes a schema of one non-object type with a oneOf
+// or anyOf whose members only add checks of that type a Defined type
+// whose Validate counts the members that match. It reports false, filling
+// nothing, for any other schema.
+func (b *builder) fillScalarAlternatives(t *Type, types []string) bool {
+	s := t.Schema
+	members, oneOf := s.OneOf, true
+	if len(members) == 0 {
+		members, oneOf = s.AnyOf, false
+	}
+	if len(members) == 0 || len(types) != 1 || types[0] == "object" || s.Properties.Len() > 0 ||
+		len(s.AllOf) > 0 || s.Discriminator != nil {
+		return false
+	}
+	own := *s
+	own.OneOf, own.AnyOf = nil, nil
+	if enumBase(&own, types) != "" {
+		return false
+	}
+	base := b.inline(&own, types, t.Name, t.Root)
+	if base.Kind == Any || (base.Kind == Builtin && base.Import != "") {
+		return false
+	}
+	var alts []*Alternative
+	for _, m := range members {
+		extra, ok := b.extraChecks(base, m)
+		if !ok {
+			return false
+		}
+		alt := &Alternative{}
+		if extra != nil {
+			alt.Checks = []*AlternativeCheck{{Ref: extra}}
+		}
+		alts = append(alts, alt)
+	}
+	t.Kind = Defined
+	t.Underlying = base
+	t.Alternatives, t.AlternativesOneOf = alts, oneOf
+	return true
 }
 
 // isObject reports whether s becomes a struct.
