@@ -1,8 +1,11 @@
 package validate
 
 import (
+	"bytes"
 	"cmp"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
 	"slices"
@@ -24,6 +27,8 @@ type checker struct {
 	servers        []*oas.Server
 	links          []*oas.Link
 	discriminators []*oas.Schema
+	allOfs         []*oas.Schema
+	oneOfs         []*oas.Schema
 }
 
 func semantic(spec *loader.Spec) ([]Diagnostic, error) {
@@ -39,6 +44,8 @@ func semantic(spec *loader.Spec) ([]Diagnostic, error) {
 	c.checkTags()
 	c.checkLinks()
 	c.checkDiscriminators()
+	c.checkAllOfConflicts()
+	c.checkOneOfAmbiguity()
 	slices.SortStableFunc(c.diags, func(a, b Diagnostic) int {
 		return cmp.Or(
 			strings.Compare(a.Location.URI, b.Location.URI),
@@ -72,6 +79,12 @@ func (c *checker) collect() error {
 		case *oas.Schema:
 			if o.Discriminator != nil {
 				c.discriminators = append(c.discriminators, o)
+			}
+			if len(o.AllOf) > 0 {
+				c.allOfs = append(c.allOfs, o)
+			}
+			if len(o.OneOf) > 1 && o.Discriminator == nil {
+				c.oneOfs = append(c.oneOfs, o)
 			}
 		}
 		return nil
@@ -363,6 +376,196 @@ func (c *checker) checkDiscriminators() {
 				"discriminator property %q is not a required property", d.PropertyName)
 		}
 	}
+}
+
+// checkAllOfConflicts reports properties that allOf members define with
+// types or values no value can satisfy at once: such an object is never
+// valid. A conflict is reported once, at the innermost schema whose
+// members define both sides.
+func (c *checker) checkAllOfConflicts() {
+	reported := make(map[[2]*oas.Schema]bool)
+	for _, s := range c.allOfs {
+		shape := shapeOf(s)
+		for _, name := range slices.Sorted(maps.Keys(shape.props)) {
+			defs := shape.props[name]
+		pairs:
+			for i, a := range defs {
+				for _, b := range defs[i+1:] {
+					if compatible(a, b) || reported[[2]*oas.Schema{a, b}] {
+						continue
+					}
+					reported[[2]*oas.Schema{a, b}] = true
+					c.report(Error, RuleAllOfConflict, s, []string{"allOf"},
+						"property %q is defined as %s and as %s by allOf members; no value is both", name, allowed(a), allowed(b))
+					break pairs
+				}
+			}
+		}
+	}
+}
+
+// checkOneOfAmbiguity warns about a oneOf without a discriminator whose
+// members are objects one value can satisfy together. oneOf rejects such
+// a value, which is rarely what the document means.
+func (c *checker) checkOneOfAmbiguity() {
+	for _, s := range c.oneOfs {
+		var objects []int
+		var shapes []objectShape
+		for i, m := range s.OneOf {
+			// Inline members without a type, such as {required: [email]},
+			// are constraints of the object rather than variants of it,
+			// and are meant to exclude each other.
+			if (m.Ref != "" || len(m.Type) > 0) && isObjectSchema(deref(m)) {
+				objects = append(objects, i)
+				shapes = append(shapes, shapeOf(m))
+			}
+		}
+	pairs:
+		for i := range objects {
+			for j := i + 1; j < len(objects); j++ {
+				if overlap(shapes[i], shapes[j]) {
+					c.report(Warning, RuleOneOfAmbiguous, s, []string{"oneOf"},
+						"oneOf members %d and %d can both match the same object, which oneOf then rejects; add a discriminator, or required properties that tell them apart",
+						objects[i], objects[j])
+					break pairs
+				}
+			}
+		}
+	}
+}
+
+// objectShape is what an object schema, with its allOf members, says
+// about properties.
+type objectShape struct {
+	props    map[string][]*oas.Schema
+	required map[string]bool
+	// closed means properties it does not define are not allowed.
+	closed bool
+}
+
+func shapeOf(s *oas.Schema) objectShape {
+	shape := objectShape{props: make(map[string][]*oas.Schema), required: make(map[string]bool)}
+	if top := deref(s); top != nil {
+		shape.closed = closes(top.AdditionalProperties) || closes(top.UnevaluatedProperties)
+	}
+	seen := make(map[*oas.Schema]bool)
+	var walk func(*oas.Schema)
+	walk = func(s *oas.Schema) {
+		s = deref(s)
+		if s == nil || seen[s] {
+			return
+		}
+		seen[s] = true
+		for name, p := range s.Properties.All() {
+			shape.props[name] = append(shape.props[name], deref(p))
+		}
+		for _, name := range s.Required {
+			shape.required[name] = true
+		}
+		for _, m := range s.AllOf {
+			walk(m)
+		}
+	}
+	walk(s)
+	return shape
+}
+
+// overlap reports whether one object could satisfy both shapes: every
+// property either requires is allowed by both, with compatible
+// definitions.
+func overlap(a, b objectShape) bool {
+	names := slices.Collect(maps.Keys(a.required))
+	for name := range b.required {
+		names = append(names, name)
+	}
+	for _, name := range names {
+		da, db := a.props[name], b.props[name]
+		if (len(da) == 0 && a.closed) || (len(db) == 0 && b.closed) {
+			return false
+		}
+		for _, x := range da {
+			for _, y := range db {
+				if !compatible(x, y) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// compatible reports whether some value could satisfy both a and b, as far
+// as their types and enum or const values tell.
+func compatible(a, b *oas.Schema) bool {
+	if a == nil || b == nil {
+		return true
+	}
+	if len(a.Type) > 0 && len(b.Type) > 0 && !slices.ContainsFunc(a.Type, func(t string) bool {
+		return slices.ContainsFunc(b.Type, func(u string) bool { return sameType(t, u) })
+	}) {
+		return false
+	}
+	va, vb := values(a), values(b)
+	return va == nil || vb == nil || slices.ContainsFunc(va, func(v string) bool { return slices.Contains(vb, v) })
+}
+
+// sameType reports whether JSON Schema types t and u share values;
+// integers are numbers.
+func sameType(t, u string) bool {
+	return t == u || (t == "integer" && u == "number") || (t == "number" && u == "integer")
+}
+
+// values returns the compacted JSON values s allows by const or enum, or
+// nil if it does not restrict them.
+func values(s *oas.Schema) []string {
+	raw := s.Enum
+	if s.Const != nil {
+		raw = []json.RawMessage{s.Const}
+	}
+	if raw == nil {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		var buf bytes.Buffer
+		if json.Compact(&buf, v) != nil {
+			return nil
+		}
+		out = append(out, buf.String())
+	}
+	return out
+}
+
+// allowed names what s allows, for messages.
+func allowed(s *oas.Schema) string {
+	if v := values(s); v != nil {
+		return strings.Join(v, " or ")
+	}
+	return strings.Join(s.Type, " or ")
+}
+
+func isObjectSchema(s *oas.Schema) bool {
+	if s == nil {
+		return false
+	}
+	if len(s.Type) > 0 {
+		return len(s.Type) == 1 && s.Type[0] == "object"
+	}
+	return s.Properties.Len() > 0 || len(s.Required) > 0
+}
+
+func closes(s *oas.Schema) bool {
+	return s != nil && s.Bool != nil && !*s.Bool
+}
+
+// deref follows $refs to a schema with content of its own.
+func deref(s *oas.Schema) *oas.Schema {
+	seen := make(map[*oas.Schema]bool)
+	for s != nil && s.Ref != "" && s.Resolved != nil && !seen[s] {
+		seen[s] = true
+		s = s.Resolved
+	}
+	return s
 }
 
 // requires reports whether s, or one of its allOf members, lists prop as

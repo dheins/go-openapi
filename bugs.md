@@ -36,15 +36,22 @@ Each entry says where it lives and how to work around it.
   When several `allOf` members define the same property, their constraints
   are all checked, unless a later one has a different type or structure of
   its own (properties, items): then the first definition is used, with a
-  warning.
+  warning. When no value can satisfy both, `goapi validate` reports an
+  `allof-conflict` error.
 - **ECMA-262 patterns are not checked.** `pattern` uses Go's RE2 `regexp`;
   patterns with lookahead, backreferences and similar produce a warning and
   are skipped in `Validate()`.
 - **`oneOf` of open objects rarely matches exactly one variant.** Without a
   discriminator, a `oneOf` whose variants are objects that allow additional
   properties often matches several of them, which JSON Schema (and the
-  generated decoder) rejects. *Workaround:* add a discriminator, or close the
+  generated decoder) rejects. `goapi validate` warns about such a `oneOf`
+  (`oneof-ambiguous`). *Workaround:* add a discriminator, or close the
   variants with `additionalProperties: false` or distinct required properties.
+- **`additionalProperties` and `unevaluatedProperties` on an `allOf` member
+  are not applied.** In JSON Schema they only see that member's properties,
+  so `false` there rejects every property another member adds; the generator
+  warns and ignores them. *Workaround:* put `unevaluatedProperties: false`
+  next to the `allOf`.
 - **A `oneOf` of members without a type, next to no type, never matches.**
   `oneOf: [{format: email}, {format: uri}]` alone gives no Go type, so every
   member becomes `any` and every value matches all of them. *Workaround:*

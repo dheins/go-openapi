@@ -69,5 +69,6 @@ func FuzzModels(f *testing.F) {
 		roundTrip[Label](t, data)
 		roundTrip[Tags](t, data)
 		roundTrip[Handle](t, data)
+		roundTrip[Settings](t, data)
 	})
 }

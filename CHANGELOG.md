@@ -19,6 +19,13 @@
   that checks every member's constraints.
 - `oneOf`/`anyOf` next to a non-object `type`, whose members only add
   checks, is checked by `Validate`, which counts the members that match.
+- `goapi validate` rules `allof-conflict` (error: `allOf` members give a
+  property types or values no value has) and `oneof-ambiguous` (warning: a
+  `oneOf` without a discriminator whose object members can match the same
+  value).
+- `minProperties` and `maxProperties` of every `allOf` member apply to the
+  combined object; `additionalProperties` and `unevaluatedProperties` on a
+  member produce a warning instead of being ignored silently.
 - `server.BindError`: invalid requests reach the error handler as their own
   error type, so they can be answered in the format the document declares.
 - Generated servers recover from panics in handlers and middleware: the

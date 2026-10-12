@@ -54,7 +54,11 @@ Validation runs in three phases and stops at the first that finds errors:
    path templates matching path parameters, duplicate parameters,
    `querystring` misuse, equivalent paths, server variables, undefined
    security schemes, tag hierarchies, link targets and discriminator
-   properties.
+   properties. Two rules look at composition: `allof-conflict` (an error)
+   reports a property that `allOf` members define with types or values no
+   value has, and `oneof-ambiguous` (a warning) a `oneOf` without a
+   discriminator whose object members one value can satisfy together,
+   which `oneOf` then rejects.
 
 Each diagnostic has a file, line and column:
 

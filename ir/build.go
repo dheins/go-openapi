@@ -310,7 +310,8 @@ func (b *builder) fillStruct(t *Type) {
 	}
 	var redefinitions []redefinition
 	var unionMembers []*oas.Schema
-	for _, part := range b.objectParts(s, s, map[*oas.Schema]bool{}, &unionMembers) {
+	parts := b.objectParts(s, s, map[*oas.Schema]bool{}, &unionMembers)
+	for _, part := range parts {
 		for name, ps := range part.Properties.All() {
 			if _, dup := index[name]; dup {
 				redefinitions = append(redefinitions, redefinition{part, name, ps})
@@ -384,7 +385,26 @@ func (b *builder) fillStruct(t *Type) {
 		}
 	}
 
-	t.MinProperties, t.MaxProperties = s.MinProperties, s.MaxProperties
+	// Every allOf member's property counts apply; the strictest wins.
+	for _, part := range parts {
+		if n := part.MinProperties; n != nil && (t.MinProperties == nil || *n > *t.MinProperties) {
+			t.MinProperties = n
+		}
+		if n := part.MaxProperties; n != nil && (t.MaxProperties == nil || *n < *t.MaxProperties) {
+			t.MaxProperties = n
+		}
+		if part == s {
+			continue
+		}
+		// In JSON Schema these only see the member's own properties, so
+		// false would reject every property another member adds.
+		if part.AdditionalProperties != nil {
+			b.warn(part, []string{"additionalProperties"}, "additionalProperties of an allOf member only knows that member's properties; it is not applied to the combined object (use unevaluatedProperties: false next to the allOf)")
+		}
+		if part.UnevaluatedProperties != nil {
+			b.warn(part, []string{"unevaluatedProperties"}, "unevaluatedProperties of an allOf member is not applied to the combined object; put it next to the allOf")
+		}
+	}
 	switch ap := s.AdditionalProperties; {
 	case ap != nil && ap.Bool != nil && !*ap.Bool:
 		t.Additional = &Additional{Forbidden: true}

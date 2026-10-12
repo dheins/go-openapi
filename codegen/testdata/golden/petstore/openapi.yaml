@@ -422,3 +422,13 @@ components:
           allOf:
             - $ref: "#/components/schemas/Code"
             - maxLength: 2
+    Settings:
+      allOf:
+        - type: object
+          properties:
+            a: {type: string}
+            b: {type: string}
+            c: {type: string}
+          maxProperties: 2
+        - type: object
+          minProperties: 1

@@ -661,3 +661,48 @@ func TestScalarAlternatives(t *testing.T) {
 		t.Errorf("decode = %q, %v", h, err)
 	}
 }
+
+func TestAllOfPropertyCounts(t *testing.T) {
+	// Each allOf member's property count applies to the combined object.
+	assertMessages(t, Settings{}.Validate(), "must have at least 1 property")
+	assertMessages(t, Settings{A: oapi.Some("a"), B: oapi.Some("b"), C: oapi.Some("c")}.Validate(), "must have at most 2 properties")
+	if err := (Settings{A: oapi.Some("a")}).Validate(); err != nil {
+		t.Errorf("one property: %v", err)
+	}
+}
+
+func TestAmbiguousOneOf(t *testing.T) {
+	// Shape is a oneOf of two objects without a discriminator:
+	//
+	//	oneOf:
+	//	  - {type: object, properties: {radius: {type: number}}}
+	//	  - {type: object, properties: {side: {type: number}}}
+	//
+	// Neither member requires a property or forbids others, so every
+	// object matches both, and oneOf, which allows exactly one, rejects
+	// it. goapi validate warns about this schema (oneof-ambiguous).
+	for _, in := range []string{`{"radius": 2}`, `{"side": 3}`, `{}`, `{"radius": 2, "side": 3}`} {
+		var s Shape
+		err := json.Unmarshal([]byte(in), &s)
+		assertMessages(t, err, "matches several variants (ShapeVariant1, ShapeVariant2), but exactly one is allowed")
+		if s.Value() != nil {
+			t.Errorf("%s: a failed decode left %#v", in, s.Value())
+		}
+	}
+	// A value that fails one member is not ambiguous: it matches only the
+	// other.
+	var s Shape
+	if err := json.Unmarshal([]byte(`{"radius": "big", "side": 3}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := s.Value().(ShapeVariant2); !ok || v.Side.Value != 3 {
+		t.Errorf("shape = %#v", s.Value())
+	}
+
+	// A discriminator removes the ambiguity: Vehicle's members overlap
+	// just as much, but "kind" says which one a value is.
+	var v Vehicle
+	if err := json.Unmarshal([]byte(`{"kind": "Bike", "wheels": 2, "gears": 1}`), &v); err != nil {
+		t.Errorf("vehicle: %v", err)
+	}
+}

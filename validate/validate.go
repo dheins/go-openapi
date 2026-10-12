@@ -46,6 +46,8 @@ const (
 	RuleTags              = "tags"
 	RuleLinkOperation     = "link-operation"
 	RuleDiscriminatorProp = "discriminator-property"
+	RuleAllOfConflict     = "allof-conflict"
+	RuleOneOfAmbiguous    = "oneof-ambiguous"
 )
 
 // Diagnostic is one finding, tied to a place in a source file.

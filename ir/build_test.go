@@ -422,3 +422,41 @@ components:
 		t.Errorf("Choice = %+v", ty)
 	}
 }
+
+func TestAllOfMemberClosure(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+components:
+  schemas:
+    Base:
+      type: object
+      properties: {id: {type: integer}}
+      additionalProperties: false
+    Sub:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          properties: {name: {type: string}}
+          unevaluatedProperties: false
+`, Options{})
+	var got []string
+	for _, w := range m.Warnings {
+		got = append(got, w.Location.Pointer+": "+w.Message)
+	}
+	want := []string{
+		"/components/schemas/Base/additionalProperties: additionalProperties of an allOf member only knows that member's properties",
+		"/components/schemas/Sub/allOf/1/unevaluatedProperties: unevaluatedProperties of an allOf member is not applied",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("warnings:\n%s", strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], want[i]) {
+			t.Errorf("warning %d = %q\nwant prefix %q", i, got[i], want[i])
+		}
+	}
+	// Base itself stays closed; Sub, built from both, is not.
+	if typeNamed(t, m, "Base").Additional == nil || typeNamed(t, m, "Sub").Additional != nil {
+		t.Errorf("Base.Additional = %+v, Sub.Additional = %+v", typeNamed(t, m, "Base").Additional, typeNamed(t, m, "Sub").Additional)
+	}
+}

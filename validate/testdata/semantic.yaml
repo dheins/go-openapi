@@ -74,3 +74,40 @@ components:
     Cyclic2:
       allOf:
         - $ref: "#/components/schemas/Cyclic"
+    Clash:
+      allOf:
+        - properties: {size: {type: string}}
+        - properties: {size: {type: integer}}
+    Narrow:
+      allOf:
+        - properties: {size: {type: integer}}
+        - properties: {size: {type: number, maximum: 3}}
+    Picked:
+      allOf:
+        - properties: {mode: {enum: [a, b]}}
+        - properties: {mode: {const: c}}
+    Outer:
+      allOf:
+        - $ref: "#/components/schemas/Clash"
+    Payment:
+      oneOf:
+        - type: object
+          required: [card]
+          properties: {card: {type: string}}
+        - type: object
+          required: [iban]
+          properties: {iban: {type: string}}
+    Tagged:
+      oneOf:
+        - {type: object, required: [kind], properties: {kind: {const: a}}}
+        - {type: object, required: [kind], properties: {kind: {const: b}}}
+    Closed:
+      oneOf:
+        - {type: object, required: [a], properties: {a: {type: string}}, additionalProperties: false}
+        - {type: object, required: [b], properties: {b: {type: string}}, additionalProperties: false}
+    OneField:
+      type: object
+      properties: {email: {type: string}, phone: {type: string}}
+      oneOf:
+        - required: [email]
+        - required: [phone]

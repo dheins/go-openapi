@@ -66,7 +66,7 @@ func TestValidateTextOutput(t *testing.T) {
 		"semantic.yaml:55:20: error: operationId \"getPet\" is already used at",
 		"[operation-id-unique]",
 		"warning: server variable \"unused\" is not used in the URL",
-		"14 error(s), 3 warning(s)",
+		"16 error(s), 4 warning(s)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output does not contain %q:\n%s", want, out)

@@ -254,6 +254,10 @@ func TestSemanticRules(t *testing.T) {
 		{RuleOperationID, 55, `operationId "getPet" is already used at`},
 		{RuleDiscriminatorProp, 68, `discriminator property "kind" is not a required property`},
 		{RuleDiscriminatorProp, 73, `discriminator property "kind" is not a required property`},
+		// Narrow, the nested Outer, Tagged and Closed report nothing.
+		{RuleAllOfConflict, 79, `property "size" is defined as string and as integer`},
+		{RuleAllOfConflict, 87, `property "mode" is defined as "a" or "b" and as "c"`},
+		{RuleOneOfAmbiguous, 94, "oneOf members 0 and 1 can both match the same object"},
 	})
 }
 
