@@ -436,3 +436,6 @@ components:
       oneOf:
         - format: email
         - format: uri
+    Password:
+      type: string
+      pattern: "^(?=.*[0-9])(?=.*[A-Z]).{8,}$"

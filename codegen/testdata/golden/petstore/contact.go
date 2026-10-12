@@ -3,12 +3,10 @@
 package petstore
 
 import (
-	"regexp"
-
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var contactPhoneAlternativePattern = regexp.MustCompile("^\\+[1-9][0-9]{6,14}$")
+var contactPhoneAlternativePattern = oapi.MustCompilePattern("^\\+[1-9][0-9]{6,14}$")
 
 // Contact is generated from the schema at /components/schemas/Contact.
 type Contact struct {
@@ -109,8 +107,8 @@ func (m Contact) matchesAlternative1() bool {
 	}
 	var errs oapi.ValidationErrors
 	if m.Phone.Set {
-		if !contactPhoneAlternativePattern.MatchString(m.Phone.Value) {
-			errs.Add("/phone", "must match the pattern ^\\+[1-9][0-9]{6,14}$")
+		if err := contactPhoneAlternativePattern.Check(m.Phone.Value); err != nil {
+			errs.Add("/phone", err.Error())
 		}
 	}
 	return len(errs) == 0

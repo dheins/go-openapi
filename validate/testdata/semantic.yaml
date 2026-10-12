@@ -111,3 +111,10 @@ components:
       oneOf:
         - required: [email]
         - required: [phone]
+    Patterns:
+      type: object
+      properties:
+        good: {type: string, pattern: "^(?=.*[0-9]).{8,}$"}
+        bad: {type: string, pattern: "(?=unclosed"}
+      patternProperties:
+        "[": {type: string}

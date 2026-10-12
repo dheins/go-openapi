@@ -521,9 +521,9 @@ func (v *validator) stringChecks(expr, path string, c *ir.Checks, hint string, d
 	}
 	if c.Pattern != "" {
 		re := v.file.declareVar(lowerFirst(v.typeName)+hint+"Pattern",
-			fmt.Sprintf("%s.MustCompile(%s)", v.file.imp("regexp", "regexp"), strconv.Quote(c.Pattern)))
-		v.line(depth, "if !%s.MatchString(%s) {", re, expr)
-		v.line(depth+1, "errs.Add(%s, %q)", path, "must match the pattern "+c.Pattern)
+			fmt.Sprintf("%s.MustCompilePattern(%s)", v.file.imp(oapiImport, "oapi"), strconv.Quote(c.Pattern)))
+		v.line(depth, "if err := %s.Check(%s); err != nil {", re, expr)
+		v.line(depth+1, "errs.Add(%s, err.Error())", path)
 		v.line(depth, "}")
 	}
 	if c.Format != "" {

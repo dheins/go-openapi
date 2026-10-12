@@ -3,12 +3,10 @@
 package petstore
 
 import (
-	"regexp"
-
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var shortCodePattern = regexp.MustCompile("^[A-Z]+$")
+var shortCodePattern = oapi.MustCompilePattern("^[A-Z]+$")
 
 // ShortCode is generated from the schema at /components/schemas/ShortCode.
 type ShortCode string
@@ -16,8 +14,8 @@ type ShortCode string
 // Validate checks the value against the constraints of the schema.
 func (v ShortCode) Validate() error {
 	var errs oapi.ValidationErrors
-	if !shortCodePattern.MatchString(string(v)) {
-		errs.Add("", "must match the pattern ^[A-Z]+$")
+	if err := shortCodePattern.Check(string(v)); err != nil {
+		errs.Add("", err.Error())
 	}
 	if oapi.StringLength(string(v)) > 4 {
 		errs.Add("", "length must be at most 4")

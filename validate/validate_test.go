@@ -258,6 +258,9 @@ func TestSemanticRules(t *testing.T) {
 		{RuleAllOfConflict, 79, `property "size" is defined as string and as integer`},
 		{RuleAllOfConflict, 87, `property "mode" is defined as "a" or "b" and as "c"`},
 		{RuleOneOfAmbiguous, 94, "oneOf members 0 and 1 can both match the same object"},
+		// A lookahead is valid ECMA-262; an unclosed group or set is not.
+		{RulePattern, 118, "pattern is not a valid regular expression"},
+		{RulePattern, 120, "pattern is not a valid regular expression"},
 	})
 }
 

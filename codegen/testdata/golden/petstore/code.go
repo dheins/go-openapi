@@ -3,12 +3,10 @@
 package petstore
 
 import (
-	"regexp"
-
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var codePattern = regexp.MustCompile("^[A-Z]+$")
+var codePattern = oapi.MustCompilePattern("^[A-Z]+$")
 
 // Code is generated from the schema at /components/schemas/Code.
 type Code string
@@ -16,8 +14,8 @@ type Code string
 // Validate checks the value against the constraints of the schema.
 func (v Code) Validate() error {
 	var errs oapi.ValidationErrors
-	if !codePattern.MatchString(string(v)) {
-		errs.Add("", "must match the pattern ^[A-Z]+$")
+	if err := codePattern.Check(string(v)); err != nil {
+		errs.Add("", err.Error())
 	}
 	return errs.Err()
 }

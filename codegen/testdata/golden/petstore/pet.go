@@ -3,13 +3,12 @@
 package petstore
 
 import (
-	"regexp"
 	"time"
 
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var petNamePattern = regexp.MustCompile("^[A-Za-z][A-Za-z ]*$")
+var petNamePattern = oapi.MustCompilePattern("^[A-Za-z][A-Za-z ]*$")
 
 // Pet is generated from the schema at /components/schemas/Pet.
 //
@@ -159,8 +158,8 @@ func (m Pet) Validate() error {
 	if oapi.StringLength(m.Name) > 50 {
 		errs.Add("/name", "length must be at most 50")
 	}
-	if !petNamePattern.MatchString(m.Name) {
-		errs.Add("/name", "must match the pattern ^[A-Za-z][A-Za-z ]*$")
+	if err := petNamePattern.Check(m.Name); err != nil {
+		errs.Add("/name", err.Error())
 	}
 	errs.Nested("/status", m.Status.Validate())
 	if m.Weight.Set {

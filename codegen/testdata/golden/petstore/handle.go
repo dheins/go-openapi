@@ -3,12 +3,10 @@
 package petstore
 
 import (
-	"regexp"
-
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var handleAlternativePattern = regexp.MustCompile("^@[a-z]+$")
+var handleAlternativePattern = oapi.MustCompilePattern("^@[a-z]+$")
 
 // Handle is generated from the schema at /components/schemas/Handle.
 type Handle string
@@ -45,8 +43,8 @@ func (v Handle) matchesAlternative0() bool {
 // oneOf: its checks pass.
 func (v Handle) matchesAlternative1() bool {
 	var errs oapi.ValidationErrors
-	if !handleAlternativePattern.MatchString(string(v)) {
-		errs.Add("", "must match the pattern ^@[a-z]+$")
+	if err := handleAlternativePattern.Check(string(v)); err != nil {
+		errs.Add("", err.Error())
 	}
 	return len(errs) == 0
 }

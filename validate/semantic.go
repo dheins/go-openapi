@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/dheins/go-openapi/loader"
+	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/oas"
 )
 
@@ -29,6 +30,7 @@ type checker struct {
 	discriminators []*oas.Schema
 	allOfs         []*oas.Schema
 	oneOfs         []*oas.Schema
+	patterns       []*oas.Schema
 }
 
 func semantic(spec *loader.Spec) ([]Diagnostic, error) {
@@ -46,6 +48,7 @@ func semantic(spec *loader.Spec) ([]Diagnostic, error) {
 	c.checkDiscriminators()
 	c.checkAllOfConflicts()
 	c.checkOneOfAmbiguity()
+	c.checkPatterns()
 	slices.SortStableFunc(c.diags, func(a, b Diagnostic) int {
 		return cmp.Or(
 			strings.Compare(a.Location.URI, b.Location.URI),
@@ -85,6 +88,9 @@ func (c *checker) collect() error {
 			}
 			if len(o.OneOf) > 1 && o.Discriminator == nil {
 				c.oneOfs = append(c.oneOfs, o)
+			}
+			if o.Pattern != "" || o.PatternProperties != nil {
+				c.patterns = append(c.patterns, o)
 			}
 		}
 		return nil
@@ -428,6 +434,26 @@ func (c *checker) checkOneOfAmbiguity() {
 						"oneOf members %d and %d can both match the same object, which oneOf then rejects; add a discriminator, or required properties that tell them apart",
 						objects[i], objects[j])
 					break pairs
+				}
+			}
+		}
+	}
+}
+
+// checkPatterns reports patterns that are not ECMA-262 regular
+// expressions, which no value can be checked against. They are compiled
+// as generated code compiles them.
+func (c *checker) checkPatterns() {
+	for _, s := range c.patterns {
+		if s.Pattern != "" {
+			if _, err := oapi.CompilePattern(s.Pattern); err != nil {
+				c.report(Error, RulePattern, s, []string{"pattern"}, "pattern is not a valid regular expression: %v", err)
+			}
+		}
+		if s.PatternProperties != nil {
+			for expr := range s.PatternProperties.All() {
+				if _, err := oapi.CompilePattern(expr); err != nil {
+					c.report(Error, RulePattern, s, []string{"patternProperties", expr}, "pattern is not a valid regular expression: %v", err)
 				}
 			}
 		}

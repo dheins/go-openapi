@@ -152,7 +152,7 @@ components:
       properties:
         x:
           type: string
-          pattern: "(?=lookahead)"
+          pattern: "(?=unclosed"
       patternProperties:
         "^y": {type: string}
     C:
@@ -164,7 +164,7 @@ components:
 	}
 	want := []string{
 		"/components/schemas/B/patternProperties: patternProperties is not supported yet and is not reflected in the generated type",
-		"/components/schemas/B/properties/x/pattern: pattern is not supported by Go's regexp package and is not checked",
+		"/components/schemas/B/properties/x/pattern: pattern is not a valid ECMA-262 regular expression and is not checked",
 		"/components/schemas/C/not: not is not supported yet and is not reflected in the generated type",
 	}
 	if len(got) != len(want) {

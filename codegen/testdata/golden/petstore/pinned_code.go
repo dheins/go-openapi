@@ -3,12 +3,10 @@
 package petstore
 
 import (
-	"regexp"
-
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var pinnedCodePattern = regexp.MustCompile("^[A-Z]+$")
+var pinnedCodePattern = oapi.MustCompilePattern("^[A-Z]+$")
 
 // PinnedCode is generated from the schema at /components/schemas/PinnedCode.
 type PinnedCode string
@@ -16,8 +14,8 @@ type PinnedCode string
 // Validate checks the value against the constraints of the schema.
 func (v PinnedCode) Validate() error {
 	var errs oapi.ValidationErrors
-	if !pinnedCodePattern.MatchString(string(v)) {
-		errs.Add("", "must match the pattern ^[A-Z]+$")
+	if err := pinnedCodePattern.Check(string(v)); err != nil {
+		errs.Add("", err.Error())
 	}
 	if oapi.StringLength(string(v)) < 2 {
 		errs.Add("", "length must be at least 2")

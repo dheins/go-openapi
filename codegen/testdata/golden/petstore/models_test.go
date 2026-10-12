@@ -725,3 +725,14 @@ func TestUntypedAlternatives(t *testing.T) {
 		t.Error("a number decoded as Contactable")
 	}
 }
+
+func TestECMAPatterns(t *testing.T) {
+	// Lookaheads are not supported by Go's regexp; the pattern is checked
+	// by a backtracking engine instead of being skipped.
+	if err := Password("Secret123").Validate(); err != nil {
+		t.Errorf("Secret123: %v", err)
+	}
+	for _, bad := range []Password{"secret123", "SecretOnly", "S3cret"} {
+		assertMessages(t, bad.Validate(), "must match the pattern ^(?=.*[0-9])(?=.*[A-Z]).{8,}$")
+	}
+}

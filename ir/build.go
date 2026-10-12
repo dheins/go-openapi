@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dheins/go-openapi/loader"
+	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/oas"
 )
 
@@ -841,8 +842,8 @@ func (b *builder) stringRef(s *oas.Schema) *Ref {
 	}
 	c.MinLength, c.MaxLength = s.MinLength, s.MaxLength
 	if s.Pattern != "" {
-		if _, err := regexp.Compile(s.Pattern); err != nil {
-			b.warn(s, []string{"pattern"}, fmt.Sprintf("pattern is not supported by Go's regexp package and is not checked: %v", err))
+		if _, err := oapi.CompilePattern(s.Pattern); err != nil {
+			b.warn(s, []string{"pattern"}, fmt.Sprintf("pattern is not a valid ECMA-262 regular expression and is not checked: %v", err))
 		} else {
 			c.Pattern = s.Pattern
 		}

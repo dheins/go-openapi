@@ -48,6 +48,7 @@ const (
 	RuleDiscriminatorProp = "discriminator-property"
 	RuleAllOfConflict     = "allof-conflict"
 	RuleOneOfAmbiguous    = "oneof-ambiguous"
+	RulePattern           = "pattern"
 )
 
 // Diagnostic is one finding, tied to a place in a source file.

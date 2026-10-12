@@ -3,12 +3,10 @@
 package petstore
 
 import (
-	"regexp"
-
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var labelCodePattern = regexp.MustCompile("^[A-Z]+$")
+var labelCodePattern = oapi.MustCompilePattern("^[A-Z]+$")
 
 // Label is generated from the schema at /components/schemas/Label.
 type Label struct {
@@ -73,8 +71,8 @@ type LabelCode string
 // Validate checks the value against the constraints of the schema.
 func (v LabelCode) Validate() error {
 	var errs oapi.ValidationErrors
-	if !labelCodePattern.MatchString(string(v)) {
-		errs.Add("", "must match the pattern ^[A-Z]+$")
+	if err := labelCodePattern.Check(string(v)); err != nil {
+		errs.Add("", err.Error())
 	}
 	if oapi.StringLength(string(v)) > 2 {
 		errs.Add("", "length must be at most 2")

@@ -3,12 +3,10 @@
 package petstore
 
 import (
-	"regexp"
-
 	"github.com/dheins/go-openapi/oapi"
 )
 
-var badgeCodePattern = regexp.MustCompile("^[A-Z]+$")
+var badgeCodePattern = oapi.MustCompilePattern("^[A-Z]+$")
 
 // Badge is generated from the schema at /components/schemas/Badge.
 type Badge struct {
@@ -67,8 +65,8 @@ func (m Badge) Validate() error {
 	if oapi.StringLength(m.Code) > 8 {
 		errs.Add("/code", "length must be at most 8")
 	}
-	if !badgeCodePattern.MatchString(m.Code) {
-		errs.Add("/code", "must match the pattern ^[A-Z]+$")
+	if err := badgeCodePattern.Check(m.Code); err != nil {
+		errs.Add("/code", err.Error())
 	}
 	return errs.Err()
 }
