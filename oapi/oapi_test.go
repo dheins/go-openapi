@@ -289,6 +289,24 @@ func TestOptionalNull(t *testing.T) {
 	}
 }
 
+func TestFileJSON(t *testing.T) {
+	// UTF-8 data is a JSON string, and decodes to the same bytes.
+	in := File{Name: "a.txt", ContentType: "text/plain", Data: []byte("héllo\n")}
+	out, err := json.Marshal(in)
+	if err != nil || string(out) != `"héllo\n"` {
+		t.Fatalf("marshal = %s, %v", out, err)
+	}
+	var back File
+	if err := json.Unmarshal(out, &back); err != nil || string(back.Data) != string(in.Data) {
+		t.Errorf("unmarshal = %q, %v", back.Data, err)
+	}
+	// Other bytes would be replaced by U+FFFD, so they are refused rather
+	// than corrupted.
+	if out, err := json.Marshal(File{Data: []byte{0xff, 0x00, 0x80}}); err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Errorf("marshal of binary data = %s, %v", out, err)
+	}
+}
+
 func TestEncodeFastPaths(t *testing.T) {
 	for _, v := range []any{"plain", `q"uote`, "tab\t", "<html>&", "ünïcode", "\u2028", "", true, int64(-9), int32(7), 42, 1.5} {
 		want, err := json.Marshal(v)

@@ -15,6 +15,7 @@ type fuzzTarget struct {
 	P *fuzzTarget                 `json:"p"`
 	D Optional[Date]              `json:"d,omitzero"`
 	F Optional[map[string]string] `json:"f,omitzero"`
+	B Optional[File]              `json:"b,omitzero"`
 }
 
 // FuzzDecode checks that decoding never panics, and that a value that
@@ -22,7 +23,7 @@ type fuzzTarget struct {
 func FuzzDecode(f *testing.F) {
 	for _, seed := range []string{
 		`{}`, `null`, `[]`, `{"s":"x","n":null,"l":[true,null],"m":{"a":[1.5]},"a":{"x":[1]},"p":{"n":3},"d":"2024-02-29"}`,
-		`{"l":[1]}`, `{"m":{"a":"b"}}`, `{"p":{"p":{"p":null}}}`, `{"d":"2024-13-01"}`, `{"f":{"k":"v"}}`,
+		`{"l":[1]}`, `{"m":{"a":"b"}}`, `{"p":{"p":{"p":null}}}`, `{"d":"2024-13-01"}`, `{"f":{"k":"v"}}`, `{"b":"bytes"}`,
 	} {
 		f.Add([]byte(seed))
 	}
