@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -25,17 +27,17 @@ import (
 
 // store implements Handler with an in-memory list of pets.
 type store struct {
-	pets   []Pet
+	pets   []model.Pet
 	nextID int64
 	// seen records the last request each method received.
 	seen map[string]any
 }
 
 func newStore() *store {
-	return &store{pets: []Pet{{ID: 1, Name: "Rex"}, {ID: 2, Name: "Tom", Tag: oapi.Some("cat")}}, nextID: 3, seen: map[string]any{}}
+	return &store{pets: []model.Pet{{ID: 1, Name: "Rex"}, {ID: 2, Name: "Tom", Tag: oapi.Some("cat")}}, nextID: 3, seen: map[string]any{}}
 }
 
-func (s *store) ListPets(ctx context.Context, req *ListPetsRequest) (ListPetsResponse, error) {
+func (s *store) ListPets(ctx context.Context, req *api.ListPetsRequest) (api.ListPetsResponse, error) {
 	s.seen["ListPets"] = req
 	if _, ok := server.HTTPRequest(ctx); !ok {
 		return nil, errors.New("no *http.Request in context")
@@ -44,125 +46,125 @@ func (s *store) ListPets(ctx context.Context, req *ListPetsRequest) (ListPetsRes
 	if n, ok := req.Limit.Get(); ok && int(n) < len(pets) {
 		pets = pets[:n]
 	}
-	return ListPets200JSONResponse{Body: pets, XTotal: int64(len(s.pets)), XNext: oapi.Some("cursor-2")}, nil
+	return api.ListPets200JSONResponse{Body: pets, XTotal: int64(len(s.pets)), XNext: oapi.Some("cursor-2")}, nil
 }
 
-func (s *store) CreatePet(_ context.Context, req *CreatePetRequest) (CreatePetResponse, error) {
+func (s *store) CreatePet(_ context.Context, req *api.CreatePetRequest) (api.CreatePetResponse, error) {
 	s.seen["CreatePet"] = req
 	if req.Body.Name == "Taken" {
-		return CreatePet4XXJSONResponse{StatusCode: http.StatusConflict, Body: Error{Message: "name taken"}}, nil
+		return api.CreatePet4XXJSONResponse{StatusCode: http.StatusConflict, Body: model.Error{Message: "name taken"}}, nil
 	}
 	if req.Body.Name == "Bad status" {
-		return CreatePet4XXJSONResponse{StatusCode: http.StatusInternalServerError}, nil
+		return api.CreatePet4XXJSONResponse{StatusCode: http.StatusInternalServerError}, nil
 	}
 	pet := req.Body
 	pet.ID = s.nextID
 	s.nextID++
 	s.pets = append(s.pets, pet)
-	return CreatePet201JSONResponse{Body: pet}, nil
+	return api.CreatePet201JSONResponse{Body: pet}, nil
 }
 
-func (s *store) GetPet(_ context.Context, req *GetPetRequest) (GetPetResponse, error) {
+func (s *store) GetPet(_ context.Context, req *api.GetPetRequest) (api.GetPetResponse, error) {
 	s.seen["GetPet"] = req
 	if req.PetID == 666 {
 		panic("cursed pet")
 	}
 	for _, p := range s.pets {
 		if p.ID == req.PetID {
-			return GetPet200JSONResponse{Body: p}, nil
+			return api.GetPet200JSONResponse{Body: p}, nil
 		}
 	}
-	return GetPet404Response{}, nil
+	return api.GetPet404Response{}, nil
 }
 
-func (s *store) DeletePet(_ context.Context, req *DeletePetRequest) (DeletePetResponse, error) {
+func (s *store) DeletePet(_ context.Context, req *api.DeletePetRequest) (api.DeletePetResponse, error) {
 	if req.PetID == 99 {
 		return nil, problem.New(http.StatusForbidden, "pet 99 is protected")
 	}
 	if req.PetID == 500 {
 		return nil, errors.New("database password is hunter2")
 	}
-	return DeletePet204Response{}, nil
+	return api.DeletePet204Response{}, nil
 }
 
-func (s *store) GetFile(_ context.Context, req *GetFileRequest) (GetFileResponse, error) {
-	return GetFile200JSONResponse{Body: GetFile200ResponseBody{Name: req.Name, Ext: string(req.Ext)}}, nil
+func (s *store) GetFile(_ context.Context, req *api.GetFileRequest) (api.GetFileResponse, error) {
+	return api.GetFile200JSONResponse{Body: model.GetFile200ResponseBody{Name: req.Name, Ext: string(req.Ext)}}, nil
 }
 
-func (s *store) SearchPets(_ context.Context, req *SearchPetsRequest) (SearchPetsResponse, error) {
+func (s *store) SearchPets(_ context.Context, req *api.SearchPetsRequest) (api.SearchPetsResponse, error) {
 	s.seen["SearchPets"] = req
-	var found []Pet
+	var found []model.Pet
 	for _, p := range s.pets {
 		if !req.Body.Set || p.Name == req.Body.Value.Name.Value {
 			found = append(found, p)
 		}
 	}
-	return SearchPets200JSONResponse{Body: found}, nil
+	return api.SearchPets200JSONResponse{Body: found}, nil
 }
 
-func (s *store) Secure(context.Context, *SecureRequest) (SecureResponse, error) {
+func (s *store) Secure(context.Context, *api.SecureRequest) (api.SecureResponse, error) {
 	return nil, nil
 }
 
-func (s *store) CopyPet(_ context.Context, req *CopyPetRequest) (CopyPetResponse, error) {
+func (s *store) CopyPet(_ context.Context, req *api.CopyPetRequest) (api.CopyPetResponse, error) {
 	for _, p := range s.pets {
 		if p.ID == req.PetID {
 			p.ID = s.nextID
 			p.Name = req.Destination
 			s.nextID++
 			s.pets = append(s.pets, p)
-			return CopyPet201JSONResponse{Body: p}, nil
+			return api.CopyPet201JSONResponse{Body: p}, nil
 		}
 	}
 	return nil, problem.New(http.StatusNotFound, "no such pet")
 }
 
-func (s *store) Admin(ctx context.Context, _ *AdminRequest) (AdminResponse, error) {
+func (s *store) Admin(ctx context.Context, _ *api.AdminRequest) (api.AdminResponse, error) {
 	user, _ := ctx.Value(userKey{}).(string)
-	return Admin200TextResponse{Body: user}, nil
+	return api.Admin200TextResponse{Body: user}, nil
 }
 
-func (s *store) GetReports(_ context.Context, req *GetReportsRequest) (GetReportsResponse, error) {
+func (s *store) GetReports(_ context.Context, req *api.GetReportsRequest) (api.GetReportsResponse, error) {
 	s.seen["GetReports"] = req
-	return GetReports204Response{}, nil
+	return api.GetReports204Response{}, nil
 }
 
-func (s *store) Lookup(_ context.Context, req *LookupRequest) (LookupResponse, error) {
+func (s *store) Lookup(_ context.Context, req *api.LookupRequest) (api.LookupResponse, error) {
 	s.seen["Lookup"] = req
-	return Lookup204Response{}, nil
+	return api.Lookup204Response{}, nil
 }
 
-func (s *store) UploadPhoto(_ context.Context, req *UploadPhotoRequest) (UploadPhotoResponse, error) {
+func (s *store) UploadPhoto(_ context.Context, req *api.UploadPhotoRequest) (api.UploadPhotoResponse, error) {
 	s.seen["UploadPhoto"] = req
-	return UploadPhoto204Response{}, nil
+	return api.UploadPhoto204Response{}, nil
 }
 
-func (s *store) GetPhoto(_ context.Context, req *GetPhotoRequest) (GetPhotoResponse, error) {
+func (s *store) GetPhoto(_ context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {
 	if req.PetID == 2 {
-		return GetPhoto200ImageResponse{ContentType: "text/plain", Body: []byte("oops")}, nil
+		return api.GetPhoto200ImageResponse{ContentType: "text/plain", Body: []byte("oops")}, nil
 	}
-	return GetPhoto200ImageResponse{ContentType: "image/png", Body: []byte("PNGDATA")}, nil
+	return api.GetPhoto200ImageResponse{ContentType: "image/png", Body: []byte("PNGDATA")}, nil
 }
 
-func (s *store) SubmitForm(_ context.Context, req *SubmitFormRequest) (SubmitFormResponse, error) {
+func (s *store) SubmitForm(_ context.Context, req *api.SubmitFormRequest) (api.SubmitFormResponse, error) {
 	s.seen["SubmitForm"] = req
-	return SubmitForm204Response{}, nil
+	return api.SubmitForm204Response{}, nil
 }
 
-func (s *store) Shout(_ context.Context, req *ShoutRequest) (ShoutResponse, error) {
-	return Shout200TextResponse{Body: strings.ToUpper(req.Body.Value) + "!"}, nil
+func (s *store) Shout(_ context.Context, req *api.ShoutRequest) (api.ShoutResponse, error) {
+	return api.Shout200TextResponse{Body: strings.ToUpper(req.Body.Value) + "!"}, nil
 }
 
-func (s *store) ExportPets(ctx context.Context, _ *ExportPetsRequest) (ExportPetsResponse, error) {
+func (s *store) ExportPets(ctx context.Context, _ *api.ExportPetsRequest) (api.ExportPetsResponse, error) {
 	r, _ := server.HTTPRequest(ctx)
 	if server.Negotiate(r, "application/jsonl", "text/csv") == "text/csv" {
 		var csv strings.Builder
 		for _, p := range s.pets {
 			fmt.Fprintf(&csv, "%d,%s\n", p.ID, p.Name)
 		}
-		return ExportPets200TextResponse{Body: csv.String()}, nil
+		return api.ExportPets200TextResponse{Body: csv.String()}, nil
 	}
-	return ExportPets200JSONLinesResponse{Items: func(yield func(Pet, error) bool) {
+	return api.ExportPets200JSONLinesResponse{Items: func(yield func(model.Pet, error) bool) {
 		for _, p := range s.pets {
 			if !yield(p, nil) {
 				return
@@ -171,8 +173,8 @@ func (s *store) ExportPets(ctx context.Context, _ *ExportPetsRequest) (ExportPet
 	}}, nil
 }
 
-func (s *store) Watch(context.Context, *WatchRequest) (WatchResponse, error) {
-	return Watch200EventsResponse{Events: func(yield func(server.Event, error) bool) {
+func (s *store) Watch(context.Context, *api.WatchRequest) (api.WatchResponse, error) {
+	return api.Watch200EventsResponse{Events: func(yield func(server.Event, error) bool) {
 		for _, p := range s.pets {
 			ev, err := server.JSONEvent("pet", p)
 			if !yield(ev, err) {
@@ -273,12 +275,12 @@ func TestListPets(t *testing.T) {
 	if r.body != `[{"id":1,"name":"Rex"}]` {
 		t.Errorf("body = %s", r.body)
 	}
-	req := s.seen["ListPets"].(*ListPetsRequest)
-	if !slices.Equal(req.Tags.Value, []string{"a", "b"}) || req.Limit.Value != 1 || req.Sort != ListPetsSortName {
+	req := s.seen["ListPets"].(*api.ListPetsRequest)
+	if !slices.Equal(req.Tags.Value, []string{"a", "b"}) || req.Limit.Value != 1 || req.Sort != model.ListPetsSortName {
 		t.Errorf("request = %+v", req)
 	}
 	do(t, h, "GET", "/pets?sort=id", "", "")
-	if req := s.seen["ListPets"].(*ListPetsRequest); req.Sort != ListPetsSortID {
+	if req := s.seen["ListPets"].(*api.ListPetsRequest); req.Sort != model.ListPetsSortID {
 		t.Errorf("sort = %q", req.Sort)
 	}
 }
@@ -338,7 +340,7 @@ func TestReadOnlyAndWriteOnlyOverHTTP(t *testing.T) {
 	if r.status != 201 {
 		t.Fatalf("%d %s", r.status, r.body)
 	}
-	if req := s.seen["CreatePet"].(*CreatePetRequest); req.Body.ID != 0 || req.Body.Secret.Value != "s3cret" {
+	if req := s.seen["CreatePet"].(*api.CreatePetRequest); req.Body.ID != 0 || req.Body.Secret.Value != "s3cret" {
 		t.Errorf("request body = %+v", req.Body)
 	}
 	// The write-only secret never leaves the server.
@@ -352,7 +354,7 @@ func TestReadOnlyAndWriteOnlyOverHTTP(t *testing.T) {
 
 func TestResponseValidation(t *testing.T) {
 	s := newStore()
-	s.pets = append(s.pets, Pet{ID: 7, Name: ""})
+	s.pets = append(s.pets, model.Pet{ID: 7, Name: ""})
 	h := NewServer(s, auth{}, server.WithResponseValidation(), server.WithLogger(slog.New(slog.DiscardHandler)))
 	if r := do(t, h, "GET", "/pets/7", "", ""); r.status != 500 {
 		t.Errorf("invalid response sent: %d %s", r.status, r.body)
@@ -397,7 +399,7 @@ func TestCreatePet(t *testing.T) {
 	if r.status != 201 || r.body != `{"id":3,"name":"Kit","tag":"cat"}` {
 		t.Fatalf("%d %s", r.status, r.body)
 	}
-	if req := s.seen["CreatePet"].(*CreatePetRequest); req.Body.Name != "Kit" {
+	if req := s.seen["CreatePet"].(*api.CreatePetRequest); req.Body.Name != "Kit" {
 		t.Errorf("request = %+v", req)
 	}
 
@@ -444,7 +446,7 @@ func TestGetAndDeletePet(t *testing.T) {
 	if rec.Code != 200 || rec.Body.String() != `{"id":2,"name":"Tom","tag":"cat"}` {
 		t.Errorf("get: %d %s", rec.Code, rec.Body)
 	}
-	if got := s.seen["GetPet"].(*GetPetRequest); got.Session.Value != "s1" || got.PetID != 2 {
+	if got := s.seen["GetPet"].(*api.GetPetRequest); got.Session.Value != "s1" || got.PetID != 2 {
 		t.Errorf("request = %+v", got)
 	}
 
@@ -491,7 +493,7 @@ func TestParameterStyles(t *testing.T) {
 	if rec.Code != 204 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	got := s.seen["GetReports"].(*GetReportsRequest)
+	got := s.seen["GetReports"].(*api.GetReportsRequest)
 	if !slices.Equal(got.IDs, []int64{1, 2}) {
 		t.Errorf("matrix ids = %v", got.IDs)
 	}
@@ -532,7 +534,7 @@ func TestQuerystringParameter(t *testing.T) {
 	if r := do(t, h, "GET", "/lookup?role=admin&age=4&tags=a&tags=b", "", ""); r.status != 204 {
 		t.Fatalf("%d %s", r.status, r.body)
 	}
-	c := s.seen["Lookup"].(*LookupRequest).Criteria.Value
+	c := s.seen["Lookup"].(*api.LookupRequest).Criteria.Value
 	if c.Role != "admin" || c.Age.Value != 4 || !slices.Equal(c.Tags.Value, []string{"a", "b"}) {
 		t.Errorf("criteria = %+v", c)
 	}
@@ -540,7 +542,7 @@ func TestQuerystringParameter(t *testing.T) {
 	if got := problemErrors(t, r); !slices.Equal(got, []string{"querystring criteria /age: must be at least 0"}) {
 		t.Errorf("errors = %q", got)
 	}
-	if r := do(t, h, "GET", "/lookup", "", ""); r.status != 204 || s.seen["Lookup"].(*LookupRequest).Criteria.Set {
+	if r := do(t, h, "GET", "/lookup", "", ""); r.status != 204 || s.seen["Lookup"].(*api.LookupRequest).Criteria.Set {
 		t.Errorf("absent querystring: %d", r.status)
 	}
 }
@@ -560,7 +562,7 @@ func TestMultipartUpload(t *testing.T) {
 	if r.status != 204 {
 		t.Fatalf("%d %s", r.status, r.body)
 	}
-	got := s.seen["UploadPhoto"].(*UploadPhotoRequest)
+	got := s.seen["UploadPhoto"].(*api.UploadPhotoRequest)
 	if got.PetID != 1 || got.Body.Caption.Value != "Rex at the beach" || string(got.Body.Photo.Data) != "PNGDATA" || got.Body.Photo.Name != "rex.png" {
 		t.Errorf("upload = %+v", got.Body)
 	}
@@ -580,14 +582,14 @@ func TestFormAndJSONBodies(t *testing.T) {
 	if r := do(t, h, "POST", "/pets/form", "application/x-www-form-urlencoded", "role=admin&age=3&tags=a&tags=b"); r.status != 204 {
 		t.Fatalf("form: %d %s", r.status, r.body)
 	}
-	got := s.seen["SubmitForm"].(*SubmitFormRequest)
+	got := s.seen["SubmitForm"].(*api.SubmitFormRequest)
 	if got.ContentType != "application/x-www-form-urlencoded" || got.Body.Role != "admin" || got.Body.Age.Value != 3 || len(got.Body.Tags.Value) != 2 {
 		t.Errorf("form request = %+v", got)
 	}
 	if r := do(t, h, "POST", "/pets/form", "application/json", `{"role": "user"}`); r.status != 204 {
 		t.Fatalf("json: %d %s", r.status, r.body)
 	}
-	if got := s.seen["SubmitForm"].(*SubmitFormRequest); got.ContentType != "application/json" || got.Body.Role != "user" {
+	if got := s.seen["SubmitForm"].(*api.SubmitFormRequest); got.ContentType != "application/json" || got.Body.Role != "user" {
 		t.Errorf("json request = %+v", got)
 	}
 	// The missing role stops decoding, so the negative age is not
@@ -650,7 +652,7 @@ func TestQueryMethodWithOptionalBody(t *testing.T) {
 		t.Errorf("%d %s", r.status, r.body)
 	}
 	r = do(t, h, "QUERY", "/search", "", "")
-	if r.status != 200 || s.seen["SearchPets"].(*SearchPetsRequest).Body.Set {
+	if r.status != 200 || s.seen["SearchPets"].(*api.SearchPetsRequest).Body.Set {
 		t.Errorf("absent optional body: %d %s", r.status, r.body)
 	}
 }
@@ -687,7 +689,7 @@ func TestCustomBadRequestFormat(t *testing.T) {
 		if errors.As(err, &be) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(be.Problem.Status)
-			json.NewEncoder(w).Encode(Error{Message: be.Problem.Errors[0].Detail})
+			json.NewEncoder(w).Encode(model.Error{Message: be.Problem.Errors[0].Detail})
 			return
 		}
 		var p *problem.Problem

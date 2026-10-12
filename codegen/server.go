@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -14,17 +15,62 @@ const serverImport = "github.com/dheins/go-openapi/runtime/server"
 // server.go with the Handler interface and NewServer, and one file per
 // operation. m must be built with ir.Options.Operations.
 func Server(m *ir.Model, opts Options) ([]File, error) {
-	g, err := newGenerator(opts)
+	lay, err := layoutOf(opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := g.models(m); err != nil {
+	// One generator per package, by import path; "" is the server's.
+	gens := map[string]*generator{}
+	var order []string
+	pkgGen := func(imp, pkg string) (*generator, error) {
+		if g, ok := gens[imp]; ok {
+			return g, nil
+		}
+		o := opts
+		if imp != "" {
+			o.Package = pkg
+		}
+		g, err := newGenerator(o)
+		if err != nil {
+			return nil, err
+		}
+		g.self, g.lay = imp, lay
+		gens[imp] = g
+		order = append(order, imp)
+		return g, nil
+	}
+	g, err := pkgGen("", opts.Package)
+	if err != nil {
 		return nil, err
+	}
+	og, err := pkgGen(lay.opsImport, lay.opsPkg)
+	if err != nil {
+		return nil, err
+	}
+	mg, err := pkgGen(lay.modelsImport, lay.modelsPkg)
+	if err != nil {
+		return nil, err
+	}
+	if err := mg.models(m); err != nil {
+		return nil, err
+	}
+	if mg != g {
+		g.add("doc.go", g.serverDocFile())
+	}
+	if og != g && og != mg {
+		og.add("doc.go", og.operationsDocFile())
+	}
+	if og != g {
+		content, err := og.render("interfaces", m, nil)
+		if err != nil {
+			return nil, fmt.Errorf("generating handler.go: %w", err)
+		}
+		og.add("handler.go", content)
 	}
 	data := struct {
 		*ir.Model
-		Document bool
-	}{m, len(opts.Document) > 0}
+		Document, Interfaces bool
+	}{m, len(opts.Document) > 0, og == g}
 	content, err := g.render("server", data, func(f *fileGen) {
 		f.imp("net/http", "http")
 		f.imp(serverImport, "server")
@@ -43,16 +89,101 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		if o.Unsupported != "" {
 			continue
 		}
-		content, err := g.render("operation", o, func(f *fileGen) {
+		base := strings.TrimSuffix(fileName(o.Name), ".go")
+		content, err := og.render("operation", o, func(f *fileGen) {
 			f.imp("net/http", "http")
 			f.imp(serverImport, "server")
 		})
 		if err != nil {
 			return nil, fmt.Errorf("generating operation %s: %w", o.Name, err)
 		}
-		g.add(strings.TrimSuffix(fileName(o.Name), ".go")+"_operation.go", content)
+		og.add(base+"_operation.go", content)
+		handler := struct {
+			*ir.Operation
+			Secured bool
+		}{o, len(m.SecuritySchemes) > 0}
+		content, err = og.render("handler", handler, func(f *fileGen) {
+			f.imp("net/http", "http")
+			f.imp(serverImport, "server")
+		})
+		if err != nil {
+			return nil, fmt.Errorf("generating the handler of %s: %w", o.Name, err)
+		}
+		og.add(base+"_handler.go", content)
 	}
-	return g.files, nil
+	var files []File
+	for _, imp := range order {
+		pg := gens[imp]
+		for _, f := range pg.files {
+			if imp != "" {
+				f.Name = path.Join(pg.opts.Package, f.Name)
+			}
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
+// serverDocFile documents the server package when generated code is in
+// other packages too.
+func (g *generator) serverDocFile() []byte {
+	about := "an OpenAPI document"
+	if g.opts.Title != "" {
+		about = g.opts.Title
+	}
+	lines := []string{fmt.Sprintf("Package %s is the HTTP server of %s: NewServer routes requests to the handler of each operation.", g.opts.Package, about)}
+	if l := g.lay; l.opsImport != "" {
+		lines = append(lines, fmt.Sprintf("The operations are in package %s (%s): the Handler interface the application implements, the request and response types, and the handlers.", l.opsPkg, l.opsImport))
+	}
+	if l := g.lay; l.modelsImport != "" && l.modelsImport != l.opsImport {
+		lines = append(lines, fmt.Sprintf("The schema types are in package %s (%s).", l.modelsPkg, l.modelsImport))
+	}
+	return g.docComment(lines)
+}
+
+// operationsDocFile documents the package of the operations' request and
+// response types.
+func (g *generator) operationsDocFile() []byte {
+	about := "an OpenAPI document"
+	if g.opts.Title != "" {
+		about = g.opts.Title
+	}
+	return g.docComment([]string{
+		fmt.Sprintf("Package %s holds the operations of %s: the Handler interface the application implements, the request and response types of each operation, and its HTTP handler, which decodes and validates the request, calls the Handler and sends the response.", g.opts.Package, about),
+	})
+}
+
+// docComment returns a doc.go with lines as the package comment, wrapped.
+func (g *generator) docComment(lines []string) []byte {
+	var b strings.Builder
+	b.WriteString(g.header())
+	for i, l := range lines {
+		if i > 0 {
+			b.WriteString("//\n")
+		}
+		b.WriteString(wrapComment(l))
+	}
+	fmt.Fprintf(&b, "package %s\n", g.opts.Package)
+	return []byte(b.String())
+}
+
+// wrapComment formats text as // comment lines of at most 76 columns.
+func wrapComment(text string) string {
+	var b, line strings.Builder
+	for _, word := range strings.Fields(text) {
+		if line.Len() > 0 && line.Len()+1+len(word) > 73 {
+			b.WriteString("// " + line.String() + "\n")
+			line.Reset()
+		}
+		if line.Len() > 0 {
+			line.WriteByte(' ')
+		}
+		line.WriteString(word)
+	}
+	if line.Len() > 0 {
+		b.WriteString("// " + line.String() + "\n")
+	}
+	return b.String()
 }
 
 func (f *fileGen) serverFuncs() map[string]any {
@@ -202,20 +333,20 @@ func (f *fileGen) securityStmts(o *ir.Operation) string {
 			switch {
 			case s.Type == "apiKey":
 				w(3, "server.APIKeyCheck(r, %q, %q, func(ctx %s, key string) (%s, error) {", s.In, s.ParamName, ctxType, ctxType)
-				w(4, "return s.sec.%s(ctx, key, %s)", s.Method, scopes)
+				w(4, "return sec.%s(ctx, key, %s)", s.Method, scopes)
 			case s.Type == "http" && s.Scheme == "basic":
 				w(3, "server.BasicCheck(r, func(ctx %s, username, password string) (%s, error) {", ctxType, ctxType)
-				w(4, "return s.sec.%s(ctx, username, password, %s)", s.Method, scopes)
+				w(4, "return sec.%s(ctx, username, password, %s)", s.Method, scopes)
 			case s.Type == "http" && s.Scheme != "bearer":
 				w(3, "server.AuthorizationCheck(r, %q, func(ctx %s, credentials string) (%s, error) {", s.Scheme, ctxType, ctxType)
-				w(4, "return s.sec.%s(ctx, credentials, %s)", s.Method, scopes)
+				w(4, "return sec.%s(ctx, credentials, %s)", s.Method, scopes)
 			case s.Type == "mutualTLS":
 				tls := f.imp("crypto/tls", "tls")
 				w(3, "server.TLSCheck(r, func(ctx %s, state *%s.ConnectionState) (%s, error) {", ctxType, tls, ctxType)
-				w(4, "return s.sec.%s(ctx, state, %s)", s.Method, scopes)
+				w(4, "return sec.%s(ctx, state, %s)", s.Method, scopes)
 			default:
 				w(3, "server.BearerCheck(r, func(ctx %s, token string) (%s, error) {", ctxType, ctxType)
-				w(4, "return s.sec.%s(ctx, token, %s)", s.Method, scopes)
+				w(4, "return sec.%s(ctx, token, %s)", s.Method, scopes)
 			}
 			w(3, "}),")
 		}
@@ -223,16 +354,16 @@ func (f *fileGen) securityStmts(o *ir.Operation) string {
 	}
 	w(1, "})")
 	w(1, "if err != nil {")
-	w(2, "s.cfg.HandleError(w, r, err)")
+	w(2, "c.HandleError(w, r, err)")
 	w(2, "return")
 	w(1, "}")
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// bindStmts returns the start of an operation's HTTP handler: it binds
-// every parameter and the body into req, validating them, and answers
-// the request itself if anything is wrong.
-func (f *fileGen) bindStmts(o *ir.Operation) string {
+// bindStmts returns the statements that bind every parameter and the body
+// of o into req, validating them, and answer the request themselves if
+// anything is wrong. cfg is the *server.Config expression.
+func (f *fileGen) bindStmts(o *ir.Operation, cfg string) string {
 	var b strings.Builder
 	w := func(depth int, format string, args ...any) {
 		b.WriteString(strings.Repeat("\t", depth))
@@ -272,11 +403,11 @@ func (f *fileGen) bindStmts(o *ir.Operation) string {
 	}
 
 	if body := o.Body; body != nil {
-		f.bindBody(w, o, body)
+		f.bindBody(w, o, body, cfg)
 	}
 
 	w(1, "if b.Failed() {")
-	w(2, "s.cfg.HandleError(w, r, b.Err())")
+	w(2, "%s.HandleError(w, r, b.Err())", cfg)
 	w(2, "return")
 	w(1, "}")
 	return strings.TrimSuffix(b.String(), "\n")
@@ -284,13 +415,15 @@ func (f *fileGen) bindStmts(o *ir.Operation) string {
 
 // bindBody writes the statements that read the request body and decode
 // it according to the media type it was sent as.
-func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *ir.Body) {
+func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *ir.Body, cfg string) {
 	var mediaTypes []string
 	for _, m := range body.Media {
 		mediaTypes = append(mediaTypes, m.MediaType)
 	}
-	elem := f.goType(body.Value)
-	w(1, "if body, mediaType, ok := s.cfg.ReadBody(w, r, &b, %s, %t); ok {", stringSlice(mediaTypes), body.Required)
+	// Only form and multipart bodies name the value type; computing it
+	// records its import.
+	elem := func() string { return f.goType(body.Value) }
+	w(1, "if body, mediaType, ok := %s.ReadBody(w, r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
 	if len(body.Media) > 1 {
 		w(2, "req.ContentType = mediaType")
 	}
@@ -316,9 +449,9 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			if m.Kind == "form" {
 				w(3, "if fields, err := server.FormFields(body); err != nil {")
 				w(4, "b.Body(err)")
-				w(3, "} else if v, err := server.DecodeFields[%s](fields, %s); err != nil {", elem, props)
+				w(3, "} else if v, err := server.DecodeFields[%s](fields, %s); err != nil {", elem(), props)
 			} else {
-				w(3, "if v, err := server.DecodeMultipart[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", elem, props)
+				w(3, "if v, err := server.DecodeMultipart[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", elem(), props)
 			}
 			w(4, "b.Body(err)")
 			w(3, "} else {")

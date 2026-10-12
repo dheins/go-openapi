@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `goapi generate server` writes three packages: `NewServer` and
+  `openapi.json` in `-out` (default `gen`); the operations in its `api`
+  subpackage (the `Handler` and `SecurityHandler` interfaces, each
+  operation's request and response types, and its HTTP handler, exported
+  as `HandleGetPet`); and the schema types in its `model` subpackage. The
+  packages import each other by the path the nearest `go.mod` gives
+  `-out` (or `-import`). `-operations` and `-models` name the
+  subpackages; `-operations "" -models ""` keeps a single package. Code
+  using the generated server now implements `api.Handler` with
+  `api.GetPetRequest` and `model.Pet`, and calls `gen.NewServer`; delete
+  the previously generated files before regenerating.
+- Generated handlers are functions (`HandleGetPet(cfg, h, sec)`) instead of
+  methods of an unexported server type, in every layout.
+- `codegen.Options` has `OperationsPackage`, `OperationsImport`,
+  `ModelsPackage` and `ModelsImport` for this layout.
+
+### Added
+
+- The petstore example has a health check, `GET /v1/health`.
+
 ## v0.2.0
 
 Complete `allOf`/`oneOf`/`anyOf` support, compile-time safe `oneOf` unions,

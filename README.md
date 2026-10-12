@@ -37,7 +37,7 @@ go install github.com/dheins/go-openapi/cmd/goapi@latest
 goapi validate openapi.yaml
 goapi validate -format json -quiet openapi.yaml
 goapi generate model -out internal/models openapi.yaml
-goapi generate server -out internal/api openapi.yaml
+goapi generate server -out internal/gen openapi.yaml   # server in gen, operations in gen/api, schemas in gen/model
 ```
 
 Generated models decode with JSON-pointer error paths and have a
@@ -63,14 +63,14 @@ validated requests) and serve it:
 type petStore struct{ /* ... */ }
 
 func (s *petStore) GetPet(ctx context.Context, req *api.GetPetRequest) (api.GetPetResponse, error) {
-	pet, ok := s.find(req.PetID)
+	pet, ok := s.find(req.PetID) // a model.Pet
 	if !ok {
 		return api.GetPet404Response{}, nil
 	}
 	return api.GetPet200JSONResponse{Body: pet}, nil
 }
 
-http.ListenAndServe(":8080", api.NewServer(&petStore{}))
+http.ListenAndServe(":8080", gen.NewServer(&petStore{}))
 ```
 
 Invalid requests are answered with RFC 9457 problem details listing every
@@ -91,7 +91,7 @@ func (a *auth) BearerAuth(ctx context.Context, token string, scopes []string) (c
 	return withUser(ctx, user), nil
 }
 
-http.ListenAndServe(":8080", api.NewServer(&petStore{}, &auth{}))
+http.ListenAndServe(":8080", gen.NewServer(&petStore{}, &auth{}))
 ```
 
 ## Documentation

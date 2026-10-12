@@ -7,7 +7,7 @@
 //	curl localhost:8080/v1/openapi.json
 package main
 
-//go:generate go run github.com/dheins/go-openapi/cmd/goapi generate server -out api openapi.yaml
+//go:generate go run github.com/dheins/go-openapi/cmd/goapi generate server -out gen openapi.yaml
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/dheins/go-openapi/examples/petstore/api"
+	"github.com/dheins/go-openapi/examples/petstore/gen"
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
@@ -33,7 +33,7 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	h := newHandler(newStore(), *key, logger)
-	logger.Info("listening", "addr", *addr, "base", api.BasePath)
+	logger.Info("listening", "addr", *addr, "base", gen.BasePath)
 	if err := http.ListenAndServe(*addr, h); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func main() {
 // newHandler builds the server: the generated routes, the API key check,
 // request logging and the document at /v1/openapi.json.
 func newHandler(s *store, key string, logger *slog.Logger) http.Handler {
-	return api.NewServer(s, apiKey(key),
+	return gen.NewServer(s, apiKey(key),
 		server.WithLogger(logger),
 		server.WithDocument("/openapi.json"),
 		server.WithMiddleware(logRequests(logger)),

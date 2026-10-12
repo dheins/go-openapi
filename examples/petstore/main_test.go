@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dheins/go-openapi/examples/petstore/api"
+	"github.com/dheins/go-openapi/examples/petstore/gen/model"
 )
 
 func newTestServer(t *testing.T) *httptest.Server {
@@ -63,7 +63,7 @@ func TestPetstore(t *testing.T) {
 	}
 
 	resp, body := send(t, srv, "GET", "/v1/pets?limit=2", "", "")
-	var page []api.Pet
+	var page []model.Pet
 	if err := json.Unmarshal([]byte(body), &page); err != nil || len(page) != 2 || resp.Header.Get("X-Next") != "2" {
 		t.Fatalf("first page: %v %s next=%q", err, body, resp.Header.Get("X-Next"))
 	}
@@ -114,5 +114,17 @@ func TestWatchPets(t *testing.T) {
 	want := []string{"id: 1", "event: pet", `data: {"id":1,"name":"Rex","status":"available"}`}
 	if strings.Join(event, "\n") != strings.Join(want, "\n") {
 		t.Errorf("event:\n%s\nwant\n%s", strings.Join(event, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestHealth(t *testing.T) {
+	srv := newTestServer(t)
+	// No API key is needed, and the body is plain text.
+	resp, body := send(t, srv, "GET", "/v1/health", "", "")
+	if resp.StatusCode != 200 || body != "OK" {
+		t.Fatalf("health: %d %q", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("content type = %q", ct)
 	}
 }

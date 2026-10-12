@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -72,6 +73,11 @@ func TestGolden(t *testing.T) {
 			generate := Models
 			if c.opts.Operations {
 				generate = Server
+				// As goapi generate server lays it out: the operations in
+				// the api subpackage, the schema types in model.
+				pkg := "github.com/dheins/go-openapi/codegen/" + filepath.ToSlash(c.dir)
+				opts.OperationsPackage, opts.OperationsImport = "api", pkg+"/api"
+				opts.ModelsPackage, opts.ModelsImport = "model", pkg+"/model"
 				src, err := loader.Parse(filepath.Join(c.dir, "openapi.yaml"))
 				if err != nil {
 					t.Fatal(err)
@@ -99,19 +105,25 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// generatedFiles lists the files of dir that the generator owns: every
-// .go file except tests, plus warnings.txt.
+// generatedFiles lists the files of dir and its api and model subpackages
+// that the generator owns, slash-separated and relative to dir: every .go
+// file except tests, plus warnings.txt and openapi.json.
 func generatedFiles(t *testing.T, dir string) []string {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var names []string
-	for _, e := range entries {
-		n := e.Name()
-		if n == "warnings.txt" || n == "openapi.json" || (strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go")) {
-			names = append(names, n)
+	for _, sub := range []string{"", "api", "model"} {
+		entries, err := os.ReadDir(filepath.Join(dir, sub))
+		if os.IsNotExist(err) && sub != "" {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			n := e.Name()
+			if !e.IsDir() && (n == "warnings.txt" || n == "openapi.json" || (strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go"))) {
+				names = append(names, path.Join(sub, n))
+			}
 		}
 	}
 	return names
@@ -120,12 +132,16 @@ func generatedFiles(t *testing.T, dir string) []string {
 func writeGolden(t *testing.T, dir string, files []File) {
 	t.Helper()
 	for _, name := range generatedFiles(t, dir) {
-		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+		if err := os.Remove(filepath.Join(dir, filepath.FromSlash(name))); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, f := range files {
-		if err := os.WriteFile(filepath.Join(dir, f.Name), f.Content, 0o644); err != nil {
+		name := filepath.Join(dir, filepath.FromSlash(f.Name))
+		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, f.Content, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -136,7 +152,7 @@ func compareGolden(t *testing.T, dir string, files []File) {
 	var produced []string
 	for _, f := range files {
 		produced = append(produced, f.Name)
-		want, err := os.ReadFile(filepath.Join(dir, f.Name))
+		want, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f.Name)))
 		if err != nil {
 			t.Errorf("%s: %v (run go test ./codegen -update)", f.Name, err)
 			continue
@@ -170,7 +186,7 @@ func TestGeneratedCode(t *testing.T) {
 	}
 	for _, c := range goldenCases(t) {
 		t.Run(filepath.Base(c.dir), func(t *testing.T) {
-			pkg := "./" + filepath.ToSlash(c.dir)
+			pkg := "./" + filepath.ToSlash(c.dir) + "/..."
 			for _, args := range [][]string{{"vet", pkg}, {"test", "-count=1", pkg}} {
 				out, err := exec.Command(goCmd, args...).CombinedOutput()
 				if err != nil {

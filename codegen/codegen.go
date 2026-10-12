@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"go/format"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,6 +32,37 @@ type Options struct {
 	// Document is the OpenAPI document as JSON. Server embeds it (as
 	// openapi.json) so the server can serve it with server.WithDocument.
 	Document []byte
+	// OperationsPackage, if set, makes Server put the request and response
+	// types of the operations in a package of their own, in the
+	// subdirectory of that name, imported as OperationsImport; the server
+	// package keeps a small handler file per operation. ModelsPackage and
+	// ModelsImport do the same for the schema types, which otherwise go
+	// with the operations. Without either, all files are one package.
+	OperationsPackage string
+	OperationsImport  string
+	ModelsPackage     string
+	ModelsImport      string
+}
+
+// layout says which package each kind of generated code goes to, by
+// import path; "" is the package of Options.Package.
+type layout struct {
+	opsPkg, opsImport       string
+	modelsPkg, modelsImport string
+}
+
+func layoutOf(opts Options) (layout, error) {
+	l := layout{
+		opsPkg: opts.OperationsPackage, opsImport: opts.OperationsImport,
+		modelsPkg: opts.ModelsPackage, modelsImport: opts.ModelsImport,
+	}
+	if (l.opsPkg == "") != (l.opsImport == "") || (l.modelsPkg == "") != (l.modelsImport == "") {
+		return layout{}, fmt.Errorf("codegen: a separate package needs both a name and an import path")
+	}
+	if l.modelsPkg == "" {
+		l.modelsPkg, l.modelsImport = l.opsPkg, l.opsImport
+	}
+	return l, nil
 }
 
 // File is one generated source file.
@@ -54,6 +86,10 @@ func Models(m *ir.Model, opts Options) ([]File, error) {
 
 type generator struct {
 	opts Options
+	// self is the import path of the package being generated, as in
+	// layout; lay says where the other generated code is.
+	self string
+	lay  layout
 	// vars are the package-level variables declared so far, across files.
 	vars      map[string]bool
 	files     []File
@@ -159,12 +195,15 @@ func (g *generator) render(name string, data any, setup func(*fileGen)) ([]byte,
 		slices.Sort(std)
 		slices.Sort(other)
 		writeImport := func(p string) {
-			if f.imports[p] == "_" {
+			switch name := f.imports[p]; {
+			case name == "_":
 				// Imported for its side effects, such as embed.
 				fmt.Fprintf(&out, "\t_ %q\n", p)
-				return
+			case name != path.Base(p):
+				fmt.Fprintf(&out, "\t%s %q\n", name, p)
+			default:
+				fmt.Fprintf(&out, "\t%q\n", p)
 			}
-			fmt.Fprintf(&out, "\t%q\n", p)
 		}
 		out.WriteString("import (\n")
 		for _, p := range std {
@@ -232,7 +271,10 @@ func (f *fileGen) funcs() template.FuncMap {
 		"enumMessage":        enumMessage,
 		"variantDoc":         variantDoc,
 
-		"sealedDecls":        f.sealedDecls,
+		"sealedDecls": f.sealedDecls,
+		"opType": func(name string) string {
+			return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, name)
+		},
 		"unionDecodeStmts":   f.unionDecodeStmts,
 		"unionMarshalStmts":  f.unionMarshalStmts,
 		"unionValidateStmts": f.unionValidateStmts,
@@ -257,6 +299,15 @@ func kindName(t *ir.Type) string {
 	return "alias"
 }
 
+// qualify refers to name, declared in the generated package with import
+// path imp (named pkg), from the file being rendered.
+func (f *fileGen) qualify(imp, pkg, name string) string {
+	if imp == f.gen.self {
+		return name
+	}
+	return f.imp(imp, pkg) + "." + name
+}
+
 // goType renders a type expression, recording the imports it needs.
 func (f *fileGen) goType(r *ir.Ref) string {
 	switch r.Kind {
@@ -267,7 +318,7 @@ func (f *fileGen) goType(r *ir.Ref) string {
 		}
 		return r.Name
 	case ir.Named:
-		return r.Type.Name
+		return f.qualify(f.gen.lay.modelsImport, f.gen.lay.modelsPkg, r.Type.Name)
 	case ir.Slice:
 		return "[]" + f.goType(r.Elem)
 	case ir.Map:

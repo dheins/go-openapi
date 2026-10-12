@@ -31,7 +31,7 @@ generator to the version in your `go.mod`, run it with
 `go run github.com/dheins/go-openapi/cmd/goapi` from a `go:generate` line:
 
 ```go
-//go:generate go run github.com/dheins/go-openapi/cmd/goapi generate server -out api openapi.yaml
+//go:generate go run github.com/dheins/go-openapi/cmd/goapi generate server -out gen openapi.yaml
 ```
 
 ## Validate a document
@@ -264,22 +264,45 @@ keeps them all and encodes their properties together.
 ## Generate a server
 
 ```sh
-goapi generate server -out internal/api -package api openapi.yaml
+goapi generate server -out internal/gen openapi.yaml
 ```
 
-This writes the models plus, for every operation, a request type, response
-types and a handler, and `server.go` with:
+This writes three packages:
+
+| Directory | Package | Contents |
+|---|---|---|
+| `internal/gen` | `gen` | `server.go` (`NewServer`, `BasePath`) and `openapi.json` |
+| `internal/gen/api` | `api` | `handler.go` (the `Handler` and `SecurityHandler` interfaces), and per operation its request and response types (`*_operation.go`) and its HTTP handler (`*_handler.go`) |
+| `internal/gen/model` | `model` | the schema types, as `goapi generate model` writes them |
+
+Your code uses all three: it implements `api.Handler` (with
+`api.GetPetRequest`, `api.GetPet200JSONResponse` and the schema types such
+as `model.Pet`) and serves it with `gen.NewServer`. The packages import each
+other by the import path of `internal/gen`, found from the `go.mod` above
+it; pass `-import` when there is none. `-operations` and `-models` name the
+subdirectories and packages (default `api` and `model`); an empty
+`-models` puts the schema types with the operations, and an empty
+`-operations` puts those in the server package, so `-operations ""
+-models ""` gives the single package of v0.2.0.
+
+The `Handler` interface has one method per operation, and `NewServer`
+routes each operation to its handler:
 
 ```go
+// package api
 type Handler interface {
 	GetPet(ctx context.Context, req *GetPetRequest) (GetPetResponse, error)
 	// one method per operation
 }
 
-func NewServer(h Handler, opts ...server.Option) http.Handler
+// package gen
+func NewServer(h api.Handler, opts ...server.Option) http.Handler
 // or, when the document declares security:
-func NewServer(h Handler, sec SecurityHandler, opts ...server.Option) http.Handler
+func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) http.Handler
 ```
+
+Each operation's handler is also exported, as `api.HandleGetPet(cfg, h,
+sec) http.Handler`, for serving operations on routes of your own.
 
 The result is an ordinary `http.Handler`: serve it, wrap it in middleware or
 mount it in another router.
@@ -335,7 +358,7 @@ and streams:
 
 ```go
 // application/jsonl: one JSON value per line, flushed as produced
-return api.ExportPets200JSONLinesResponse{Items: func(yield func(api.Pet, error) bool) { ... }}, nil
+return api.ExportPets200JSONLinesResponse{Items: func(yield func(model.Pet, error) bool) { ... }}, nil
 
 // text/event-stream
 return api.Watch200EventsResponse{Events: func(yield func(server.Event, error) bool) {
@@ -405,7 +428,7 @@ credentials that are present and wrong are still rejected.
 
 | Option | Effect |
 |---|---|
-| `server.WithBasePath("/v1")` | serve below a prefix; the default is the path of the first `servers` URL (`api.BasePath`) |
+| `server.WithBasePath("/v1")` | serve below a prefix; the default is the path of the first `servers` URL (`gen.BasePath`) |
 | `server.WithMiddleware(mw...)` | wrap every operation; middleware gets a `server.Operation` (ID, method, path) |
 | `server.WithDocument("/openapi.json")` | serve the document the server was generated from |
 | `server.WithResponseValidation()` | check response bodies against the document; invalid ones become a logged 500 |
@@ -423,7 +446,7 @@ gracefully so in-flight requests finish:
 ```go
 srv := &http.Server{
 	Addr:              ":8080",
-	Handler:           api.NewServer(h, sec, server.WithLogger(logger)),
+	Handler:           gen.NewServer(h, sec, server.WithLogger(logger)),
 	ReadHeaderTimeout: 5 * time.Second,
 	ReadTimeout:       30 * time.Second,
 	WriteTimeout:      30 * time.Second, // longer, or 0, for streaming responses
@@ -461,7 +484,7 @@ requests in that format: they reach the error handler as a
 server.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 	var bind *server.BindError
 	if errors.As(err, &bind) {
-		writeJSON(w, http.StatusBadRequest, api.Error{Message: bind.Error()})
+		writeJSON(w, http.StatusBadRequest, model.Error{Message: bind.Error()})
 		return
 	}
 	var p *problem.Problem

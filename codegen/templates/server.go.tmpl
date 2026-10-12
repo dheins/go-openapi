@@ -1,9 +1,46 @@
 {{- /*
-Templates for the server: the Handler interface and NewServer, and per
-operation its request and response types and HTTP handler.
+Templates for the server. "interfaces" (Handler, SecurityHandler) and per
+operation "operation" (its request and response types) and "handler" (its
+HTTP handler) go to the operations' package; "server" (NewServer, which
+routes to the handlers) to the server package, which may be the same.
 */ -}}
 
 {{define "server"}}
+{{- if .Interfaces}}
+{{template "interfaces" .}}
+{{- end}}
+
+// BasePath is the path of the document's first server URL. Routes are
+// served below it unless server.WithBasePath says otherwise.
+const BasePath = {{quote .BasePath}}
+
+// NewServer returns an http.Handler that serves the operations of the
+// document with h{{if .SecuritySchemes}}, checking credentials with sec{{end}}.
+func NewServer(h {{opType "Handler"}}{{if .SecuritySchemes}}, sec {{opType "SecurityHandler"}}{{end}}, opts ...server.Option) http.Handler {
+	cfg := server.NewConfig(append([]server.Option{server.WithBasePath(BasePath)}, opts...)...)
+{{- range .Operations}}
+{{- if .Unsupported}}{{if .Route}}
+	cfg.Handle({{opInfo .}}, {{quote .Route}}, server.NotImplemented({{quote .Unsupported}}))
+{{- end}}{{else}}
+	cfg.Handle({{opInfo .}}, {{quote .Route}}, {{opType (printf "Handle%s" .Name)}}(cfg, h{{if $.SecuritySchemes}}, sec{{end}}))
+{{- end}}
+{{- end}}
+{{- if .Document}}
+	cfg.ServeDocument(openAPIDocument)
+{{- end}}
+	return cfg.Handler()
+}
+{{- if .Document}}
+
+// openAPIDocument is the document the server was generated from, served
+// with server.WithDocument.
+//
+//go:embed openapi.json
+var openAPIDocument []byte
+{{- end}}
+{{- end}}
+
+{{define "interfaces"}}
 // Handler is implemented by the application, with one method per
 // operation. The server decodes and validates each request before calling
 // it. The context carries the *http.Request (see server.HTTPRequest).
@@ -14,7 +51,7 @@ operation its request and response types and HTTP handler.
 type Handler interface {
 {{- range .Operations}}{{if not .Unsupported}}
 {{handlerDoc .}}
-	{{.Name}}(ctx {{imp "context" "context"}}.Context, req *{{.RequestType}}) ({{.ResponseType}}, error)
+	{{.Name}}(ctx {{imp "context" "context"}}.Context, req *{{opType .RequestType}}) ({{opType .ResponseType}}, error)
 {{- end}}{{end}}
 }
 
@@ -36,43 +73,6 @@ type SecurityHandler interface {
 {{- end}}
 }
 {{- end}}
-
-// BasePath is the path of the document's first server URL. Routes are
-// served below it unless server.WithBasePath says otherwise.
-const BasePath = {{quote .BasePath}}
-
-// NewServer returns an http.Handler that serves the operations of the
-// document with h{{if .SecuritySchemes}}, checking credentials with sec{{end}}.
-func NewServer(h Handler{{if .SecuritySchemes}}, sec SecurityHandler{{end}}, opts ...server.Option) http.Handler {
-	s := &apiServer{handler: h{{if .SecuritySchemes}}, sec: sec{{end}}, cfg: server.NewConfig(append([]server.Option{server.WithBasePath(BasePath)}, opts...)...)}
-{{- range .Operations}}
-{{- if .Unsupported}}{{if .Route}}
-	s.cfg.Handle({{opInfo .}}, {{quote .Route}}, server.NotImplemented({{quote .Unsupported}}))
-{{- end}}{{else}}
-	s.cfg.Handle({{opInfo .}}, {{quote .Route}}, http.HandlerFunc(s.handle{{.Name}}))
-{{- end}}
-{{- end}}
-{{- if .Document}}
-	s.cfg.ServeDocument(openAPIDocument)
-{{- end}}
-	return s.cfg.Handler()
-}
-{{- if .Document}}
-
-// openAPIDocument is the document the server was generated from, served
-// with server.WithDocument.
-//
-//go:embed openapi.json
-var openAPIDocument []byte
-{{- end}}
-
-type apiServer struct {
-	handler Handler
-{{- if .SecuritySchemes}}
-	sec SecurityHandler
-{{- end}}
-	cfg *server.Config
-}
 {{- end}}
 
 {{define "operation"}}
@@ -134,20 +134,29 @@ func (r {{.TypeName}}) write{{$.ResponseType}}(w http.ResponseWriter, req *http.
 {{writeStmts $r}}
 }
 {{end}}
-func (s *apiServer) handle{{.Name}}(w http.ResponseWriter, r *http.Request) {
-{{- if .Security}}
-{{securityStmts .}}
 {{- end}}
-{{bindStmts .}}
-	resp, err := s.handler.{{.Name}}({{if .Security}}ctx{{else}}server.RequestContext(r){{end}}, &req)
-	if err == nil && resp == nil {
-		err = {{imp "errors" "errors"}}.New("{{.Name}} returned neither a response nor an error")
-	}
-	if err == nil {
-		err = resp.write{{.ResponseType}}(w, r, s.cfg)
-	}
-	if err != nil {
-		s.cfg.HandleError(w, r, err)
-	}
+
+{{define "handler"}}
+// Handle{{.Name}} returns the HTTP handler of {{.Name}}.
+//
+// It {{if .Security}}checks the credentials with sec, {{end}}decodes and validates the
+// request, calls h.{{.Name}} and sends the response it returns.
+func Handle{{.Name}}(c *server.Config, h Handler{{if .Secured}}, sec SecurityHandler{{end}}) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+{{- if .Security}}
+{{securityStmts .Operation}}
+{{- end}}
+{{bindStmts .Operation "c"}}
+		resp, err := h.{{.Name}}({{if .Security}}ctx{{else}}server.RequestContext(r){{end}}, &req)
+		if err == nil && resp == nil {
+			err = {{imp "errors" "errors"}}.New("{{.Name}} returned neither a response nor an error")
+		}
+		if err == nil {
+			err = resp.write{{.ResponseType}}(w, r, c)
+		}
+		if err != nil {
+			c.HandleError(w, r, err)
+		}
+	})
 }
 {{- end}}

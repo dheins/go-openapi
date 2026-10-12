@@ -11,9 +11,15 @@ curl localhost:8080/v1/pets
 curl -H "X-API-Key: secret" -d '{"name":"Rex","status":"available"}' localhost:8080/v1/pets
 ```
 
-- [main.go](main.go) wires the generated `api.NewServer` with the options.
-- [store.go](store.go) implements the generated `api.Handler`.
-- [api/](api) is generated: `go generate ./examples/petstore` rewrites it.
+- [main.go](main.go) wires the generated `gen.NewServer` with the options.
+- [store.go](store.go) implements the generated `api.Handler`, with the
+  request and response types of `gen/api` and the schema types of
+  `gen/model`.
+- [gen/](gen) is generated: `go generate ./examples/petstore` rewrites it.
+  It holds `NewServer` (package `gen`), the operations in
+  [gen/api](gen/api) (package `api`: the `Handler` interface, request and
+  response types, and a handler per operation), and the schema types in
+  [gen/model](gen/model) (package `model`).
 - [main_test.go](main_test.go) exercises it end to end.
 
 ## Postman
@@ -32,5 +38,5 @@ From the command line, with [Newman](https://github.com/postmanlabs/newman):
 
 ```sh
 newman run examples/petstore/petstore.postman_collection.json \
-  --folder Document --folder Pets --folder Errors
+  --folder Document --folder Health --folder Pets --folder Errors
 ```

@@ -8,6 +8,19 @@ servers:
 tags:
   - name: pets
 paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [ health ]
+      summary: An API for the servers health.
+      responses:
+        "200":
+          description: healthcheck response.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
   /pets:
     get:
       operationId: listPets

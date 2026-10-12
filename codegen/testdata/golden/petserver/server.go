@@ -3,78 +3,12 @@
 package petserver
 
 import (
-	"context"
 	_ "embed"
 	"net/http"
 
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
 	"github.com/dheins/go-openapi/runtime/server"
 )
-
-// Handler is implemented by the application, with one method per
-// operation. The server decodes and validates each request before calling
-// it. The context carries the *http.Request (see server.HTTPRequest).
-//
-// A method returns one of the operation's response types, or an error: a
-// *problem.Problem is sent as it is, anything else is logged and answered
-// with 500 Internal Server Error.
-type Handler interface {
-	// ListPets handles GET /pets.
-	//
-	// List pets
-	ListPets(ctx context.Context, req *ListPetsRequest) (ListPetsResponse, error)
-	// CreatePet handles POST /pets.
-	CreatePet(ctx context.Context, req *CreatePetRequest) (CreatePetResponse, error)
-	// GetPet handles GET /pets/{petId}.
-	GetPet(ctx context.Context, req *GetPetRequest) (GetPetResponse, error)
-	// DeletePet handles DELETE /pets/{petId}.
-	//
-	// Deprecated: the operation is marked as deprecated.
-	DeletePet(ctx context.Context, req *DeletePetRequest) (DeletePetResponse, error)
-	// CopyPet handles COPY /pets/{petId}.
-	CopyPet(ctx context.Context, req *CopyPetRequest) (CopyPetResponse, error)
-	// GetFile handles GET /files/{name}.{ext}.
-	GetFile(ctx context.Context, req *GetFileRequest) (GetFileResponse, error)
-	// SearchPets handles QUERY /search.
-	SearchPets(ctx context.Context, req *SearchPetsRequest) (SearchPetsResponse, error)
-	// GetReports handles GET /reports/{ids}.
-	GetReports(ctx context.Context, req *GetReportsRequest) (GetReportsResponse, error)
-	// Lookup handles GET /lookup.
-	Lookup(ctx context.Context, req *LookupRequest) (LookupResponse, error)
-	// GetPhoto handles GET /pets/{petId}/photo.
-	GetPhoto(ctx context.Context, req *GetPhotoRequest) (GetPhotoResponse, error)
-	// UploadPhoto handles PUT /pets/{petId}/photo.
-	UploadPhoto(ctx context.Context, req *UploadPhotoRequest) (UploadPhotoResponse, error)
-	// SubmitForm handles POST /pets/form.
-	SubmitForm(ctx context.Context, req *SubmitFormRequest) (SubmitFormResponse, error)
-	// Shout handles POST /notes.
-	Shout(ctx context.Context, req *ShoutRequest) (ShoutResponse, error)
-	// ExportPets handles GET /export.
-	ExportPets(ctx context.Context, req *ExportPetsRequest) (ExportPetsResponse, error)
-	// Watch handles GET /events.
-	Watch(ctx context.Context, req *WatchRequest) (WatchResponse, error)
-	// Admin handles GET /admin.
-	Admin(ctx context.Context, req *AdminRequest) (AdminResponse, error)
-	// Secure handles GET /secure.
-	Secure(ctx context.Context, req *SecureRequest) (SecureResponse, error)
-}
-
-// SecurityHandler checks the credentials of requests, with one method per
-// security scheme of the document. A method returns the context the
-// operation runs with (for example carrying the authenticated user), or
-// an error: a *problem.Problem (such as 403 for missing scopes) is sent as
-// it is, any other error as 401 without details.
-//
-// A method is only called when the request carries credentials for its
-// scheme; requests without any are answered with 401 unless the operation
-// allows anonymous access.
-type SecurityHandler interface {
-	// Oauth checks an OAuth2 access token, sent as a bearer token; scopes are the required OAuth2 scopes (security scheme "oauth").
-	Oauth(ctx context.Context, token string, scopes []string) (context.Context, error)
-	// BasicAuth checks HTTP basic credentials (security scheme "basicAuth").
-	BasicAuth(ctx context.Context, username, password string, scopes []string) (context.Context, error)
-	// APIKey checks the API key sent in the header "X-API-Key" (security scheme "apiKey").
-	APIKey(ctx context.Context, key string, scopes []string) (context.Context, error)
-}
 
 // BasePath is the path of the document's first server URL. Routes are
 // served below it unless server.WithBasePath says otherwise.
@@ -82,28 +16,28 @@ const BasePath = "/v1"
 
 // NewServer returns an http.Handler that serves the operations of the
 // document with h, checking credentials with sec.
-func NewServer(h Handler, sec SecurityHandler, opts ...server.Option) http.Handler {
-	s := &apiServer{handler: h, sec: sec, cfg: server.NewConfig(append([]server.Option{server.WithBasePath(BasePath)}, opts...)...)}
-	s.cfg.Handle(server.Operation{ID: "listPets", Name: "ListPets", Method: "GET", Path: "/pets"}, "/pets", http.HandlerFunc(s.handleListPets))
-	s.cfg.Handle(server.Operation{ID: "createPet", Name: "CreatePet", Method: "POST", Path: "/pets"}, "/pets", http.HandlerFunc(s.handleCreatePet))
-	s.cfg.Handle(server.Operation{ID: "getPet", Name: "GetPet", Method: "GET", Path: "/pets/{petId}"}, "/pets/{p0}", http.HandlerFunc(s.handleGetPet))
-	s.cfg.Handle(server.Operation{ID: "deletePet", Name: "DeletePet", Method: "DELETE", Path: "/pets/{petId}"}, "/pets/{p0}", http.HandlerFunc(s.handleDeletePet))
-	s.cfg.Handle(server.Operation{ID: "copyPet", Name: "CopyPet", Method: "COPY", Path: "/pets/{petId}"}, "/pets/{p0}", http.HandlerFunc(s.handleCopyPet))
-	s.cfg.Handle(server.Operation{ID: "getFile", Name: "GetFile", Method: "GET", Path: "/files/{name}.{ext}"}, "/files/{p0}", http.HandlerFunc(s.handleGetFile))
-	s.cfg.Handle(server.Operation{ID: "searchPets", Name: "SearchPets", Method: "QUERY", Path: "/search"}, "/search", http.HandlerFunc(s.handleSearchPets))
-	s.cfg.Handle(server.Operation{ID: "getReports", Name: "GetReports", Method: "GET", Path: "/reports/{ids}"}, "/reports/{p0}", http.HandlerFunc(s.handleGetReports))
-	s.cfg.Handle(server.Operation{ID: "lookup", Name: "Lookup", Method: "GET", Path: "/lookup"}, "/lookup", http.HandlerFunc(s.handleLookup))
-	s.cfg.Handle(server.Operation{ID: "getPhoto", Name: "GetPhoto", Method: "GET", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", http.HandlerFunc(s.handleGetPhoto))
-	s.cfg.Handle(server.Operation{ID: "uploadPhoto", Name: "UploadPhoto", Method: "PUT", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", http.HandlerFunc(s.handleUploadPhoto))
-	s.cfg.Handle(server.Operation{ID: "submitForm", Name: "SubmitForm", Method: "POST", Path: "/pets/form"}, "/pets/form", http.HandlerFunc(s.handleSubmitForm))
-	s.cfg.Handle(server.Operation{ID: "shout", Name: "Shout", Method: "POST", Path: "/notes"}, "/notes", http.HandlerFunc(s.handleShout))
-	s.cfg.Handle(server.Operation{ID: "exportPets", Name: "ExportPets", Method: "GET", Path: "/export"}, "/export", http.HandlerFunc(s.handleExportPets))
-	s.cfg.Handle(server.Operation{ID: "watch", Name: "Watch", Method: "GET", Path: "/events"}, "/events", http.HandlerFunc(s.handleWatch))
-	s.cfg.Handle(server.Operation{ID: "upload", Name: "Upload", Method: "POST", Path: "/upload"}, "/upload", server.NotImplemented("request bodies of type multipart/form-data are not supported yet"))
-	s.cfg.Handle(server.Operation{ID: "admin", Name: "Admin", Method: "GET", Path: "/admin"}, "/admin", http.HandlerFunc(s.handleAdmin))
-	s.cfg.Handle(server.Operation{ID: "secure", Name: "Secure", Method: "GET", Path: "/secure"}, "/secure", http.HandlerFunc(s.handleSecure))
-	s.cfg.ServeDocument(openAPIDocument)
-	return s.cfg.Handler()
+func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) http.Handler {
+	cfg := server.NewConfig(append([]server.Option{server.WithBasePath(BasePath)}, opts...)...)
+	cfg.Handle(server.Operation{ID: "listPets", Name: "ListPets", Method: "GET", Path: "/pets"}, "/pets", api.HandleListPets(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "createPet", Name: "CreatePet", Method: "POST", Path: "/pets"}, "/pets", api.HandleCreatePet(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "getPet", Name: "GetPet", Method: "GET", Path: "/pets/{petId}"}, "/pets/{p0}", api.HandleGetPet(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "deletePet", Name: "DeletePet", Method: "DELETE", Path: "/pets/{petId}"}, "/pets/{p0}", api.HandleDeletePet(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "copyPet", Name: "CopyPet", Method: "COPY", Path: "/pets/{petId}"}, "/pets/{p0}", api.HandleCopyPet(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "getFile", Name: "GetFile", Method: "GET", Path: "/files/{name}.{ext}"}, "/files/{p0}", api.HandleGetFile(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "searchPets", Name: "SearchPets", Method: "QUERY", Path: "/search"}, "/search", api.HandleSearchPets(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "getReports", Name: "GetReports", Method: "GET", Path: "/reports/{ids}"}, "/reports/{p0}", api.HandleGetReports(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "lookup", Name: "Lookup", Method: "GET", Path: "/lookup"}, "/lookup", api.HandleLookup(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "getPhoto", Name: "GetPhoto", Method: "GET", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleGetPhoto(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "uploadPhoto", Name: "UploadPhoto", Method: "PUT", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleUploadPhoto(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "submitForm", Name: "SubmitForm", Method: "POST", Path: "/pets/form"}, "/pets/form", api.HandleSubmitForm(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "shout", Name: "Shout", Method: "POST", Path: "/notes"}, "/notes", api.HandleShout(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "exportPets", Name: "ExportPets", Method: "GET", Path: "/export"}, "/export", api.HandleExportPets(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "watch", Name: "Watch", Method: "GET", Path: "/events"}, "/events", api.HandleWatch(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "upload", Name: "Upload", Method: "POST", Path: "/upload"}, "/upload", server.NotImplemented("request bodies of type multipart/form-data are not supported yet"))
+	cfg.Handle(server.Operation{ID: "admin", Name: "Admin", Method: "GET", Path: "/admin"}, "/admin", api.HandleAdmin(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "secure", Name: "Secure", Method: "GET", Path: "/secure"}, "/secure", api.HandleSecure(cfg, h, sec))
+	cfg.ServeDocument(openAPIDocument)
+	return cfg.Handler()
 }
 
 // openAPIDocument is the document the server was generated from, served
@@ -111,9 +45,3 @@ func NewServer(h Handler, sec SecurityHandler, opts ...server.Option) http.Handl
 //
 //go:embed openapi.json
 var openAPIDocument []byte
-
-type apiServer struct {
-	handler Handler
-	sec     SecurityHandler
-	cfg     *server.Config
-}
