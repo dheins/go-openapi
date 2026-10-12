@@ -15,6 +15,7 @@ complete server.
 - [Errors](#errors)
 - [Security](#security)
 - [Server options](#server-options)
+- [Running in production](#running-in-production)
 - [Using the libraries directly](#using-the-libraries-directly)
 
 ## Install
@@ -141,9 +142,44 @@ case animal.Dog != nil:
 ```
 
 With a discriminator, its property selects the variant when decoding, and
-encoding writes it if the variant left it empty. Without one, every variant
-is decoded and validated; `oneOf` must match exactly one (objects that allow
-additional properties often match several; give them a discriminator).
+encoding writes it if the variant left it empty (the first mapping key, or
+the component name). Without one, every variant is decoded and validated;
+`oneOf` must match exactly one (objects that allow additional properties
+often match several; give them a discriminator).
+
+The 3.0 way of polymorphism works too: a base schema with a discriminator
+that other schemas extend with `allOf`. The base becomes a union of its
+subtypes, so a property typed as the base accepts every subtype, and the
+base's own properties become a `...Base` struct for values that map to the
+base itself:
+
+```yaml
+Vehicle:            # type Vehicle struct{ VehicleBase *VehicleBase; Car *Car; Bike *Bike }
+  type: object
+  properties: {kind: {type: string}, wheels: {type: integer}}
+  discriminator: {propertyName: kind}
+Car:                # type Car struct{ Kind string; Wheels int64; Doors ... }
+  allOf: [{$ref: "#/components/schemas/Vehicle"}, {properties: {doors: {type: integer}}}]
+```
+
+`oneOf` or `anyOf` next to `properties` is checked by `Validate` when its
+members only list properties and required ones, the usual way to say
+"exactly one of these fields":
+
+```yaml
+Contact:
+  type: object
+  properties: {email: {type: string}}
+  oneOf:
+    - required: [email]
+    - required: [phone]
+      properties: {phone: {type: string, pattern: "^\\+[0-9]+$"}}
+```
+
+A property only an alternative defines (`phone`) becomes an optional field
+whose constraints are checked only as part of that alternative. When
+several `allOf` members define the same property, the constraints of all of
+them are checked.
 
 ## Generate a server
 
@@ -292,6 +328,67 @@ credentials that are present and wrong are still rejected.
 | `server.WithErrorHandler(f)` | write errors yourself |
 | `server.WithLogger(l)` | where unexpected errors are logged (default `slog.Default()`) |
 | `server.WithMux(m)` | route with something other than a new `http.ServeMux` |
+
+## Running in production
+
+A generated server is an `http.Handler`; the `http.Server` around it is
+yours, and its defaults have no timeouts. Set them, and shut down
+gracefully so in-flight requests finish:
+
+```go
+srv := &http.Server{
+	Addr:              ":8080",
+	Handler:           api.NewServer(h, sec, server.WithLogger(logger)),
+	ReadHeaderTimeout: 5 * time.Second,
+	ReadTimeout:       30 * time.Second,
+	WriteTimeout:      30 * time.Second, // longer, or 0, for streaming responses
+	IdleTimeout:       2 * time.Minute,
+}
+go func() {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}()
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+<-ctx.Done()
+shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+srv.Shutdown(shutdown)
+```
+
+What the generated server already does:
+
+- **Panics** in a handler or middleware are recovered: the panic and its
+  stack are logged with the operation, and the client gets a 500 problem
+  (if no response had started), instead of a dropped connection.
+- **Request bodies** are limited to 10 MiB (`server.WithMaxBodyBytes`).
+- **Internal errors** never reach clients: anything that is not a
+  `*problem.Problem` is logged and answered with a bare 500.
+- **Response headers** are only sent with a response whose body encoded;
+  a failure becomes a clean 500.
+
+If the document declares its own body for 400 responses, answer invalid
+requests in that format: they reach the error handler as a
+`*server.BindError`, which holds every problem found.
+
+```go
+server.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
+	var bind *server.BindError
+	if errors.As(err, &bind) {
+		writeJSON(w, http.StatusBadRequest, api.Error{Message: bind.Error()})
+		return
+	}
+	var p *problem.Problem
+	if !errors.As(err, &p) {
+		p = problem.New(http.StatusInternalServerError, "")
+	}
+	problem.Write(w, p)
+})
+```
+
+Cross-cutting concerns (request IDs, CORS, metrics, rate limits) go in
+`server.WithMiddleware`, which sees the operation each request is for.
 
 ## Using the libraries directly
 

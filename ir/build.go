@@ -28,6 +28,9 @@ type builder struct {
 	following map[*oas.Schema]bool
 	// securityMethods are the method names of the SecurityHandler.
 	securityMethods namespace
+	// subtypes maps a schema with a discriminator to the component schemas
+	// that extend it with allOf; built on first use.
+	subtypes map[*oas.Schema][]*oas.Schema
 }
 
 // Build maps the schemas of a loaded document to Go types: every
@@ -112,9 +115,13 @@ func (b *builder) fill(t *Type) {
 	case enumBase(s, types) != "":
 		b.warnUnionKeywords(s)
 		b.fillEnum(t, types)
+	case isObject(s, types) && len(b.subtypesOf(s)) > 0:
+		b.fillPolymorphic(t)
 	case isObject(s, types):
-		b.warnUnionKeywords(s)
 		b.fillStruct(t)
+		if s.Discriminator != nil {
+			b.warn(s, []string{"discriminator"}, "no schema extends this one with allOf, so the discriminator selects nothing")
+		}
 	default:
 		b.warnUnionKeywords(s)
 		r := b.inline(s, types, t.Name, t.Root)
@@ -286,10 +293,18 @@ func (b *builder) fillStruct(t *Type) {
 	var props []property
 	index := make(map[string]int)
 	required := make(map[string]bool)
+	// Further definitions of a property in other allOf members add their
+	// constraints to the field, once it exists.
+	type redefinition struct {
+		part   *oas.Schema
+		name   string
+		schema *oas.Schema
+	}
+	var redefinitions []redefinition
 	for _, part := range b.objectParts(s, s, map[*oas.Schema]bool{}) {
 		for name, ps := range part.Properties.All() {
 			if _, dup := index[name]; dup {
-				b.warn(part, []string{"properties", name}, fmt.Sprintf("property %q is also defined by another allOf member; the first definition is used", name))
+				redefinitions = append(redefinitions, redefinition{part, name, ps})
 				continue
 			}
 			index[name] = len(props)
@@ -297,6 +312,19 @@ func (b *builder) fillStruct(t *Type) {
 		}
 		for _, name := range part.Required {
 			required[name] = true
+		}
+	}
+	// Properties that only oneOf or anyOf members define are optional
+	// fields of the struct; the alternatives check them.
+	alternatives, oneOf := b.alternativeMembers(s)
+	alternativeOnly := make(map[string]bool)
+	for _, m := range alternatives {
+		for name, ps := range m.Properties.All() {
+			if _, ok := index[name]; !ok {
+				index[name] = len(props)
+				props = append(props, property{name, ps})
+				alternativeOnly[name] = true
+			}
 		}
 	}
 
@@ -311,6 +339,9 @@ func (b *builder) fillStruct(t *Type) {
 			JSONName: p.name,
 			Required: required[p.name],
 			Nullable: r.AllowsNull(),
+			source:   deref(p.schema),
+
+			AlternativeOnly: alternativeOnly[p.name],
 		}
 		if p.schema != nil {
 			f.Doc = describeSchema(p.schema)
@@ -328,6 +359,22 @@ func (b *builder) fillStruct(t *Type) {
 		t.Fields = append(t.Fields, f)
 	}
 
+	byName := make(map[string]*Field, len(t.Fields))
+	for _, f := range t.Fields {
+		byName[f.JSONName] = f
+	}
+	for _, rd := range redefinitions {
+		f := byName[rd.name]
+		extra, ok := b.extraChecks(f.Type, rd.schema)
+		if !ok {
+			b.warn(rd.part, []string{"properties", rd.name}, fmt.Sprintf("property %q is also defined by another allOf member with a different type; only the first definition is used", rd.name))
+			continue
+		}
+		if extra != nil {
+			f.Extra = append(f.Extra, extra)
+		}
+	}
+
 	t.MinProperties, t.MaxProperties = s.MinProperties, s.MaxProperties
 	switch ap := s.AdditionalProperties; {
 	case ap != nil && ap.Bool != nil && !*ap.Bool:
@@ -338,6 +385,220 @@ func (b *builder) fillStruct(t *Type) {
 		// The 2020-12 way to close an object built with allOf.
 		t.Additional = &Additional{Forbidden: true}
 	}
+	b.fillAlternatives(t, alternatives, oneOf, byName)
+}
+
+// alternativeMembers returns the members of a oneOf or anyOf next to the
+// properties of s, if every one only constrains the object (properties,
+// required, annotations), and whether they are oneOf. Otherwise it warns
+// and returns none.
+func (b *builder) alternativeMembers(s *oas.Schema) ([]*oas.Schema, bool) {
+	members, keyword, oneOf := s.OneOf, "oneOf", true
+	if len(members) == 0 {
+		members, keyword, oneOf = s.AnyOf, "anyOf", false
+	}
+	if len(members) == 0 {
+		return nil, false
+	}
+	var out []*oas.Schema
+	for i, m := range members {
+		mm := deref(m)
+		if mm == nil || !constrainsObjectOnly(mm) {
+			b.warn(s, []string{keyword, fmt.Sprint(i)}, keyword+" next to properties is only supported when every member just lists properties and required ones; it is not checked")
+			return nil, false
+		}
+		out = append(out, mm)
+	}
+	return out, oneOf
+}
+
+// constrainsObjectOnly reports whether s has nothing but properties,
+// required, an object type and annotations.
+func constrainsObjectOnly(s *oas.Schema) bool {
+	c := *s
+	c.Properties, c.Required = nil, nil
+	if reflect.DeepEqual(c.Type, oas.Types{"object"}) {
+		c.Type = nil
+	}
+	return !hasConstraints(&c) && len(c.AllOf) == 0
+}
+
+// fillAlternatives records the oneOf/anyOf members of a struct as
+// alternatives: which fields each requires, and the checks it puts on
+// them.
+func (b *builder) fillAlternatives(t *Type, members []*oas.Schema, oneOf bool, byName map[string]*Field) {
+	var alts []*Alternative
+	for i, m := range members {
+		alt := &Alternative{}
+		for _, name := range m.Required {
+			switch f, ok := byName[name]; {
+			case ok:
+				alt.Required = append(alt.Required, f)
+			case t.Additional != nil && !t.Additional.Forbidden:
+				alt.RequiredAdditional = append(alt.RequiredAdditional, name)
+			default:
+				b.warn(t.Schema, []string{"oneOf", fmt.Sprint(i), "required"}, fmt.Sprintf("%q is required by an alternative but is not a property; the alternatives are not checked", name))
+				return
+			}
+		}
+		for name, ps := range m.Properties.All() {
+			f := byName[name]
+			if f.source == deref(ps) {
+				// The field was built from this very schema. A field
+				// of an alternative is checked fully here; any other
+				// field already validates itself.
+				if f.AlternativeOnly {
+					alt.Checks = append(alt.Checks, &AlternativeCheck{Field: f, Ref: f.Type})
+				}
+				continue
+			}
+			extra, ok := b.extraChecks(f.Type, ps)
+			if !ok {
+				b.warn(t.Schema, []string{"oneOf", fmt.Sprint(i), "properties", name}, fmt.Sprintf("property %q has a different type in an alternative; the alternatives are not checked", name))
+				return
+			}
+			if extra != nil {
+				alt.Checks = append(alt.Checks, &AlternativeCheck{Field: f, Ref: extra})
+			}
+		}
+		alts = append(alts, alt)
+	}
+	t.Alternatives, t.AlternativesOneOf = alts, oneOf
+}
+
+// extraChecks returns the validation keywords of s as checks on a value
+// of type fieldType, with the same wrappers (Optional, Nullable, pointer)
+// as fieldType, or nil if s adds none. It reports false if s describes a
+// value of another kind or with structure of its own (properties, items,
+// composition), which cannot be combined with the field's type.
+func (b *builder) extraChecks(fieldType *Ref, s *oas.Schema) (*Ref, bool) {
+	s = deref(s)
+	if s == nil || s.Bool != nil {
+		return nil, true
+	}
+	if s.Properties.Len() > 0 || s.Items != nil || s.AdditionalProperties != nil || len(s.AllOf) > 0 ||
+		len(s.OneOf) > 0 || len(s.AnyOf) > 0 || s.Not != nil || s.Ref != "" {
+		return nil, false
+	}
+	inner := fieldType
+	for inner.Kind == Optional || inner.Kind == Nullable || inner.Kind == Pointer ||
+		(inner.Kind == Named && inner.Type.Kind == Alias) {
+		if inner.Kind == Named {
+			inner = inner.Type.Underlying
+		} else {
+			inner = inner.Elem
+		}
+	}
+	want := ""
+	switch inner.Kind {
+	case Builtin, Named:
+		want = jsonType(inner)
+	case Slice:
+		want = "array"
+	case Map:
+		want = "object"
+	}
+	if types, _ := splitTypes(s); len(types) > 1 || (len(types) == 1 && want != "" && types[0] != want &&
+		!(types[0] == "number" && want == "integer")) {
+		return nil, false
+	}
+
+	var checks *Checks
+	var leaf *Ref
+	switch {
+	case inner.Kind == Builtin && want == "string":
+		checks = b.stringRef(s).Checks
+		leaf = &Ref{Kind: Builtin, Name: inner.Name, Import: inner.Import}
+	case inner.Kind == Builtin && (want == "integer" || want == "number"):
+		checks = numberChecks(s)
+		leaf = &Ref{Kind: Builtin, Name: inner.Name}
+	case inner.Kind == Slice:
+		checks = arrayChecks(s)
+		leaf = &Ref{Kind: Slice, Elem: anyRef(nil)}
+	case inner.Kind == Map:
+		checks = mapChecks(s)
+		leaf = &Ref{Kind: Map, Elem: anyRef(nil)}
+	default:
+		// Named types, booleans and any: only enum and const apply, which
+		// compare JSON values and so work on any Go type.
+		checks = valueChecks(s)
+		leaf = anyRef(nil)
+	}
+	if checks.IsEmpty() {
+		return nil, true
+	}
+	leaf.Checks = checks
+	return rewrap(fieldType, leaf), true
+}
+
+// rewrap returns leaf inside the same Optional, Nullable and pointer
+// wrappers as like.
+func rewrap(like, leaf *Ref) *Ref {
+	switch like.Kind {
+	case Optional, Nullable, Pointer:
+		return &Ref{Kind: like.Kind, Elem: rewrap(like.Elem, leaf)}
+	case Named:
+		if like.Type.Kind == Alias {
+			return rewrap(like.Type.Underlying, leaf)
+		}
+	}
+	return leaf
+}
+
+// subtypesOf returns the component schemas that extend s with allOf, if s
+// has a discriminator and no oneOf or anyOf of its own, plus non-component
+// schemas its mapping names.
+func (b *builder) subtypesOf(s *oas.Schema) []*oas.Schema {
+	if s.Discriminator == nil || len(s.OneOf) > 0 || len(s.AnyOf) > 0 {
+		return nil
+	}
+	if b.subtypes == nil {
+		b.subtypes = make(map[*oas.Schema][]*oas.Schema)
+		if c := b.spec.Document.Components; c != nil {
+			for _, sub := range c.Schemas.All() {
+				if sub == nil {
+					continue
+				}
+				for _, m := range sub.AllOf {
+					if base := deref(m); base != nil && base.Discriminator != nil && base != sub {
+						b.subtypes[base] = append(b.subtypes[base], sub)
+					}
+				}
+			}
+		}
+	}
+	subs := slices.Clone(b.subtypes[s])
+	for _, target := range s.Discriminator.Targets.All() {
+		if t := deref(target); t != s && !slices.Contains(subs, t) {
+			subs = append(subs, t)
+		}
+	}
+	return subs
+}
+
+// fillPolymorphic makes a schema with a discriminator, which other schemas
+// extend with allOf (the 3.0 way of polymorphism), a union of those
+// schemas. Its own properties become a separate struct, the variant for
+// values the discriminator maps to the base schema itself.
+func (b *builder) fillPolymorphic(t *Type) {
+	s := t.Schema
+	t.Kind, t.OneOf = Union, true
+	base := &Type{Name: b.names.claim(t.Name + "Base"), Schema: s, Root: t.Root, Location: t.Location, Doc: t.Doc}
+	b.model.Types = append(b.model.Types, base)
+	b.fillStruct(base)
+
+	fields := namespace{}
+	for _, n := range reservedFieldNames {
+		fields[n] = true
+	}
+	t.Variants = []*Variant{{Name: fields.claim(base.Name), Type: &Ref{Kind: Named, Type: base}}}
+	targets := []*oas.Schema{s}
+	for _, sub := range b.subtypesOf(s) {
+		ref := stripNullable(b.use(sub, b.hintFor(sub, t.Name+"Subtype"), nil))
+		t.Variants = append(t.Variants, &Variant{Name: fields.claim(variantName(ref, len(t.Variants))), Type: ref})
+		targets = append(targets, sub)
+	}
+	b.discriminate(t, targets)
 }
 
 // objectParts returns s and the schemas its allOf members (recursively)
@@ -797,7 +1058,6 @@ func (b *builder) discriminate(t *Type, targets []*oas.Schema) {
 			t.DefaultVariant = nil
 			return
 		}
-		slices.Sort(v.Values)
 	}
 	t.Discriminator = d.PropertyName
 }
@@ -894,9 +1154,9 @@ func (b *builder) warnUnsupported(s *oas.Schema) {
 }
 
 // warnUnionKeywords reports oneOf, anyOf and discriminator on a schema
-// that does not become a union: next to properties or a single type.
+// that becomes neither a union nor a struct: an enum or a single type.
 func (b *builder) warnUnionKeywords(s *oas.Schema) {
-	const ignored = "next to properties or a type is not supported yet and is not reflected in the generated type"
+	const ignored = "next to a type is not supported yet and is not reflected in the generated type"
 	if len(s.OneOf) > 0 {
 		b.warn(s, []string{"oneOf"}, "oneOf "+ignored)
 	}
@@ -904,7 +1164,7 @@ func (b *builder) warnUnionKeywords(s *oas.Schema) {
 		b.warn(s, []string{"anyOf"}, "anyOf "+ignored)
 	}
 	if s.Discriminator != nil {
-		b.warn(s, []string{"discriminator"}, "a discriminator without oneOf or anyOf (polymorphism through allOf) is not supported yet")
+		b.warn(s, []string{"discriminator"}, "a discriminator on a schema that is not an object or a union selects nothing")
 	}
 }
 

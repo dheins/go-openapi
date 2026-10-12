@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	"github.com/dheins/go-openapi/runtime/problem"
@@ -127,13 +128,66 @@ func NewConfig(opts ...Option) *Config {
 }
 
 // Handle routes op, at route (a ServeMux path pattern) below the base
-// path, to h wrapped in the middleware.
+// path, to h wrapped in the middleware and in panic recovery.
 func (c *Config) Handle(op Operation, route string, h http.Handler) {
 	for i := len(c.Middleware) - 1; i >= 0; i-- {
 		h = c.Middleware[i](op, h)
 	}
-	c.Mux.Handle(op.Method+" "+c.BasePath+route, h)
+	c.Mux.Handle(op.Method+" "+c.BasePath+route, c.recoverPanics(op, h))
 }
+
+// recoverPanics turns a panic in an operation's handler or middleware
+// into a logged error with its stack and, if nothing was sent yet, a 500
+// problem, instead of a dropped connection. http.ErrAbortHandler, the
+// deliberate way to abort a response, is passed on.
+func (c *Config) recoverPanics(op Operation, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tw := &trackingWriter{ResponseWriter: w}
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			if v == http.ErrAbortHandler {
+				panic(v)
+			}
+			c.Logger.ErrorContext(r.Context(), "panic serving request",
+				"operation", op.ID, "method", r.Method, "path", r.URL.Path,
+				"panic", v, "stack", string(debug.Stack()))
+			if !tw.wrote {
+				c.HandleError(tw, r, problem.New(http.StatusInternalServerError, ""))
+			}
+		}()
+		next.ServeHTTP(tw, r)
+	})
+}
+
+// trackingWriter records whether a response has started, so recovery
+// does not write a second status line. It passes flushing on, which
+// streaming responses need.
+type trackingWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (w *trackingWriter) WriteHeader(status int) {
+	w.wrote = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *trackingWriter) Write(b []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *trackingWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap gives http.ResponseController access to the underlying writer.
+func (w *trackingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // ServeDocument serves doc, the document as JSON, at DocumentPath if it
 // is set.

@@ -11,15 +11,16 @@ import (
 	"github.com/dheins/go-openapi/oapi"
 )
 
-// WriteJSON sends body as JSON with the given status and content type,
-// leaving out write-only properties. The body is encoded before anything
-// is written, so an error leaves w untouched and the caller can still
-// send an error response.
-func (c *Config) WriteJSON(w http.ResponseWriter, status int, contentType string, body any) error {
+// WriteJSON sends body as JSON with the given status, content type and
+// headers, leaving out write-only properties. The body is encoded before
+// anything is written, so an error leaves w untouched (headers included)
+// and the caller can still send an error response.
+func (c *Config) WriteJSON(w http.ResponseWriter, status int, contentType string, body any, header http.Header) error {
 	data, err := oapi.EncodeResponse(body)
 	if err != nil {
 		return fmt.Errorf("encoding the %d response: %w", status, err)
 	}
+	applyHeader(w, header)
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(status)
 	// The status line is sent; a failed write means the client is gone and
@@ -42,9 +43,19 @@ func (e *InvalidResponse) Error() string {
 func (e *InvalidResponse) Unwrap() error { return e.Err }
 
 // WriteEmpty sends a response without a body.
-func WriteEmpty(w http.ResponseWriter, status int) error {
+func WriteEmpty(w http.ResponseWriter, status int, header http.Header) error {
+	applyHeader(w, header)
 	w.WriteHeader(status)
 	return nil
+}
+
+// applyHeader adds the headers of a response to w. Writers call it only
+// once nothing can fail any more, so an error response never carries the
+// headers meant for the success response.
+func applyHeader(w http.ResponseWriter, header http.Header) {
+	for name, values := range header {
+		w.Header()[name] = values
+	}
 }
 
 // CheckStatus checks a status code chosen by a handler for a response

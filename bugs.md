@@ -32,9 +32,11 @@ Each entry says where it lives and how to work around it.
 
 ## Models (ir / codegen / oapi)
 
-- **`allOf` property conflicts keep the first definition.** When several
-  `allOf` members define the same property, the first one is used (with a
-  warning) instead of combining the constraints of all of them.
+- **`allOf` members that give a property different types keep the first.**
+  When several `allOf` members define the same property, their constraints
+  are all checked, unless a later one has a different type or structure of
+  its own (properties, items): then the first definition is used, with a
+  warning.
 - **ECMA-262 patterns are not checked.** `pattern` uses Go's RE2 `regexp`;
   patterns with lookahead, backreferences and similar produce a warning and
   are skipped in `Validate()`.
@@ -52,13 +54,10 @@ Each entry says where it lives and how to work around it.
 
 ## Server (runtime / generated server)
 
-- **Binding errors ignore the document's declared 400 response.** Invalid
-  requests are always answered with `application/problem+json`, even when the
-  operation documents a different body for 400. *Workaround:*
-  `server.WithErrorHandler` can rewrite the `*problem.Problem`.
-- **Headers survive a failed response encoding.** A variant's headers are set
-  before its body is encoded; if encoding fails, the 500 error response still
-  carries them.
+- **Invalid requests get problem details by default.** Even when an
+  operation documents a different body for 400, binding errors are sent as
+  `application/problem+json` unless an error handler answers the
+  `*server.BindError` itself (see the guide, "Running in production").
 - **Errors in a stream cannot change the status.** JSON Lines and
   server-sent event responses send 200 before the first item; a later error
   only ends the stream and is logged.

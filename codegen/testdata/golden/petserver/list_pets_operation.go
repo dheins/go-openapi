@@ -59,19 +59,20 @@ func (r ListPets200JSONResponse) writeListPetsResponse(w http.ResponseWriter, re
 			return &server.InvalidResponse{Status: 200, Err: err}
 		}
 	}
+	header := make(http.Header)
 	if r.XNext.Set {
 		h0, err := server.FormatScalar(r.XNext.Value)
 		if err != nil {
 			return err
 		}
-		w.Header().Set("X-Next", h0)
+		header.Set("X-Next", h0)
 	}
 	h1, err := server.FormatScalar(r.XTotal)
 	if err != nil {
 		return err
 	}
-	w.Header().Set("X-Total", h1)
-	return c.WriteJSON(w, 200, "application/json", r.Body)
+	header.Set("X-Total", h1)
+	return c.WriteJSON(w, 200, "application/json", r.Body, header)
 }
 
 // ListPetsDefaultJSONResponse is the default response of ListPets.
@@ -94,7 +95,7 @@ func (r ListPetsDefaultJSONResponse) writeListPetsResponse(w http.ResponseWriter
 			return &server.InvalidResponse{Status: r.StatusCode, Err: err}
 		}
 	}
-	return c.WriteJSON(w, r.StatusCode, "application/json", r.Body)
+	return c.WriteJSON(w, r.StatusCode, "application/json", r.Body, nil)
 }
 
 func (s *apiServer) handleListPets(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +161,7 @@ func (s *apiServer) handleListPets(w http.ResponseWriter, r *http.Request) {
 		b.Param("query", "sort", err)
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.ListPets(server.RequestContext(r), &req)

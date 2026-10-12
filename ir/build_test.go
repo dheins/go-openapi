@@ -227,10 +227,10 @@ components:
       type: [integer, boolean, "null"]
 `, Options{})
 	pet := typeNamed(t, m, "Pet")
-	// Cat is selected by "kitty" and by its name (implicit mapping); Dog's
-	// name is an explicit key, so it is not added twice.
+	// Each variant is selected by its mapping keys (first, so encoding
+	// writes them) and by its component name (the implicit mapping).
 	if pet.Kind != Union || !pet.OneOf || pet.Discriminator != "kind" || pet.DefaultVariant.Name != "Lizard" ||
-		variantSummary(pet) != "Cat=Cat|kitty Dog=Dog|dog Lizard=Lizard" {
+		variantSummary(pet) != "Cat=kitty|Cat Dog=dog|Dog Lizard=Lizard" {
 		t.Errorf("Pet = %s, discriminator %q", variantSummary(pet), pet.Discriminator)
 	}
 

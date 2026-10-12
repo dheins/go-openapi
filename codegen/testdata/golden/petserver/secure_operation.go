@@ -27,7 +27,7 @@ type Secure204Response struct {
 }
 
 func (r Secure204Response) writeSecureResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEmpty(w, 204)
+	return server.WriteEmpty(w, 204, nil)
 }
 
 func (s *apiServer) handleSecure(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +45,7 @@ func (s *apiServer) handleSecure(w http.ResponseWriter, r *http.Request) {
 	var req SecureRequest
 	var b server.Binder
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.Secure(ctx, &req)

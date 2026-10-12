@@ -232,15 +232,16 @@ func TestErrorHandling(t *testing.T) {
 func TestResponses(t *testing.T) {
 	cfg := NewConfig()
 	rec := httptest.NewRecorder()
-	if err := cfg.WriteJSON(rec, 201, "application/json", map[string]int{"id": 1}); err != nil {
+	if err := cfg.WriteJSON(rec, 201, "application/json", map[string]int{"id": 1}, http.Header{"X-Total": {"1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 201 || rec.Body.String() != `{"id":1}` || rec.Header().Get("Content-Type") != "application/json" {
-		t.Errorf("WriteJSON: %d %q", rec.Code, rec.Body)
+	if rec.Code != 201 || rec.Body.String() != `{"id":1}` || rec.Header().Get("Content-Type") != "application/json" || rec.Header().Get("X-Total") != "1" {
+		t.Errorf("WriteJSON: %d %q %v", rec.Code, rec.Body, rec.Header())
 	}
 	rec = httptest.NewRecorder()
-	if err := cfg.WriteJSON(rec, 200, "application/json", func() {}); err == nil || rec.Code != 200 || rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "" {
-		t.Error("an encoding error must leave the response untouched")
+	err := cfg.WriteJSON(rec, 200, "application/json", func() {}, http.Header{"X-Total": {"1"}})
+	if err == nil || rec.Code != 200 || rec.Body.Len() != 0 || len(rec.Header()) != 0 {
+		t.Error("an encoding error must leave the response untouched, headers included")
 	}
 
 	for _, tt := range []struct {
@@ -319,6 +320,55 @@ func TestMiddlewareAndDocument(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/openapi.json", nil))
 	if rec.Code != 200 || rec.Body.String() != `{"openapi":"3.2.0"}` || rec.Header().Get("Content-Type") != "application/json" {
 		t.Errorf("document: %d %q", rec.Code, rec.Body)
+	}
+}
+
+func TestPanicRecovery(t *testing.T) {
+	var logged strings.Builder
+	cfg := NewConfig(WithLogger(slog.New(slog.NewTextHandler(&logged, nil))))
+	cfg.Handle(Operation{ID: "boom", Method: "GET", Path: "/boom"}, "/boom", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("kaboom")
+	}))
+	cfg.Handle(Operation{ID: "late", Method: "GET", Path: "/late"}, "/late", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		panic("after the status line")
+	}))
+	h := cfg.Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/boom", nil))
+	if rec.Code != 500 || rec.Header().Get("Content-Type") != problem.ContentType || strings.Contains(rec.Body.String(), "kaboom") {
+		t.Errorf("panic: %d %q", rec.Code, rec.Body)
+	}
+	if !strings.Contains(logged.String(), "kaboom") || !strings.Contains(logged.String(), "operation=boom") {
+		t.Errorf("panic not logged with its operation: %s", logged.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/late", nil))
+	if rec.Code != http.StatusAccepted || rec.Body.Len() != 0 {
+		t.Errorf("a started response must not get a second status: %d %q", rec.Code, rec.Body)
+	}
+
+	cfg.Handle(Operation{ID: "abort", Method: "GET", Path: "/abort"}, "/abort", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	}))
+	defer func() {
+		if v := recover(); v != http.ErrAbortHandler {
+			t.Errorf("ErrAbortHandler should pass through, got %v", v)
+		}
+	}()
+	cfg.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/abort", nil))
+}
+
+func TestBindError(t *testing.T) {
+	var b Binder
+	b.Missing("query", "limit")
+	err := b.Err()
+	var be *BindError
+	var p *problem.Problem
+	if !errors.As(err, &be) || !errors.As(err, &p) || p.Status != 400 || len(be.Problem.Errors) != 1 {
+		t.Errorf("err = %#v", err)
 	}
 }
 
@@ -415,7 +465,7 @@ func TestStreaming(t *testing.T) {
 			}
 		}
 	}
-	if err := WriteJSONLines(cfg, rec, r, 200, "application/jsonl", items); err != nil {
+	if err := WriteJSONLines(cfg, rec, r, 200, "application/jsonl", items, nil); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Body.String() != "0\n1\n2\n" || rec.Header().Get("Content-Type") != "application/jsonl" {
@@ -431,7 +481,7 @@ func TestStreaming(t *testing.T) {
 		}
 		yield(Event{Data: "two\nlines", Retry: 500}, nil)
 	}
-	if err := WriteEvents(cfg, rec, r, 200, events); err != nil {
+	if err := WriteEvents(cfg, rec, r, 200, events, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "id: 1\nevent: pet\ndata: {\"id\":1}\n\nretry: 500\ndata: two\ndata: lines\n\n"

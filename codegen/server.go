@@ -276,7 +276,7 @@ func (f *fileGen) bindStmts(o *ir.Operation) string {
 	}
 
 	w(1, "if b.Failed() {")
-	w(2, "s.cfg.HandleError(w, r, b.Problem())")
+	w(2, "s.cfg.HandleError(w, r, b.Err())")
 	w(2, "return")
 	w(1, "}")
 	return strings.TrimSuffix(b.String(), "\n")
@@ -521,6 +521,11 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(1, "}")
 		contentType = "r.ContentType"
 	}
+	header := "nil"
+	if len(r.Headers) > 0 {
+		header = "header"
+		w(1, "header := make(http.Header)")
+	}
 	for i, h := range r.Headers {
 		format := "server.FormatScalar"
 		if h.Array {
@@ -540,24 +545,24 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(depth, "if err != nil {")
 		w(depth+1, "return err")
 		w(depth, "}")
-		w(depth, "w.Header().Set(%q, %s)", h.Name, v)
+		w(depth, "header.Set(%q, %s)", h.Name, v)
 		if depth == 2 {
 			w(1, "}")
 		}
 	}
 	switch r.Kind {
 	case "json":
-		w(1, "return c.WriteJSON(w, %s, %s, r.Body)", status, contentType)
+		w(1, "return c.WriteJSON(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "text":
-		w(1, "return server.WriteText(w, %s, %s, string(r.Body))", status, contentType)
+		w(1, "return server.WriteText(w, %s, %s, string(r.Body), %s)", status, contentType, header)
 	case "binary":
-		w(1, "return server.WriteBytes(w, %s, %s, r.Body)", status, contentType)
+		w(1, "return server.WriteBytes(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "jsonl":
-		w(1, "return server.WriteJSONLines(c, w, req, %s, %s, r.Items)", status, contentType)
+		w(1, "return server.WriteJSONLines(c, w, req, %s, %s, r.Items, %s)", status, contentType, header)
 	case "sse":
-		w(1, "return server.WriteEvents(c, w, req, %s, r.Events)", status)
+		w(1, "return server.WriteEvents(c, w, req, %s, r.Events, %s)", status, header)
 	default:
-		w(1, "return server.WriteEmpty(w, %s)", status)
+		w(1, "return server.WriteEmpty(w, %s, %s)", status, header)
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }

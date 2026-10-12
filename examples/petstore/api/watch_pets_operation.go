@@ -30,14 +30,14 @@ type WatchPets200EventsResponse struct {
 }
 
 func (r WatchPets200EventsResponse) writeWatchPetsResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEvents(c, w, req, 200, r.Events)
+	return server.WriteEvents(c, w, req, 200, r.Events, nil)
 }
 
 func (s *apiServer) handleWatchPets(w http.ResponseWriter, r *http.Request) {
 	var req WatchPetsRequest
 	var b server.Binder
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.WatchPets(server.RequestContext(r), &req)

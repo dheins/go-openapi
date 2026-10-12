@@ -28,7 +28,7 @@ type Admin200TextResponse struct {
 }
 
 func (r Admin200TextResponse) writeAdminResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteText(w, 200, "text/plain", string(r.Body))
+	return server.WriteText(w, 200, "text/plain", string(r.Body), nil)
 }
 
 func (s *apiServer) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +51,7 @@ func (s *apiServer) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	var req AdminRequest
 	var b server.Binder
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.Admin(ctx, &req)

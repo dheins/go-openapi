@@ -43,7 +43,7 @@ func (r CopyPet201JSONResponse) writeCopyPetResponse(w http.ResponseWriter, req 
 			return &server.InvalidResponse{Status: 201, Err: err}
 		}
 	}
-	return c.WriteJSON(w, 201, "application/json", r.Body)
+	return c.WriteJSON(w, 201, "application/json", r.Body, nil)
 }
 
 func (s *apiServer) handleCopyPet(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +70,7 @@ func (s *apiServer) handleCopyPet(w http.ResponseWriter, r *http.Request) {
 		b.Missing("header", "Destination")
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.CopyPet(server.RequestContext(r), &req)

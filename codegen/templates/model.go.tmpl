@@ -63,6 +63,7 @@ func (m {{.Name}}) Validate() error {
 {{validateStmts .}}
 	return errs.Err()
 }
+{{- alternativeMethods .}}
 {{- end}}
 
 {{define "union"}}

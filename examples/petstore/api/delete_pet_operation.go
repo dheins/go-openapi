@@ -33,7 +33,7 @@ type DeletePet204Response struct {
 }
 
 func (r DeletePet204Response) writeDeletePetResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEmpty(w, 204)
+	return server.WriteEmpty(w, 204, nil)
 }
 
 // DeletePet404JSONResponse is the 404 response of DeletePet.
@@ -51,7 +51,7 @@ func (r DeletePet404JSONResponse) writeDeletePetResponse(w http.ResponseWriter, 
 			return &server.InvalidResponse{Status: 404, Err: err}
 		}
 	}
-	return c.WriteJSON(w, 404, "application/problem+json", r.Body)
+	return c.WriteJSON(w, 404, "application/problem+json", r.Body, nil)
 }
 
 func (s *apiServer) handleDeletePet(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +78,7 @@ func (s *apiServer) handleDeletePet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.DeletePet(ctx, &req)

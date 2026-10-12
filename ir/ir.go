@@ -85,6 +85,10 @@ type Type struct {
 	// MinProperties and MaxProperties bound the number of properties
 	// present, declared and additional.
 	MinProperties, MaxProperties *int
+	// Alternatives come from oneOf or anyOf next to properties: a value
+	// must match exactly one (AlternativesOneOf) or at least one of them.
+	Alternatives      []*Alternative
+	AlternativesOneOf bool
 
 	// Enum
 	Base   *Ref
@@ -150,6 +154,34 @@ type Field struct {
 	// Default is the JSON literal of the property's default value, or "".
 	// It is applied to absent optional properties of requests.
 	Default string
+	// Extra are further checks on the field's value, from other allOf
+	// members defining the same property. Each has the shape of Type.
+	Extra []*Ref
+
+	// AlternativeOnly means the property is defined only by oneOf/anyOf
+	// alternatives: its constraints apply within them, so Validate does
+	// not check the field on its own.
+	AlternativeOnly bool
+
+	// source is the schema the field was built from.
+	source *oas.Schema
+}
+
+// Alternative is one member of a oneOf or anyOf next to properties: the
+// properties it requires and the checks it puts on property values.
+type Alternative struct {
+	Required []*Field
+	// RequiredAdditional are required names that are not declared fields,
+	// looked up in the struct's additional properties.
+	RequiredAdditional []string
+	Checks             []*AlternativeCheck
+}
+
+// AlternativeCheck is a check an Alternative puts on a field's value; Ref
+// has the shape of the field's type.
+type AlternativeCheck struct {
+	Field *Field
+	Ref   *Ref
 }
 
 // RefKind is the kind of a type expression.

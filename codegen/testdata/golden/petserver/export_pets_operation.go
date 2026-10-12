@@ -31,7 +31,7 @@ type ExportPets200JSONLinesResponse struct {
 }
 
 func (r ExportPets200JSONLinesResponse) writeExportPetsResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteJSONLines(c, w, req, 200, "application/jsonl", r.Items)
+	return server.WriteJSONLines(c, w, req, 200, "application/jsonl", r.Items, nil)
 }
 
 // ExportPets200TextResponse is the 200 response of ExportPets.
@@ -42,14 +42,14 @@ type ExportPets200TextResponse struct {
 }
 
 func (r ExportPets200TextResponse) writeExportPetsResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteText(w, 200, "text/csv", string(r.Body))
+	return server.WriteText(w, 200, "text/csv", string(r.Body), nil)
 }
 
 func (s *apiServer) handleExportPets(w http.ResponseWriter, r *http.Request) {
 	var req ExportPetsRequest
 	var b server.Binder
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.ExportPets(server.RequestContext(r), &req)

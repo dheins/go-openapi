@@ -38,7 +38,7 @@ func (r CreatePet201JSONResponse) writeCreatePetResponse(w http.ResponseWriter, 
 			return &server.InvalidResponse{Status: 201, Err: err}
 		}
 	}
-	return c.WriteJSON(w, 201, "application/json", r.Body)
+	return c.WriteJSON(w, 201, "application/json", r.Body, nil)
 }
 
 // CreatePet4XXJSONResponse is the 4XX response of CreatePet.
@@ -61,7 +61,7 @@ func (r CreatePet4XXJSONResponse) writeCreatePetResponse(w http.ResponseWriter, 
 			return &server.InvalidResponse{Status: r.StatusCode, Err: err}
 		}
 	}
-	return c.WriteJSON(w, r.StatusCode, "application/json", r.Body)
+	return c.WriteJSON(w, r.StatusCode, "application/json", r.Body, nil)
 }
 
 func (s *apiServer) handleCreatePet(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +80,7 @@ func (s *apiServer) handleCreatePet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.CreatePet(server.RequestContext(r), &req)

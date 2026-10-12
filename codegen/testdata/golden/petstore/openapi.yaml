@@ -163,6 +163,71 @@ components:
         limit:
           type: integer
           default: 10
+    Vehicle:
+      type: object
+      required: [kind, wheels]
+      properties:
+        kind:
+          type: string
+        wheels:
+          type: integer
+          minimum: 0
+      discriminator:
+        propertyName: kind
+        mapping:
+          automobile: "#/components/schemas/Car"
+    Car:
+      allOf:
+        - $ref: "#/components/schemas/Vehicle"
+        - type: object
+          properties:
+            doors:
+              type: integer
+              maximum: 5
+    Bike:
+      allOf:
+        - $ref: "#/components/schemas/Vehicle"
+        - type: object
+          required: [gears]
+          properties:
+            gears:
+              type: integer
+    Garage:
+      type: object
+      properties:
+        vehicles:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vehicle"
+    Badge:
+      allOf:
+        - type: object
+          required: [code]
+          properties:
+            code:
+              type: string
+              minLength: 3
+              maxLength: 8
+        - type: object
+          properties:
+            code:
+              pattern: "^[A-Z]+$"
+    Contact:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+      oneOf:
+        - required: [email]
+        - required: [phone]
+          properties:
+            phone:
+              type: string
+              pattern: "^\\+[1-9][0-9]{6,14}$"
     Animal:
       oneOf:
         - $ref: "#/components/schemas/Cat"

@@ -238,8 +238,9 @@ func TestDiscriminatedUnion(t *testing.T) {
 	assertMessages(t, a.Validate(), "/lives: must be at most 9")
 
 	// The discriminator is written even if the variant leaves it empty.
+	// The documented mapping key is written, not the component name.
 	out, err := json.Marshal(Animal{Cat: &Cat{Lives: 3}})
-	if err != nil || string(out) != `{"kind":"Cat","lives":3}` {
+	if err != nil || string(out) != `{"kind":"kitty","lives":3}` {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
 	assertMessages(t, Animal{}.Validate(), "no variant is set")
@@ -323,6 +324,79 @@ func TestReadOnlyAndWriteOnly(t *testing.T) {
 func TestPropertyCount(t *testing.T) {
 	acct := Account{ID: 1, Username: "ann", Password: "x", Role: oapi.Some("a"), Limit: oapi.Some(int64(1))}
 	assertMessages(t, acct.Validate(), "must have at most 4 properties")
+}
+
+func TestAllOfPolymorphism(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{`{"kind": "automobile", "wheels": 4, "doors": 3}`, "Car"},
+		{`{"kind": "Car", "wheels": 4}`, "Car"},
+		{`{"kind": "Bike", "wheels": 2, "gears": 21}`, "Bike"},
+		{`{"kind": "Vehicle", "wheels": 6}`, "VehicleBase"},
+	}
+	for _, tt := range tests {
+		var v Vehicle
+		if err := json.Unmarshal([]byte(tt.in), &v); err != nil {
+			t.Errorf("%s: %v", tt.in, err)
+			continue
+		}
+		got := map[bool]string{v.Car != nil: "Car", v.Bike != nil: "Bike", v.VehicleBase != nil: "VehicleBase"}[true]
+		if got != tt.want {
+			t.Errorf("%s decoded as %s, want %s", tt.in, got, tt.want)
+		}
+	}
+	var v Vehicle
+	assertMessages(t, json.Unmarshal([]byte(`{"kind": "Bike", "wheels": 2}`), &v), "/gears: required property is missing")
+	assertMessages(t, json.Unmarshal([]byte(`{"kind": "boat", "wheels": 0}`), &v), `/kind: must be one of "Vehicle", "automobile", "Car", "Bike"`)
+
+	// Subtypes are ordinary structs with the base's properties merged in.
+	car := Car{Kind: "automobile", Wheels: 4, Doors: oapi.Some(int64(9))}
+	assertMessages(t, Vehicle{Car: &car}.Validate(), "/doors: must be at most 5")
+	out, err := json.Marshal(Vehicle{Bike: &Bike{Wheels: 2, Gears: 3}})
+	if err != nil || string(out) != `{"kind":"Bike","wheels":2,"gears":3}` {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+
+	// A property typed as the base accepts every subtype.
+	var g Garage
+	if err := json.Unmarshal([]byte(`{"vehicles": [{"kind": "automobile", "wheels": 4}, {"kind": "Bike", "wheels": 2, "gears": 1}]}`), &g); err != nil {
+		t.Fatal(err)
+	}
+	if vs := g.Vehicles.Value; vs[0].Car == nil || vs[1].Bike == nil {
+		t.Errorf("garage = %+v", vs)
+	}
+}
+
+func TestAllOfConstraintsCombine(t *testing.T) {
+	// Badge's allOf members both constrain code: a string of 3 to 8
+	// characters (first member) that also matches ^[A-Z]+$ (second).
+	assertMessages(t, Badge{Code: "ab"}.Validate(), "/code: length must be at least 3", "/code: must match the pattern ^[A-Z]+$")
+	assertMessages(t, Badge{Code: "ABCDEFGHIJ"}.Validate(), "/code: length must be at most 8")
+	if err := (Badge{Code: "ABCD"}).Validate(); err != nil {
+		t.Errorf("valid badge: %v", err)
+	}
+}
+
+func TestOneOfNextToProperties(t *testing.T) {
+	// Contact needs exactly one of email or phone; phone must then be in
+	// E.164 form.
+	if err := (Contact{Name: "a", Email: oapi.Some("a@example.com")}).Validate(); err != nil {
+		t.Errorf("email only: %v", err)
+	}
+	if err := (Contact{Name: "a", Phone: oapi.Some("+15551234567")}).Validate(); err != nil {
+		t.Errorf("phone only: %v", err)
+	}
+	assertMessages(t, Contact{Name: "a"}.Validate(), "must match exactly one of the 2 oneOf alternatives, matches 0")
+	assertMessages(t, Contact{Name: "a", Email: oapi.Some("a@example.com"), Phone: oapi.Some("+15551234567")}.Validate(),
+		"must match exactly one of the 2 oneOf alternatives, matches 2")
+	assertMessages(t, Contact{Name: "a", Phone: oapi.Some("555")}.Validate(), "must match exactly one of the 2 oneOf alternatives, matches 0")
+	// The phone pattern belongs to the phone alternative: with an email,
+	// the first alternative matches and a malformed phone is allowed, as
+	// JSON Schema says.
+	if err := (Contact{Name: "a", Email: oapi.Some("a@example.com"), Phone: oapi.Some("555")}).Validate(); err != nil {
+		t.Errorf("email with an unchecked phone: %v", err)
+	}
 }
 
 // assertMessages checks that err holds exactly the given messages, in any

@@ -31,7 +31,7 @@ type Lookup204Response struct {
 }
 
 func (r Lookup204Response) writeLookupResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEmpty(w, 204)
+	return server.WriteEmpty(w, 204, nil)
 }
 
 func (s *apiServer) handleLookup(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +53,7 @@ func (s *apiServer) handleLookup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.Lookup(server.RequestContext(r), &req)

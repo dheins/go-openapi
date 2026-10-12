@@ -39,7 +39,7 @@ func (r SearchPets200JSONResponse) writeSearchPetsResponse(w http.ResponseWriter
 			return &server.InvalidResponse{Status: 200, Err: err}
 		}
 	}
-	return c.WriteJSON(w, 200, "application/json", r.Body)
+	return c.WriteJSON(w, 200, "application/json", r.Body, nil)
 }
 
 func (s *apiServer) handleSearchPets(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +60,7 @@ func (s *apiServer) handleSearchPets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.SearchPets(server.RequestContext(r), &req)

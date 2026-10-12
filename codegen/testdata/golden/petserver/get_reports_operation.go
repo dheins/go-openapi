@@ -53,7 +53,7 @@ type GetReports204Response struct {
 }
 
 func (r GetReports204Response) writeGetReportsResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEmpty(w, 204)
+	return server.WriteEmpty(w, 204, nil)
 }
 
 func (s *apiServer) handleGetReports(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +128,7 @@ func (s *apiServer) handleGetReports(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.GetReports(server.RequestContext(r), &req)

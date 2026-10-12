@@ -36,7 +36,7 @@ func (r GetPhoto200ImageResponse) writeGetPhotoResponse(w http.ResponseWriter, r
 	if err := server.CheckContentType(r.ContentType, "image/*"); err != nil {
 		return err
 	}
-	return server.WriteBytes(w, 200, r.ContentType, r.Body)
+	return server.WriteBytes(w, 200, r.ContentType, r.Body, nil)
 }
 
 func (s *apiServer) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +52,7 @@ func (s *apiServer) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.GetPhoto(server.RequestContext(r), &req)

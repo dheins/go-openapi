@@ -44,7 +44,7 @@ func (r GetPet200JSONResponse) writeGetPetResponse(w http.ResponseWriter, req *h
 			return &server.InvalidResponse{Status: 200, Err: err}
 		}
 	}
-	return c.WriteJSON(w, 200, "application/json", r.Body)
+	return c.WriteJSON(w, 200, "application/json", r.Body, nil)
 }
 
 // GetPet404Response is the 404 response of GetPet.
@@ -54,7 +54,7 @@ type GetPet404Response struct {
 }
 
 func (r GetPet404Response) writeGetPetResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEmpty(w, 404)
+	return server.WriteEmpty(w, 404, nil)
 }
 
 func (s *apiServer) handleGetPet(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +79,7 @@ func (s *apiServer) handleGetPet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.GetPet(server.RequestContext(r), &req)

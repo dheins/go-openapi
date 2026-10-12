@@ -30,14 +30,14 @@ type Watch200EventsResponse struct {
 }
 
 func (r Watch200EventsResponse) writeWatchResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEvents(c, w, req, 200, r.Events)
+	return server.WriteEvents(c, w, req, 200, r.Events, nil)
 }
 
 func (s *apiServer) handleWatch(w http.ResponseWriter, r *http.Request) {
 	var req WatchRequest
 	var b server.Binder
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.Watch(server.RequestContext(r), &req)

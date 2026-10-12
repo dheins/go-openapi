@@ -40,6 +40,8 @@ func FuzzModels(f *testing.F) {
 		`5`, `"ab"`, `{"animals": [{"kind": "Doggo"}], "choice": "auto"}`, `{"choice": null}`,
 		`{"value": "a", "next": {"value": "b", "next": null}}`, `{"kind": "extensible", "a": 1}`,
 		`{"id": 1, "parent": {"id": 2}, "children": [{"name": "c"}]}`,
+		`{"kind": "automobile", "wheels": 4, "doors": 3}`, `{"vehicles": [{"kind": "Bike", "wheels": 2, "gears": 1}]}`,
+		`{"name": "a", "email": "a@example.com"}`, `{"code": "ABC"}`,
 	} {
 		f.Add([]byte(seed))
 	}
@@ -52,5 +54,9 @@ func FuzzModels(f *testing.F) {
 		roundTrip[Extensible](t, data)
 		roundTrip[Category](t, data)
 		roundTrip[Account](t, data)
+		roundTrip[Vehicle](t, data)
+		roundTrip[Garage](t, data)
+		roundTrip[Contact](t, data)
+		roundTrip[Badge](t, data)
 	})
 }

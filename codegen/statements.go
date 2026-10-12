@@ -140,7 +140,34 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 	switch t.Kind {
 	case ir.Struct:
 		for _, fd := range t.Fields {
+			if fd.AlternativeOnly {
+				// Checked by the alternatives that define it.
+				continue
+			}
 			v.ref("m."+fd.Name, pointerLiteral(fd.JSONName), fd.Type, fd.Name, 1)
+			for _, extra := range fd.Extra {
+				v.ref("m."+fd.Name, pointerLiteral(fd.JSONName), extra, fd.Name, 1)
+			}
+		}
+		if len(t.Alternatives) > 0 {
+			calls := make([]string, len(t.Alternatives))
+			for i := range t.Alternatives {
+				calls[i] = fmt.Sprintf("m.matchesAlternative%d()", i)
+			}
+			v.line(1, "matches := 0")
+			v.line(1, "for _, ok := range []bool{%s} {", strings.Join(calls, ", "))
+			v.line(2, "if ok {")
+			v.line(3, "matches++")
+			v.line(2, "}")
+			v.line(1, "}")
+			if t.AlternativesOneOf {
+				v.line(1, "if matches != 1 {")
+				v.line(2, "errs.Addf(\"\", \"must match exactly one of the %d oneOf alternatives, matches %%d\", matches)", len(t.Alternatives))
+			} else {
+				v.line(1, "if matches == 0 {")
+				v.line(2, "errs.Add(\"\", \"must match at least one of the %d anyOf alternatives\")", len(t.Alternatives))
+			}
+			v.line(1, "}")
 		}
 		v.propertyCount(t)
 		if a := t.Additional; a != nil && !a.Forbidden {
@@ -192,6 +219,55 @@ func (v *validator) propertyCount(t *ir.Type) {
 		v.line(1, "count += len(m.%s)", a.FieldName)
 	}
 	v.counts(1, "count", `""`, t.MinProperties, t.MaxProperties, "property")
+}
+
+// alternativeMethods returns the matchesAlternativeN methods of a struct
+// with oneOf or anyOf alternatives next to its properties.
+func (f *fileGen) alternativeMethods(t *ir.Type) string {
+	var b strings.Builder
+	for i, alt := range t.Alternatives {
+		fmt.Fprintf(&b, "\n// matchesAlternative%d reports whether the value matches alternative %d of the\n", i, i+1)
+		fmt.Fprintf(&b, "// %s: the properties it requires are present and its checks pass.\n", map[bool]string{true: "oneOf", false: "anyOf"}[t.AlternativesOneOf])
+		fmt.Fprintf(&b, "func (m %s) matchesAlternative%d() bool {\n", t.Name, i)
+		for _, fd := range alt.Required {
+			if cond := absent("m."+fd.Name, fd); cond != "" {
+				fmt.Fprintf(&b, "\tif %s {\n\t\treturn false\n\t}\n", cond)
+			}
+		}
+		for _, name := range alt.RequiredAdditional {
+			fmt.Fprintf(&b, "\tif _, ok := m.%s[%q]; !ok {\n\t\treturn false\n\t}\n", t.Additional.FieldName, name)
+		}
+		v := &validator{file: f, typeName: t.Name}
+		for _, c := range alt.Checks {
+			v.ref("m."+c.Field.Name, pointerLiteral(c.Field.JSONName), c.Ref, c.Field.Name+"Alternative", 1)
+		}
+		if v.b.Len() > 0 {
+			b.WriteString("\tvar errs oapi.ValidationErrors\n")
+			b.WriteString(v.b.String())
+			b.WriteString("\treturn len(errs) == 0\n")
+		} else {
+			b.WriteString("\treturn true\n")
+		}
+		b.WriteString("}\n")
+	}
+	return b.String()
+}
+
+// absent returns the condition under which a field holds no value, or ""
+// if it always does.
+func absent(expr string, fd *ir.Field) string {
+	if fd.Required {
+		return ""
+	}
+	switch fd.Type.Kind {
+	case ir.Optional:
+		return "!" + expr + ".Set"
+	case ir.Pointer, ir.Any:
+		return expr + " == nil"
+	case ir.Slice, ir.Map:
+		return "len(" + expr + ") == 0"
+	}
+	return ""
 }
 
 // underlyingExpr converts the receiver of a defined type to its

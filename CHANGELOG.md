@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Polymorphism the 3.0 way: a base schema with a discriminator that other
+  schemas extend with `allOf` becomes a union of those schemas.
+- `oneOf`/`anyOf` next to `properties` (members listing properties and
+  required ones) is checked by `Validate`.
+- `server.BindError`: invalid requests reach the error handler as their own
+  error type, so they can be answered in the format the document declares.
+- Generated servers recover from panics in handlers and middleware: the
+  panic is logged with its stack and the client gets a 500 problem.
+- A "Running in production" section in the guide.
+
+### Fixed
+
+- Response headers were set before the body was encoded, so an encoding
+  failure sent them with the 500 error response.
+- When several `allOf` members defined the same property, only the first
+  definition's constraints were checked.
+
+### Changed
+
+- Discriminated unions write the first mapping key when encoding (the
+  documented value) rather than the alphabetically first value.
+- The runtime writers (`Config.WriteJSON`, `WriteText`, `WriteBytes`,
+  `WriteEmpty`, `WriteJSONLines`, `WriteEvents`) take the response headers
+  as a parameter. Regenerate servers after upgrading.
+
 ## v0.1.0
 
 The first release: validation, model generation and server generation for

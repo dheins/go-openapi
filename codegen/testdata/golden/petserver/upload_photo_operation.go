@@ -35,7 +35,7 @@ type UploadPhoto204Response struct {
 }
 
 func (r UploadPhoto204Response) writeUploadPhotoResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEmpty(w, 204)
+	return server.WriteEmpty(w, 204, nil)
 }
 
 func (s *apiServer) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +64,7 @@ func (s *apiServer) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.UploadPhoto(server.RequestContext(r), &req)

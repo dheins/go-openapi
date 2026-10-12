@@ -64,6 +64,25 @@ func (b *Binder) Failed() bool {
 	return b.fatal != nil || len(b.errs) > 0
 }
 
+// BindError is the error a generated server hands to the error handler
+// when a request is invalid: parameters or body that do not match the
+// document, a body that is too large, or an unsupported content type. It
+// wraps the problem sent by default, so errors.As finds a
+// *problem.Problem in it; an error handler can look for a *BindError to
+// answer invalid requests in the format the document declares instead.
+type BindError struct {
+	Problem *problem.Problem
+}
+
+func (e *BindError) Error() string { return e.Problem.Error() }
+
+func (e *BindError) Unwrap() error { return e.Problem }
+
+// Err returns the error for a failed binding.
+func (b *Binder) Err() error {
+	return &BindError{Problem: b.Problem()}
+}
+
 // Problem returns the response for a failed binding.
 func (b *Binder) Problem() *problem.Problem {
 	if b.fatal != nil {

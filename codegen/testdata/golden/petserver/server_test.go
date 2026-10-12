@@ -64,6 +64,9 @@ func (s *store) CreatePet(_ context.Context, req *CreatePetRequest) (CreatePetRe
 
 func (s *store) GetPet(_ context.Context, req *GetPetRequest) (GetPetResponse, error) {
 	s.seen["GetPet"] = req
+	if req.PetID == 666 {
+		panic("cursed pet")
+	}
 	for _, p := range s.pets {
 		if p.ID == req.PetID {
 			return GetPet200JSONResponse{Body: p}, nil
@@ -658,6 +661,46 @@ func TestUnsupportedAndMisbehavingOperations(t *testing.T) {
 	// Secure returns neither a response nor an error.
 	if r := do(t, h, "GET", "/secure", "", "", "X-API-Key", "good"); r.status != 500 {
 		t.Errorf("nil response: %d %s", r.status, r.body)
+	}
+}
+
+func TestHandlerPanic(t *testing.T) {
+	_, h := newTestServer()
+	r := do(t, h, "GET", "/pets/666", "", "")
+	if r.status != 500 || strings.Contains(r.body, "cursed") {
+		t.Errorf("panic: %d %s", r.status, r.body)
+	}
+	// The server keeps serving.
+	if r := do(t, h, "GET", "/pets/1", "", ""); r.status != 200 {
+		t.Errorf("after a panic: %d", r.status)
+	}
+}
+
+func TestCustomBadRequestFormat(t *testing.T) {
+	// An API whose documented 400 body is its Error schema, not problem
+	// details, can answer invalid requests in that format.
+	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
+		var be *server.BindError
+		if errors.As(err, &be) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(be.Problem.Status)
+			json.NewEncoder(w).Encode(Error{Message: be.Problem.Errors[0].Detail})
+			return
+		}
+		var p *problem.Problem
+		if !errors.As(err, &p) {
+			p = problem.New(http.StatusInternalServerError, "")
+		}
+		problem.Write(w, p)
+	}
+	h := NewServer(newStore(), auth{}, server.WithErrorHandler(errorHandler), server.WithLogger(slog.New(slog.DiscardHandler)))
+	r := do(t, h, "GET", "/pets?limit=500", "", "")
+	if r.status != 400 || r.header.Get("Content-Type") != "application/json" || !strings.Contains(r.body, `"message":"must be at most 100"`) {
+		t.Errorf("bind error: %d %s %s", r.status, r.header.Get("Content-Type"), r.body)
+	}
+	// Other errors keep their problem details.
+	if r := do(t, h, "DELETE", "/pets/99", "", ""); r.status != 403 || r.header.Get("Content-Type") != problem.ContentType {
+		t.Errorf("handler problem: %d %s", r.status, r.body)
 	}
 }
 

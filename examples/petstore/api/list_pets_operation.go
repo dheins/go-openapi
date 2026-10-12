@@ -53,14 +53,15 @@ func (r ListPets200JSONResponse) writeListPetsResponse(w http.ResponseWriter, re
 			return &server.InvalidResponse{Status: 200, Err: err}
 		}
 	}
+	header := make(http.Header)
 	if r.XNext.Set {
 		h0, err := server.FormatScalar(r.XNext.Value)
 		if err != nil {
 			return err
 		}
-		w.Header().Set("X-Next", h0)
+		header.Set("X-Next", h0)
 	}
-	return c.WriteJSON(w, 200, "application/json", r.Body)
+	return c.WriteJSON(w, 200, "application/json", r.Body, header)
 }
 
 func (s *apiServer) handleListPets(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +113,7 @@ func (s *apiServer) handleListPets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if b.Failed() {
-		s.cfg.HandleError(w, r, b.Problem())
+		s.cfg.HandleError(w, r, b.Err())
 		return
 	}
 	resp, err := s.handler.ListPets(server.RequestContext(r), &req)

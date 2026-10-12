@@ -143,11 +143,11 @@ func storeFiles(f reflect.Value, files []oapi.File) error {
 
 // WriteText sends a text body, as UTF-8 unless the content type names
 // a charset.
-func WriteText(w http.ResponseWriter, status int, contentType, body string) error {
+func WriteText(w http.ResponseWriter, status int, contentType, body string, header http.Header) error {
 	if !strings.Contains(strings.ToLower(contentType), "charset=") {
 		contentType += "; charset=utf-8"
 	}
-	return WriteBytes(w, status, contentType, []byte(body))
+	return WriteBytes(w, status, contentType, []byte(body), header)
 }
 
 // CheckContentType checks the content type a handler chose for a
@@ -161,7 +161,8 @@ func CheckContentType(contentType, declared string) error {
 }
 
 // WriteBytes sends a binary body.
-func WriteBytes(w http.ResponseWriter, status int, contentType string, body []byte) error {
+func WriteBytes(w http.ResponseWriter, status int, contentType string, body []byte, header http.Header) error {
+	applyHeader(w, header)
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
@@ -174,10 +175,11 @@ func WriteBytes(w http.ResponseWriter, status int, contentType string, body []by
 // flushing after each, leaving out write-only properties. Once the first
 // item is sent the status cannot change, so a later error ends the
 // stream and is logged.
-func WriteJSONLines[T any](c *Config, w http.ResponseWriter, r *http.Request, status int, contentType string, items iter.Seq2[T, error]) error {
+func WriteJSONLines[T any](c *Config, w http.ResponseWriter, r *http.Request, status int, contentType string, items iter.Seq2[T, error], header http.Header) error {
 	if items == nil {
 		return errors.New("streaming response without items")
 	}
+	applyHeader(w, header)
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(status)
 	bw := bufio.NewWriter(w)
@@ -233,10 +235,11 @@ func JSONEvent(event string, v any) (Event, error) {
 
 // WriteEvents streams server-sent events, flushing after each. A later
 // error ends the stream and is logged.
-func WriteEvents(c *Config, w http.ResponseWriter, r *http.Request, status int, events iter.Seq2[Event, error]) error {
+func WriteEvents(c *Config, w http.ResponseWriter, r *http.Request, status int, events iter.Seq2[Event, error], header http.Header) error {
 	if events == nil {
 		return errors.New("streaming response without events")
 	}
+	applyHeader(w, header)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(status)

@@ -13,7 +13,7 @@ import (
 // Exactly one of the fields is set. The property "kind" selects
 // the variant when decoding.
 type Animal struct {
-	// Cat is set when the value is a Cat (kind "Cat" or "kitty").
+	// Cat is set when the value is a Cat (kind "kitty" or "Cat").
 	Cat *Cat
 	// Doggo is set when the value is a Doggo (kind "Doggo").
 	Doggo *Doggo
@@ -37,7 +37,7 @@ func (u *Animal) DecodeJSON(data []byte, dir oapi.Direction) error {
 		return err
 	}
 	switch {
-	case found && (value == "Cat" || value == "kitty"):
+	case found && (value == "kitty" || value == "Cat"):
 		var x Cat
 		if err := oapi.DecodeField(data, &x, false, dir); err != nil {
 			return err
@@ -78,7 +78,7 @@ func (u Animal) EncodeJSON(dir oapi.Direction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return oapi.EnsureProperty(data, "kind", "Cat")
+		return oapi.EnsureProperty(data, "kind", "kitty")
 	}
 	if u.Doggo != nil {
 		data, err := oapi.EncodeValue(u.Doggo, dir)
