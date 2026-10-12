@@ -1,18 +1,46 @@
 # Changelog
 
-## v0.2.0
+## v0.3.0
 
-Complete `allOf`/`oneOf`/`anyOf` support, compile-time safe `oneOf` unions,
-generated servers split into `gen`, `gen/api` and `gen/model` packages,
-hardened generated servers, and fixes found by fuzzing. This release
-changes generated code and runtime signatures: delete previously generated
-files and regenerate models and servers after upgrading, and see "Changed"
-for code that uses unions, the generated server or the runtime writers
-directly.
+Generated servers are split into three packages, and the petstore example
+has a health check. Delete previously generated files and regenerate
+servers after upgrading; see "Changed".
+
+The GitHub tag v0.2.0 was briefly moved to include these changes, but the
+Go module proxy serves v0.2.0 as first released, without them: use v0.3.0.
+
+### Changed
+
+- `goapi generate server` writes three packages: `NewServer` and
+  `openapi.json` in `-out` (default `gen`); the operations in its `api`
+  subpackage (the `Handler` and `SecurityHandler` interfaces, each
+  operation's request and response types, and its HTTP handler, exported
+  as `HandleGetPet`); and the schema types in its `model` subpackage. The
+  packages import each other by the path the nearest `go.mod` gives
+  `-out` (or `-import`). `-operations` and `-models` name the
+  subpackages; `-operations "" -models ""` keeps a single package. Code
+  using the generated server now implements `api.Handler` with
+  `api.GetPetRequest` and `model.Pet`, and calls `gen.NewServer`; delete
+  the previously generated files before regenerating.
+- Generated handlers are functions (`HandleGetPet(cfg, h, sec)`) instead of
+  methods of an unexported server type, in every layout.
+- `codegen.Options` has `OperationsPackage`, `OperationsImport`,
+  `ModelsPackage` and `ModelsImport` for this layout.
 
 ### Added
 
 - The petstore example has a health check, `GET /v1/health`.
+
+## v0.2.0
+
+Complete `allOf`/`oneOf`/`anyOf` support, compile-time safe `oneOf` unions,
+hardened generated servers, and fixes found by fuzzing. This release
+changes generated code and runtime signatures: regenerate models and
+servers after upgrading, and see "Changed" for code that uses unions or
+the runtime writers directly.
+
+### Added
+
 - Polymorphism the 3.0 way: a base schema with a discriminator that other
   schemas extend with `allOf` becomes a union of those schemas, at any depth
   of the hierarchy; intermediate schemas inherit the discriminator.
@@ -71,21 +99,6 @@ directly.
 
 ### Changed
 
-- `goapi generate server` writes three packages: `NewServer` and
-  `openapi.json` in `-out` (default `gen`); the operations in its `api`
-  subpackage (the `Handler` and `SecurityHandler` interfaces, each
-  operation's request and response types, and its HTTP handler, exported
-  as `HandleGetPet`); and the schema types in its `model` subpackage. The
-  packages import each other by the path the nearest `go.mod` gives
-  `-out` (or `-import`). `-operations` and `-models` name the
-  subpackages; `-operations "" -models ""` keeps a single package. Code
-  using the generated server now implements `api.Handler` with
-  `api.GetPetRequest` and `model.Pet`, and calls `gen.NewServer`; delete
-  the previously generated files before regenerating.
-- Generated handlers are functions (`HandleGetPet(cfg, h, sec)`) instead of
-  methods of an unexported server type, in every layout.
-- `codegen.Options` has `OperationsPackage`, `OperationsImport`,
-  `ModelsPackage` and `ModelsImport` for this layout.
 - Encoding an `oapi.File` whose data is not UTF-8 into JSON is an error
   instead of silently replacing the invalid bytes.
 - Generated pattern checks use `oapi.MustCompilePattern` and
