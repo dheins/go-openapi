@@ -1,17 +1,14 @@
 // Command petstore serves the example document in openapi.yaml with a
-// generated server and an in-memory store, logging with zap and, when
-// configured, exporting OpenTelemetry traces and metrics.
+// generated server and an in-memory store, logging through log/slog with
+// an access log.
 //
-//	go run . -key secret
-//	go run . -key secret -log-encoding console -log-level debug
-//	go run . -key secret -traces stdout                  # spans on stdout
-//	go run . -key secret -metrics prometheus             # scrape :9464/metrics
-//	OTEL_TRACES_EXPORTER=otlp go run . -key secret       # any OTLP vendor
+//	go run ./examples/petstore -key secret
+//	go run ./examples/petstore -key secret -log-format text -log-level debug
 //	curl localhost:8080/v1/pets
 //	curl -H "X-API-Key: secret" -d '{"name":"Rex","status":"available"}' localhost:8080/v1/pets
 package main
 
-//go:generate go tool goapi generate server -out gen openapi.yaml
+//go:generate go run github.com/dheins/go-openapi/cmd/goapi generate server -out gen openapi.yaml
 
 import (
 	"context"
@@ -40,41 +37,20 @@ func main() {
 func run() error {
 	addr := flag.String("addr", ":8080", "address to listen on")
 	key := flag.String("key", os.Getenv("PETSTORE_API_KEY"), "API key required for changes")
-	logLevel := flag.String("log-level", "info", "zap log level: debug, info, warn or error")
-	logEncoding := flag.String("log-encoding", "json", "zap log encoding: json or console")
+	logLevel := flag.String("log-level", "info", "log level: debug, info, warn or error")
+	logFormat := flag.String("log-format", "json", "log format: json or text")
 	accessLog := flag.Bool("access-log", true, "log every request")
-	traces := flag.String("traces", "", "trace exporters, comma-separated: otlp, stdout, none (default: OTEL_TRACES_EXPORTER, else none)")
-	metrics := flag.String("metrics", "", "metric exporters, comma-separated: otlp, stdout, prometheus, none (default: OTEL_METRICS_EXPORTER, else none)")
-	promAddr := flag.String("prometheus-addr", ":9464", "address of the /metrics endpoint when the prometheus exporter is used")
 	flag.Parse()
 	if *key == "" {
 		return errors.New("set an API key with -key or PETSTORE_API_KEY")
 	}
 
-	logger, syncLogs, err := newLogger(*logLevel, *logEncoding)
+	logger, err := newLogger(*logLevel, *logFormat)
 	if err != nil {
 		return err
 	}
-	defer syncLogs()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	tel, err := setupTelemetry(ctx, *traces, *metrics)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := tel.Shutdown(shutdown); err != nil {
-			logger.Error("flushing telemetry", "error", err)
-		}
-	}()
-	if tel.Prometheus != nil {
-		go servePrometheus(*promAddr, tel.Prometheus, logger)
-	}
-
-	opts := []server.Option{tel.ServerOption()}
+	var opts []server.Option
 	if *accessLog {
 		opts = append(opts, server.WithAccessLog(slog.LevelInfo))
 	}
@@ -84,13 +60,15 @@ func run() error {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdown)
 	}()
-	logger.Info("listening", "addr", *addr, "base", gen.BasePath, "telemetry", tel.Enabled())
+	logger.Info("listening", "addr", *addr, "base", gen.BasePath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -98,8 +76,8 @@ func run() error {
 }
 
 // newHandler builds the server: the generated routes, the API key check,
-// logging to logger, the document at /v1/openapi.json, and opts (access
-// logs, telemetry).
+// logging to logger, the document at /v1/openapi.json, and opts (such as
+// the access log).
 func newHandler(s *store, key string, logger *slog.Logger, opts ...server.Option) http.Handler {
 	return gen.NewServer(s, apiKey(key), append([]server.Option{
 		server.WithLogger(logger),
@@ -115,14 +93,4 @@ func (k apiKey) APIKey(ctx context.Context, key string, _ []string) (context.Con
 		return nil, errors.New("wrong API key")
 	}
 	return ctx, nil
-}
-
-func servePrometheus(addr string, metrics http.Handler, logger *slog.Logger) {
-	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", metrics)
-	logger.Info("serving metrics", "addr", addr, "path", "/metrics")
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	if err := srv.ListenAndServe(); err != nil {
-		logger.Error("metrics endpoint stopped", "error", err)
-	}
 }

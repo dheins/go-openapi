@@ -17,13 +17,6 @@
 - `Config.Log`, which adds the operation and records the caller,
   `server.OperationFromContext`, and `server.AuthError`, which carries
   why credentials were rejected and wraps the 401 problem.
-- Module `github.com/dheins/go-openapi/contrib/zaplog`: generated servers
-  log with zap (`zaplog.WithZap`).
-- Module `github.com/dheins/go-openapi/contrib/otel` (package `goapiotel`):
-  OpenTelemetry server spans and HTTP metrics per operation, `Setup` for
-  OTLP (gRPC or HTTP), Prometheus and stdout exporters, several at once,
-  from a `Config` or the standard `OTEL_*` variables, off unless
-  configured; `LogHandler` adds trace and span IDs to slog records.
 
 ### Changed
 
@@ -31,11 +24,8 @@
   no longer needs to; the default error handler no longer logs on its own.
   `Authorize` returns a `*server.AuthError` (which still unwraps to the
   `*problem.Problem`).
-- The petstore example is a module of its own; it logs with zap,
-  configured with an explicit `zap.Config` (`-log-level`,
-  `-log-encoding`), has an access log, exports telemetry when configured (`-traces`, `-metrics`,
-  `-prometheus-addr`), shuts down gracefully, and runs the generator with
-  `go tool goapi`.
+- The petstore example logs through slog with an access log
+  (`-log-level`, `-log-format`) and shuts down gracefully.
 
 ## v0.3.0
 

@@ -54,25 +54,23 @@ shipped in.
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
-## Telemetry
+## Logging and telemetry
 
-- Exporting logs through OpenTelemetry (OTLP logs); today logs go to slog
-  or zap and carry trace and span IDs (`goapiotel.LogHandler`). — later
-- Request and response body size metrics (`http.server.request.body.size`,
-  `http.server.response.body.size`). — later
-- Spans for the phases of a request (binding, the handler, writing the
-  response) as children of the server span. — later
+- Integrations with zap, OpenTelemetry or other vendors are not planned in
+  this module: they would add third-party dependencies to every user.
+  Applications plug them in themselves through a slog handler
+  (`server.WithLogger`) and `server.WithObserver`; the guide shows how.
+  (zap and OpenTelemetry modules were added in bfa3830 and removed again.)
+  — not planned
 
 ## Implemented
 
 Unreleased (after v0.3.0):
 
-- [x] Zap logging for generated servers (`contrib/zaplog`), an access log
-  (`server.WithAccessLog`), request observers (`server.WithObserver`) and
-  logs in generated handlers. (bfa3830)
-- [x] OpenTelemetry traces and metrics for generated servers
-  (`contrib/otel`), for several vendors at once through OTLP, Prometheus
-  or stdout, off unless configured. (bfa3830)
+- [x] Logging in generated servers: log entries for every way a request
+  ends, an access log (`server.WithAccessLog`) and request observers
+  (`server.WithObserver`), through `log/slog` with no dependencies.
+  (bfa3830)
 
 v0.2.0:
 

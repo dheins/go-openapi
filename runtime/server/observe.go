@@ -9,8 +9,8 @@ import (
 
 // Observer is told about every request routed to an operation: Start
 // before it is handled, End once its response is written or a panic in
-// it recovered. Observers implement logging, tracing and metrics; see
-// WithAccessLog and the contrib modules for zap and OpenTelemetry.
+// it recovered. Observers implement logging, tracing and metrics, such
+// as WithAccessLog, or a tracer from the library of your choice.
 //
 // Start returns the context the request is handled with, which the
 // handler, the middleware and the server's logging see; it can carry a
