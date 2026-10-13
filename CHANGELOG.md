@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.3.1
+
+Logging for generated servers: every way a request ends is logged with its
+operation, at a level that says whose problem it is, and an access log and
+request observers can be added, all through `log/slog` with no new
+dependencies. Regenerate servers after upgrading; see "Changed" for error
+handlers that log themselves or look at what `Authorize` returns.
 
 ### Added
 

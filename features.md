@@ -65,7 +65,7 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 ## Implemented
 
-Unreleased (after v0.3.0):
+v0.3.1:
 
 - [x] Logging in generated servers: log entries for every way a request
   ends, an access log (`server.WithAccessLog`) and request observers
