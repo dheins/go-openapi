@@ -229,7 +229,7 @@ components:
 		t.Errorf("params:\n%s\nwant\n%s", strings.Join(got, " "), want)
 	}
 	filter := styles.Params[1]
-	if fmt.Sprint(filter.Properties) != "[{role string false} {age integer false} {tags string true}]" {
+	if fmt.Sprint(filter.Properties) != "[{role string false [] []} {age integer false [] []} {tags string true [] []}]" {
 		t.Errorf("properties = %v", filter.Properties)
 	}
 	if !styles.Params[3].AllowEmptyValue {
@@ -288,7 +288,7 @@ components:
 	if strings.Join(media, " ") != "application/json=json multipart/form-data=multipart" {
 		t.Fatalf("body media = %v", media)
 	}
-	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false} {photo file false} {tags string true}]" {
+	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] []} {photo file false [] []} {tags string true [] []}]" {
 		t.Errorf("multipart properties = %s", props)
 	}
 	var warnings []string
@@ -353,5 +353,53 @@ components:
 	arr := tags.Type.Elem
 	if !tags.Array || arr.Kind != Slice || arr.Checks == nil || *arr.Checks.MaxItems != 3 || *tags.Elem.Checks.MinLength != 2 {
 		t.Errorf("tags = %+v, array = %+v", tags, arr)
+	}
+}
+
+func TestMultipartFileParts(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /docs:
+    post:
+      operationId: upload
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                pdf: {type: string, contentMediaType: application/pdf}
+                untyped: {}
+                anything: true
+                scans: {type: array, items: {contentMediaType: image/png}}
+                caption: {type: string}
+            encoding:
+              pdf: {contentType: "application/pdf; version=1.7", headers: {X-Sum: {required: true}, Content-Type: {required: true}}}
+      responses: {"204": {description: ok}}
+    put:
+      operationId: replace
+      requestBody:
+        content:
+          application/json: {schema: {$ref: "#/components/schemas/Doc"}}
+      responses: {"204": {description: ok}}
+components:
+  schemas:
+    Doc:
+      type: object
+      properties:
+        pdf: {type: string, contentMediaType: application/pdf}
+`, Options{Operations: true})
+	props := operationNamed(t, m, "Upload").Body.Media[0].Properties
+	if got := fmt.Sprint(props); got != "[{pdf file false [application/pdf] [X-Sum]} {untyped file false [] []} {anything file false [] []} {scans file true [] []} {caption string false [] []}]" {
+		t.Errorf("multipart properties = %s", got)
+	}
+	// Outside multipart, a contentMediaType string holds text.
+	pdf := typeNamed(t, m, "Doc").Fields[0].Type
+	for pdf.Kind == Optional {
+		pdf = pdf.Elem
+	}
+	if pdf.Kind != Builtin || pdf.Name != "string" {
+		t.Errorf("Doc.pdf = %+v", pdf)
 	}
 }

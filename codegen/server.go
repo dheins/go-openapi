@@ -477,7 +477,14 @@ func propertyMap(props []ir.ParamProperty) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%q: {Type: %q, Array: %t}", prop.Name, prop.Type, prop.Array)
+		fmt.Fprintf(&b, "%q: {Type: %q, Array: %t", prop.Name, prop.Type, prop.Array)
+		if len(prop.ContentTypes) > 0 {
+			fmt.Fprintf(&b, ", ContentTypes: %s", stringSlice(prop.ContentTypes))
+		}
+		if len(prop.Headers) > 0 {
+			fmt.Fprintf(&b, ", Headers: %s", stringSlice(prop.Headers))
+		}
+		b.WriteString("}")
 	}
 	b.WriteString("}")
 	return b.String()

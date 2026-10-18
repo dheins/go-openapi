@@ -306,10 +306,14 @@ func QueryString(r *http.Request) (string, bool, error) {
 }
 
 // Property describes the type of an object property for ObjectJSON: a
-// JSON Schema type name, and whether the value is an array of it.
+// JSON Schema type name, and whether the value is an array of it. For a
+// multipart part, it also says which content types the part may declare
+// (any if empty) and which headers it must carry, from its encoding.
 type Property struct {
-	Type  string
-	Array bool
+	Type         string
+	Array        bool
+	ContentTypes []string
+	Headers      []string
 }
 
 // ObjectJSON converts the fields of an object parameter or form body to a

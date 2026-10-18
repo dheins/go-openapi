@@ -113,6 +113,11 @@ type ParamProperty struct {
 	Name  string
 	Type  string
 	Array bool
+	// ContentTypes are the media types (or ranges) a multipart part may
+	// declare, from its encoding; empty allows any.
+	ContentTypes []string
+	// Headers are the headers a multipart part must carry.
+	Headers []string
 }
 
 // Body is the JSON request body of an operation.
@@ -460,7 +465,7 @@ func objectProperties(ref *Ref, files bool) ([]ParamProperty, bool) {
 			prop.Array = true
 			r = stripNullable(r.Elem)
 		}
-		if files && r.Kind == Builtin && r.Name == "oapi.File" {
+		if files && isFile(r) {
 			prop.Type = "file"
 		} else if prop.Type = jsonType(r); prop.Type == "" {
 			return nil, false
@@ -468,6 +473,14 @@ func objectProperties(ref *Ref, files bool) ([]ParamProperty, bool) {
 		props = append(props, prop)
 	}
 	return props, true
+}
+
+// isFile reports whether r is oapi.File or an alias of it.
+func isFile(r *Ref) bool {
+	for r.Kind == Named && r.Type.Kind == Alias {
+		r = r.Type.Underlying
+	}
+	return r.Kind == Builtin && r.Name == "oapi.File"
 }
 
 // jsonType returns the JSON Schema type of a scalar, or "".
@@ -566,7 +579,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Bo
 			rejected = append(rejected, mt)
 			continue
 		}
-		if m.Deref().Encoding.Len() > 0 {
+		if m.Deref().Encoding.Len() > 0 && kind != "multipart" {
 			b.warnAt(m, []string{"encoding"}, "the encoding object is not applied yet")
 		}
 		g := kind
@@ -590,6 +603,9 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Bo
 				rejected = append(rejected, mt)
 				continue
 			}
+			if kind == "multipart" {
+				b.partEncodings(m.Deref(), props)
+			}
 			media.Properties = props
 		}
 		body.Media = append(body.Media, media)
@@ -603,6 +619,117 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Bo
 		body.Type = b.optional(body.Value)
 	}
 	return body
+}
+
+// partEncodings applies the encoding object of a multipart media type to
+// its properties: the content types each part may have and the headers
+// it must carry.
+func (b *builder) partEncodings(m *oas.MediaType, props []ParamProperty) {
+	for name, enc := range m.Encoding.All() {
+		i := slices.IndexFunc(props, func(p ParamProperty) bool { return p.Name == name })
+		if i < 0 || enc == nil {
+			b.warnAt(m, []string{"encoding", name}, fmt.Sprintf("the encoding of %q names no property and is ignored", name))
+			continue
+		}
+		for ct := range strings.SplitSeq(enc.ContentType, ",") {
+			// Parameters such as charset do not decide whether a part matches.
+			ct, _, _ = strings.Cut(ct, ";")
+			if ct = strings.TrimSpace(ct); ct != "" {
+				props[i].ContentTypes = append(props[i].ContentTypes, ct)
+			}
+		}
+		for hname, h := range enc.Headers.All() {
+			h = h.Deref()
+			// The part's Content-Type is described by contentType.
+			if h == nil || strings.EqualFold(hname, "Content-Type") {
+				continue
+			}
+			if h.Required {
+				props[i].Headers = append(props[i].Headers, http.CanonicalHeaderKey(hname))
+			}
+			if h.Schema != nil || h.Content.Len() > 0 {
+				b.warnAt(enc, []string{"headers", hname}, fmt.Sprintf("the value of part header %q is not checked yet, only its presence", hname))
+			}
+		}
+		if enc.Style != "" || enc.Explode != nil || enc.AllowReserved != nil {
+			b.warnAt(enc, nil, "style, explode and allowReserved do not apply to multipart/form-data parts and are ignored")
+		}
+	}
+}
+
+// markFileParts records which properties of multipart request bodies hold
+// files although they are not format: binary, the 3.0 way: OpenAPI 3.1
+// writes a file part as a string with a contentMediaType, or as a schema
+// without a type. Elsewhere such schemas stay strings and any, since a
+// JSON string with a contentMediaType holds text, not bytes.
+func (b *builder) markFileParts() {
+	b.fileParts = map[*oas.Schema]bool{}
+	if b.spec.Document.Paths == nil {
+		return
+	}
+	for _, item := range b.spec.Document.Paths.Items.All() {
+		for _, op := range item.Deref().Operations() {
+			rb := op.RequestBody.Deref()
+			if rb == nil {
+				continue
+			}
+			for mt, m := range rb.Content.All() {
+				if mediaKind(mt) == "multipart" {
+					b.markFileProperties(deref(m.Deref().Schema), map[*oas.Schema]bool{})
+				}
+			}
+		}
+	}
+}
+
+// markFileProperties marks the file parts among the properties of s and
+// of its allOf members, and the items of arrays of them.
+func (b *builder) markFileProperties(s *oas.Schema, seen map[*oas.Schema]bool) {
+	if s == nil || seen[s] {
+		return
+	}
+	seen[s] = true
+	for _, prop := range s.Properties.All() {
+		if p := deref(prop); p != nil && p.Items != nil && slices.Contains([]string(p.Type), "array") {
+			b.markFile(p.Items)
+		}
+		b.markFile(prop)
+	}
+	for _, m := range s.AllOf {
+		b.markFileProperties(deref(m), seen)
+	}
+}
+
+// markFile marks s, and the schemas its $ref chain passes through, if the
+// chain ends at a file part.
+func (b *builder) markFile(s *oas.Schema) {
+	if !isFilePart(deref(s)) {
+		return
+	}
+	for seen := map[*oas.Schema]bool{}; s != nil && !seen[s]; s = s.Resolved {
+		seen[s] = true
+		b.fileParts[s] = true
+		if s.Ref == "" {
+			return
+		}
+	}
+}
+
+// isFilePart reports whether the schema of a multipart property describes
+// a file: a string with a contentMediaType and no other encoding or
+// format, or a schema that does not constrain the value.
+func isFilePart(s *oas.Schema) bool {
+	switch {
+	case s == nil:
+		return false
+	case s.Bool != nil:
+		return *s.Bool
+	case s.ContentMediaType != "":
+		types, _ := splitTypes(s)
+		return s.ContentEncoding == "" && s.Format == "" &&
+			(slices.Equal(types, []string{"string"}) || len(types) == 0 && inferType(s) == "string")
+	}
+	return s.Ref == "" && !hasConstraints(s)
 }
 
 // bodyValue returns the Go type of a body of the given kind: the schema's

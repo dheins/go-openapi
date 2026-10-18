@@ -334,8 +334,15 @@ string, or no items for an array; for numbers and booleans it means the
 parameter is not given); defaults.
 
 Supported request bodies: JSON (`application/json`, `*+json`),
-`application/x-www-form-urlencoded`, `multipart/form-data` (files become
-`oapi.File`), `text/*` (a string) and anything else as bytes. In a JSON
+`application/x-www-form-urlencoded`, `multipart/form-data`, `text/*` (a
+string) and anything else as bytes. In a multipart body, a part is a file,
+an `oapi.File` with the part's name, content type, headers and data, when
+its schema is `format: binary` (3.0) or, the 3.1 way, a string with a
+`contentMediaType` or a schema without a type; a part need not have a file
+name. The `encoding` object is applied to multipart parts: a part that
+declares a content type must match `contentType` (a list of media types or
+ranges), and the `required` part headers must be present (their values are
+not checked yet). In a JSON
 body, an `oapi.File` is a string: its data must be UTF-8, or encoding fails
 (use `contentEncoding: base64` for binary data in JSON, generated as
 `[]byte`). When an

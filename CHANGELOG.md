@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Multipart file parts written the OpenAPI 3.1 way: a string with a
+  `contentMediaType`, or a property without a type, is an `oapi.File`
+  (only in `multipart/form-data` bodies; elsewhere such a string stays a
+  string). File parts need not have a file name.
+- The `encoding` object of `multipart/form-data` bodies: a part declaring a
+  content type outside `contentType` is a 400, as is a missing `required`
+  part header. `oapi.File.Header` holds the part's headers.
+
+### Changed
+
+- Regenerate servers: multipart properties typed `string` or `any` because
+  of a `contentMediaType` or a missing type become `oapi.File`.
+
 ## v0.3.1
 
 Logging for generated servers: every way a request ends is logged with its

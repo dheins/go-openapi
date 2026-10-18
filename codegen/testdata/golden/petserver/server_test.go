@@ -16,6 +16,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"slices"
 	"strings"
 	"testing"
@@ -137,6 +138,11 @@ func (s *store) Lookup(_ context.Context, req *api.LookupRequest) (api.LookupRes
 func (s *store) UploadPhoto(_ context.Context, req *api.UploadPhotoRequest) (api.UploadPhotoResponse, error) {
 	s.seen["UploadPhoto"] = req
 	return api.UploadPhoto204Response{}, nil
+}
+
+func (s *store) UploadRecords(_ context.Context, req *api.UploadRecordsRequest) (api.UploadRecordsResponse, error) {
+	s.seen["UploadRecords"] = req
+	return api.UploadRecords204Response{}, nil
 }
 
 func (s *store) GetPhoto(_ context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {
@@ -573,6 +579,85 @@ func TestMultipartUpload(t *testing.T) {
 	mw.Close()
 	r = do(t, h, "PUT", "/pets/1/photo", mw.FormDataContentType(), body.String())
 	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /photo: required property is missing"}) {
+		t.Errorf("errors = %q", got)
+	}
+}
+
+// recordsBody builds a multipart body with one part per header and data.
+func recordsBody(t *testing.T, parts ...any) (string, string) {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	for i := 0; i < len(parts); i += 2 {
+		pw, err := mw.CreatePart(parts[i].(textproto.MIMEHeader))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pw.Write(parts[i+1].([]byte))
+	}
+	mw.Close()
+	return mw.FormDataContentType(), body.String()
+}
+
+func part(name, filename, contentType string, extra ...string) textproto.MIMEHeader {
+	h := textproto.MIMEHeader{}
+	disposition := fmt.Sprintf("form-data; name=%q", name)
+	if filename != "" {
+		disposition += fmt.Sprintf("; filename=%q", filename)
+	}
+	h.Set("Content-Disposition", disposition)
+	if contentType != "" {
+		h.Set("Content-Type", contentType)
+	}
+	for i := 0; i < len(extra); i += 2 {
+		h.Set(extra[i], extra[i+1])
+	}
+	return h
+}
+
+func TestMultipartFileParts(t *testing.T) {
+	s, h := newTestServer()
+	binary := []byte{0x89, 'P', 'N', 'G', 0xff, 0x00}
+	ct, body := recordsBody(t,
+		// contentMediaType parts are files with or without a file name.
+		part("report", "", "application/pdf", "X-Checksum", "abc"), []byte("%PDF"),
+		part("scans", "a.png", "image/png"), binary,
+		part("scans", "b.jpg", "image/jpeg; q=1"), []byte("JPEG"),
+		// An untyped part is a file and may have any content type.
+		part("attachment", "notes.txt", ""), []byte("hello"),
+	)
+	r := do(t, h, "POST", "/pets/1/records", ct, body)
+	if r.status != 204 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	got := s.seen["UploadRecords"].(*api.UploadRecordsRequest).Body
+	if string(got.Report.Data) != "%PDF" || got.Report.Name != "" || got.Report.Header.Get("X-Checksum") != "abc" {
+		t.Errorf("report = %+v", got.Report)
+	}
+	if len(got.Scans.Value) != 2 || !bytes.Equal(got.Scans.Value[0].Data, binary) || got.Scans.Value[1].ContentType != "image/jpeg; q=1" {
+		t.Errorf("scans = %+v", got.Scans)
+	}
+	if !got.Attachment.Set || got.Attachment.Value.Name != "notes.txt" || string(got.Attachment.Value.Data) != "hello" {
+		t.Errorf("attachment = %+v", got.Attachment)
+	}
+
+	// Parts that break their encoding are reported together.
+	ct, body = recordsBody(t,
+		part("report", "r.txt", "text/plain"), []byte("text"),
+		part("scans", "a.gif", "image/gif"), []byte("GIF"),
+	)
+	r = do(t, h, "POST", "/pets/1/records", ct, body)
+	want := []string{
+		`body /report: content type "text/plain" is not allowed; expected application/pdf`,
+		`body /scans: content type "image/gif" is not allowed; expected image/png, image/jpeg`,
+	}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+
+	ct, body = recordsBody(t, part("report", "r.pdf", "application/pdf"), []byte("%PDF"))
+	r = do(t, h, "POST", "/pets/1/records", ct, body)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{`body /report: part header "X-Checksum" is missing`}) {
 		t.Errorf("errors = %q", got)
 	}
 }

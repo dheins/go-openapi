@@ -11,6 +11,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -28,44 +29,54 @@ func FormFields(body []byte) (map[string][]string, error) {
 	return values, nil
 }
 
-// maxMultipartMemory is how much of a multipart body is kept in memory;
-// the rest of the parts go to temporary files.
-const maxMultipartMemory = 32 << 20
-
 // DecodeMultipart decodes a multipart/form-data body into T. Values are
-// converted like ObjectJSON; parts of properties of type "file" are read
-// into the oapi.File fields of T (File, Optional[File], *File, []File or
-// Optional[[]File]) with the matching JSON name.
+// converted like ObjectJSON; parts of properties of type "file", with or
+// without a file name, are read into the oapi.File fields of T (File,
+// Optional[File], *File, []File or Optional[[]File]) with the matching
+// JSON name. A part must have one of its property's ContentTypes, if it
+// declares a content type, and carry its Headers.
 func DecodeMultipart[T any](body []byte, contentType string, props map[string]Property) (T, error) {
 	var v T
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil || params["boundary"] == "" {
 		return v, &oapi.ValidationError{Message: "multipart body without a boundary"}
 	}
-	form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(maxMultipartMemory)
-	if err != nil {
-		return v, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
-	}
-	defer form.RemoveAll()
-
-	fields := make(map[string][]string, len(form.Value)+len(form.File))
-	for name, vals := range form.Value {
-		fields[name] = vals
-	}
+	fields := map[string][]string{}
 	files := map[string][]oapi.File{}
-	for name, headers := range form.File {
-		if props[name].Type != "file" {
+	var errs oapi.ValidationErrors
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return v, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
+		}
+		name := part.FormName()
+		if name == "" {
 			continue
 		}
-		for _, fh := range headers {
-			f, err := readPart(fh)
-			if err != nil {
-				return v, &oapi.ValidationError{Path: oapi.Field("", name), Message: err.Error()}
-			}
-			files[name] = append(files[name], f)
+		data, err := io.ReadAll(part)
+		if err != nil {
+			return v, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
+		}
+		prop := props[name]
+		if msg := checkPart(part.Header, prop); msg != "" {
+			errs.Add(oapi.Field("", name), msg)
+			continue
+		}
+		switch {
+		case prop.Type == "file":
+			files[name] = append(files[name], oapi.File{Name: part.FileName(), ContentType: part.Header.Get("Content-Type"), Header: part.Header, Data: data})
 			// A placeholder, so that decoding sees the property as present.
 			fields[name] = append(fields[name], "")
+		case part.FileName() == "":
+			fields[name] = append(fields[name], string(data))
 		}
+	}
+	if err := errs.Err(); err != nil {
+		return v, err
 	}
 	data, err := ObjectJSON(fields, props)
 	if err != nil {
@@ -77,17 +88,21 @@ func DecodeMultipart[T any](body []byte, contentType string, props map[string]Pr
 	return v, setFiles(&v, files)
 }
 
-func readPart(fh *multipart.FileHeader) (oapi.File, error) {
-	f, err := fh.Open()
-	if err != nil {
-		return oapi.File{}, err
+// checkPart checks a part's headers against its encoding, returning what
+// is wrong or "".
+func checkPart(header textproto.MIMEHeader, prop Property) string {
+	if ct := header.Get("Content-Type"); ct != "" && len(prop.ContentTypes) > 0 {
+		mt, _, err := mime.ParseMediaType(ct)
+		if err != nil || !matchMediaType(mt, prop.ContentTypes) {
+			return fmt.Sprintf("content type %q is not allowed; expected %s", ct, strings.Join(prop.ContentTypes, ", "))
+		}
 	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return oapi.File{}, err
+	for _, h := range prop.Headers {
+		if len(header.Values(h)) == 0 {
+			return fmt.Sprintf("part header %q is missing", h)
+		}
 	}
-	return oapi.File{Name: fh.Filename, ContentType: fh.Header.Get("Content-Type"), Data: data}, nil
+	return ""
 }
 
 var (

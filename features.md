@@ -32,9 +32,9 @@ shipped in.
   can stream already). — later
 - Bodies in other formats: XML, and multipart types other than
   `multipart/form-data`. — later
-- The multipart `encoding` object (per-part content types and headers), and
-  3.1-style file parts marked only with `contentMediaType` (today a file part
-  must be `format: binary`). — later
+- Checking the values of multipart part headers against their schemas
+  (only `required` is checked), and `contentEncoding` (`[]byte`) parts.
+  — later
 - Form and multipart bodies, object parameters and `querystring` whose
   properties are nested objects; free-form (`additionalProperties`) form
   bodies. — later
@@ -64,6 +64,12 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   — not planned
 
 ## Implemented
+
+Unreleased:
+
+- [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
+  schema without a type) and the multipart `encoding` object: per-part
+  content types and required part headers, exposed as `oapi.File.Header`.
 
 v0.3.1:
 
