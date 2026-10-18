@@ -611,3 +611,54 @@ components:
 		}
 	}
 }
+
+func TestPositionalParts(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /batch:
+    post:
+      operationId: batch
+      requestBody:
+        content:
+          application/json: {schema: {type: object, properties: {a: {type: string}}}}
+          multipart/mixed:
+            schema: {type: array, items: {type: string, contentMediaType: image/png}}
+            prefixEncoding: [{contentType: "image/png; q=1", headers: {Content-ID: {required: true}}}]
+            itemEncoding: {contentType: "image/*"}
+          multipart/related:
+            schema: {type: array, prefixItems: [{type: string}]}
+            encoding: {a: {contentType: text/plain}}
+      responses:
+        "200":
+          description: ok
+          content:
+            multipart/mixed: {schema: {type: array, items: {type: integer}}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Batch")
+	var fields []string
+	for _, f := range o.Body.Fields {
+		fields = append(fields, f.Name+"="+f.Media[0].MediaType)
+	}
+	if got := strings.Join(fields, " "); got != "Body=application/json MixedBody=multipart/mixed RelatedBody=multipart/related" {
+		t.Errorf("fields = %s", got)
+	}
+	mixed, related := o.Body.Media[1].Parts, o.Body.Media[2].Parts
+	if mixed.Item != "file" || fmt.Sprint(mixed.Prefix) != "[{  false [] <nil> [image/png] [Content-Id]}]" || fmt.Sprint(mixed.Rest.ContentTypes) != "[image/*]" {
+		t.Errorf("mixed = %+v", mixed)
+	}
+	// Items by position cannot be typed: the parts are files.
+	if related.Item != "file" || o.Body.Fields[2].Value.Elem.Name != "oapi.File" {
+		t.Errorf("related = %+v, %+v", related, o.Body.Fields[2].Value)
+	}
+	if r := o.Responses[0]; r.Kind != "parts" || r.TypeName != "Batch200MixedResponse" || r.Parts.Item != "json" {
+		t.Errorf("response = %+v", r)
+	}
+	all := ""
+	for _, w := range m.Warnings {
+		all += w.Message + "\n"
+	}
+	if !strings.Contains(all, "encoding by name applies to multipart/form-data only") {
+		t.Errorf("no warning about encoding by name in:\n%s", all)
+	}
+}

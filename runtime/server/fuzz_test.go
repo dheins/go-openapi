@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/dheins/go-openapi/oapi"
 )
 
 // FuzzParamStyles checks that splitting parameter values never panics,
@@ -64,6 +66,15 @@ func FuzzMultipart(f *testing.F) {
 		}
 		props := Property{Type: "object", Properties: map[string]Property{"name": {Type: "string"}, "photo": {Type: "file"}}}
 		_, _ = DecodeMultipart[upload](bytes.Clone(body), "multipart/form-data; boundary="+boundary, props)
+		// The same body as positional parts, of each kind of item.
+		ct := "multipart/mixed; boundary=" + boundary
+		rules := Parts{Prefix: []Property{{ContentTypes: []string{"application/json"}, Headers: []string{"X-Seq"}}}}
+		rules.Item = "json"
+		_, _ = DecodeParts[upload](bytes.Clone(body), ct, rules)
+		rules.Item = "text"
+		_, _ = DecodeParts[string](bytes.Clone(body), ct, rules)
+		rules.Item = "file"
+		_, _ = DecodeParts[oapi.File](bytes.Clone(body), ct, rules)
 	})
 }
 

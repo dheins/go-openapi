@@ -388,6 +388,72 @@ paths:
       responses:
         "204":
           description: Stored.
+  /pets/batch:
+    post:
+      operationId: batchPets
+      description: Pets as positional JSON parts.
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Pet"
+            prefixEncoding:
+              - contentType: application/json
+                headers:
+                  X-Seq:
+                    required: true
+                    schema:
+                      type: string
+            itemEncoding:
+              contentType: application/json
+      responses:
+        "200":
+          description: The pets stored.
+          content:
+            multipart/mixed:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+  /bundle:
+    post:
+      operationId: uploadBundle
+      requestBody:
+        required: true
+        content:
+          multipart/related:
+            itemEncoding:
+              contentType: image/*
+      responses:
+        "200":
+          description: The images back.
+          content:
+            multipart/related:
+              schema:
+                type: array
+                items:
+                  type: string
+                  contentMediaType: image/png
+  /memos:
+    put:
+      operationId: putNotes
+      requestBody:
+        required: true
+        content:
+          multipart/alternative:
+            schema:
+              type: array
+              items:
+                type: string
+                minLength: 1
+            itemEncoding:
+              contentType: text/plain, text/html
+      responses:
+        "204":
+          description: Stored.
   /pets/form:
     post:
       operationId: submitForm

@@ -161,8 +161,9 @@ type BodyMedia struct {
 	// Additional the type of any others.
 	Properties []ParamProperty
 	Additional *ParamProperty
-	// XML describes the document, for xml.
-	XML *XMLNode
+	// XML describes the document, for xml, and Parts the parts, for parts.
+	XML   *XMLNode
+	Parts *Parts
 	// Field is the request field the body is decoded into.
 	Field *BodyField
 }
@@ -183,8 +184,9 @@ type Response struct {
 	Kind      string
 	Body      *Ref
 	Item      *Ref
-	// XML describes the document, for xml.
-	XML *XMLNode
+	// XML describes the document, for xml, and Parts the parts, for parts.
+	XML   *XMLNode
+	Parts *Parts
 	// ContentTypeField means MediaType is a range such as "image/*", so
 	// the handler sets the actual type in a ContentType field.
 	ContentTypeField bool
@@ -615,7 +617,8 @@ func stripNullable(r *Ref) *Ref {
 }
 
 // mediaKind classifies a media type for bodies: json, xml, form,
-// multipart, jsonl, sse, text or binary. Other multipart types are "".
+// multipart (multipart/form-data), parts (other multipart types, whose
+// parts are positional), jsonl, sse, text or binary.
 func mediaKind(mt string) string {
 	mt = strings.ToLower(strings.TrimSpace(mt))
 	if base, _, ok := strings.Cut(mt, ";"); ok {
@@ -631,7 +634,7 @@ func mediaKind(mt string) string {
 	case mt == "multipart/form-data":
 		return "multipart"
 	case strings.HasPrefix(mt, "multipart/"):
-		return ""
+		return "parts"
 	case mt == "application/jsonl" || mt == "application/x-ndjson":
 		return "jsonl"
 	case mt == "text/event-stream":
@@ -688,7 +691,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			g = "structured"
 		}
 		i := slices.IndexFunc(groups, func(gr *group) bool {
-			return gr.kind == g && (g != "structured" || sameSchema(gr.schema, deref(schema)))
+			return gr.kind == g && (g != "structured" && g != "parts" || sameSchema(gr.schema, deref(schema)))
 		})
 		var field *BodyField
 		switch {
@@ -710,6 +713,9 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			field.Value = b.bodyValue(kind, schema, hint)
 		}
 		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field}
+		if kind == "parts" {
+			media.Parts = b.parts(field.Value, m.Deref())
+		}
 		if kind == "xml" {
 			node, why := b.xmlRoot(field.Value, schema)
 			if why != "" {
@@ -778,7 +784,13 @@ func sameSchema(a, b *oas.Schema) bool {
 // cannot be decoded into Body: after its kind, or after the media type if
 // another field has that name. The caller claims it once the field is used.
 func bodyFieldName(fields namespace, kind, mediaType string) string {
-	name := map[string]string{"json": "JSON", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary"}[kind] + "Body"
+	name := map[string]string{"json": "JSON", "xml": "XML", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary"}[kind] + "Body"
+	if kind == "parts" {
+		// MixedBody, RelatedBody, ...
+		mt, _, _ := strings.Cut(mediaType, ";")
+		_, sub, _ := strings.Cut(mt, "/")
+		name = GoName(sub) + "Body"
+	}
 	if fields[name] {
 		mt, _, _ := strings.Cut(mediaType, ";")
 		name = GoName(mt) + "Body"
@@ -796,30 +808,77 @@ func (b *builder) partEncodings(m *oas.MediaType, props []ParamProperty) {
 			b.warnAt(m, []string{"encoding", name}, fmt.Sprintf("the encoding of %q names no property and is ignored", name))
 			continue
 		}
-		for ct := range strings.SplitSeq(enc.ContentType, ",") {
-			// Parameters such as charset do not decide whether a part matches.
-			ct, _, _ = strings.Cut(ct, ";")
-			if ct = strings.TrimSpace(ct); ct != "" {
-				props[i].ContentTypes = append(props[i].ContentTypes, ct)
-			}
-		}
-		for hname, h := range enc.Headers.All() {
-			h = h.Deref()
-			// The part's Content-Type is described by contentType.
-			if h == nil || strings.EqualFold(hname, "Content-Type") {
-				continue
-			}
-			if h.Required {
-				props[i].Headers = append(props[i].Headers, http.CanonicalHeaderKey(hname))
-			}
-			if h.Schema != nil || h.Content.Len() > 0 {
-				b.warnAt(enc, []string{"headers", hname}, fmt.Sprintf("the value of part header %q is not checked yet, only its presence", hname))
-			}
-		}
-		if enc.Style != "" || enc.Explode != nil || enc.AllowReserved != nil {
-			b.warnAt(enc, nil, "style, explode and allowReserved do not apply to multipart/form-data parts and are ignored")
+		props[i].ContentTypes, props[i].Headers = b.encodingRules(enc)
+	}
+}
+
+// encodingRules returns the content types (or ranges) a part with
+// encoding enc may declare and the headers it must carry.
+func (b *builder) encodingRules(enc *oas.Encoding) (contentTypes, headers []string) {
+	for ct := range strings.SplitSeq(enc.ContentType, ",") {
+		// Parameters such as charset do not decide whether a part matches.
+		ct, _, _ = strings.Cut(ct, ";")
+		if ct = strings.TrimSpace(ct); ct != "" {
+			contentTypes = append(contentTypes, ct)
 		}
 	}
+	for hname, h := range enc.Headers.All() {
+		h = h.Deref()
+		// The part's Content-Type is described by contentType.
+		if h == nil || strings.EqualFold(hname, "Content-Type") {
+			continue
+		}
+		if h.Required {
+			headers = append(headers, http.CanonicalHeaderKey(hname))
+		}
+		if h.Schema != nil || h.Content.Len() > 0 {
+			b.warnAt(enc, []string{"headers", hname}, fmt.Sprintf("the value of part header %q is not checked yet, only its presence", hname))
+		}
+	}
+	if enc.Style != "" || enc.Explode != nil || enc.AllowReserved != nil {
+		b.warnAt(enc, nil, "style, explode and allowReserved do not apply to multipart parts and are ignored")
+	}
+	return contentTypes, headers
+}
+
+// Parts describes a multipart body of positional parts, such as
+// multipart/mixed: how each part becomes an item (file, text or json) and
+// the encodings of the parts by position.
+type Parts struct {
+	Item   string
+	Prefix []ParamProperty
+	Rest   ParamProperty
+}
+
+// parts describes the parts of a body of type value, a slice, with the
+// positional encodings of m.
+func (b *builder) parts(value *Ref, m *oas.MediaType) *Parts {
+	elem := value
+	for elem.Kind == Named && (elem.Type.Kind == Defined || elem.Type.Kind == Alias) {
+		elem = elem.Type.Underlying
+	}
+	elem = stripNullable(elem.Elem)
+	p := &Parts{Item: "json"}
+	switch {
+	case isFile(elem):
+		p.Item = "file"
+	case jsonType(elem) == "string":
+		p.Item = "text"
+	}
+	for _, enc := range m.PrefixEncoding {
+		var rule ParamProperty
+		if enc != nil {
+			rule.ContentTypes, rule.Headers = b.encodingRules(enc)
+		}
+		p.Prefix = append(p.Prefix, rule)
+	}
+	if m.ItemEncoding != nil {
+		p.Rest.ContentTypes, p.Rest.Headers = b.encodingRules(m.ItemEncoding)
+	}
+	if m.Encoding.Len() > 0 {
+		b.warnAt(m, []string{"encoding"}, "encoding by name applies to multipart/form-data only; use prefixEncoding and itemEncoding for positional parts")
+	}
+	return p
 }
 
 // markFileParts records which properties of multipart request bodies hold
@@ -839,11 +898,40 @@ func (b *builder) markFileParts() {
 				continue
 			}
 			for mt, m := range rb.Content.All() {
-				if mediaKind(mt) == "multipart" {
+				switch mediaKind(mt) {
+				case "multipart":
 					b.markFileProperties(deref(m.Deref().Schema), map[*oas.Schema]bool{})
+				case "parts":
+					b.markPartItems(m.Deref().Schema)
 				}
 			}
 		}
+	}
+	// Positional parts are files in responses too.
+	for _, item := range b.spec.Document.Paths.Items.All() {
+		for _, op := range item.Deref().Operations() {
+			if op.Responses == nil {
+				continue
+			}
+			for _, resp := range op.Responses.Items.All() {
+				if resp.Deref() == nil {
+					continue
+				}
+				for mt, m := range resp.Deref().Content.All() {
+					if mediaKind(mt) == "parts" {
+						b.markPartItems(m.Deref().Schema)
+					}
+				}
+			}
+		}
+	}
+}
+
+// markPartItems marks the items of a body of positional parts that hold
+// files, like the file properties of multipart/form-data.
+func (b *builder) markPartItems(s *oas.Schema) {
+	if s = deref(s); s != nil && s.Items != nil {
+		b.markFile(s.Items)
 	}
 }
 
@@ -908,6 +996,13 @@ func (b *builder) bodyValue(kind string, schema *oas.Schema, hint string) *Ref {
 		return &Ref{Kind: Builtin, Name: "string"}
 	case "binary":
 		return &Ref{Kind: Builtin, Name: "[]byte"}
+	case "parts":
+		// Positional parts are items of the array the schema describes;
+		// without one, or with items by position (prefixItems), they are
+		// the parts themselves.
+		if s := deref(schema); s == nil || s.Items == nil || s.PrefixItems != nil {
+			return &Ref{Kind: Slice, Elem: fileRef()}
+		}
 	}
 	return b.use(schema, hint, nil)
 }
@@ -955,6 +1050,11 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			}
 			v.XML = node
 			suffix = "XML"
+		case "parts":
+			v.Body = b.bodyValue(kind, media.Schema, o.Name+statusName+"ResponseBody")
+			v.Parts = b.parts(v.Body, media)
+			_, sub, _ := strings.Cut(mt, "/")
+			suffix = GoName(sub)
 		case "text":
 			v.Body = b.bodyValue(kind, media.Schema, "")
 			suffix = "Text"

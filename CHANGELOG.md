@@ -59,6 +59,12 @@
   attributes, text and CDATA, wrapped arrays, 3.2 `nodeType`). The XML is
   converted to and from JSON, so validation and problem paths are those of
   JSON bodies (`server.DecodeXML`, `Config.WriteXML`, `server.XMLNode`).
+- Multipart types other than `multipart/form-data` (`mixed`, `related`,
+  `alternative`, ...): the parts are the items of the body's array schema,
+  read as files, text or JSON, or the raw parts (`[]oapi.File`) without
+  one; `prefixEncoding` and `itemEncoding` are checked by position.
+  Responses of these types are written part by part (`server.Parts`,
+  `DecodeParts`, `WriteParts`).
 
 ### Fixed
 
@@ -89,6 +95,9 @@
   request bodies with a schema are decoded instead of being answered with
   415 next to JSON, or passed on as bytes when alone; `text/xml` with a
   schema is no longer a string.
+- Operations with multipart bodies other than `multipart/form-data` used
+  to be answered with 501, and such responses could not be returned; they
+  are generated now, so the `Handler` interface gains their methods.
 - Properties named like the methods of generated structs (`DecodeJSON`,
   `EncodeJSON`, `DecodeJSONFrom`, `UnmarshalJSONFrom`) get a numbered field
   name, as `Validate` already did.
