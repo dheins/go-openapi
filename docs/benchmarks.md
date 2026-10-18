@@ -25,23 +25,24 @@ go test -run=^$ -bench=. -benchmem ./loader ./validate ./codegen \
 nullable, a date, a date-time and a map. "plain encoding/json" is a struct
 of the same shape without the generated methods.
 
-Measured after M7, on a busier machine than the other tables (plain
-`encoding/json` took 3.2 µs here rather than 2.2 µs); compare the rows with
-each other.
+Measured after the generated encoders, on a busier machine than the
+other tables (plain `encoding/json` decoding took 3.1 µs here rather than
+2.2 µs); compare the rows with each other.
 
 | Benchmark | Time | Memory | Allocations |
 |---|---|---|---|
-| Decode `Pet` | 6.3 µs | 1.3 KiB | 30 |
-| Decode, plain encoding/json | 3.2 µs | 560 B | 7 |
-| Validate `Pet` | 2.6 µs | 514 B | 19 |
-| Encode `Pet` | 7.9 µs | 2.9 KiB | 57 |
-| Encode, plain encoding/json | 2.5 µs | 664 B | 6 |
-| Decode a discriminated union | 3.9 µs | 1.0 KiB | 20 |
+| Decode `Pet` | 6.0 µs | 1.3 KiB | 30 |
+| Decode, plain encoding/json | 3.1 µs | 560 B | 7 |
+| Validate `Pet` | 2.5 µs | 514 B | 19 |
+| Encode `Pet` | 3.2 µs | 2.0 KiB | 17 |
+| Encode, plain encoding/json | 2.3 µs | 664 B | 6 |
+| Decode a discriminated union | 2.5 µs | 1.0 KiB | 20 |
+| Encode a discriminated union | 0.54 µs | 120 B | 6 |
 
-Generated decoding costs about twice plain `encoding/json`: it reports
-every problem with its JSON pointer, checks required properties and nulls,
-and passes the request/response direction down to nested values. Encoding
-still costs about three times as much.
+Generated decoding costs about twice plain `encoding/json`, encoding about
+1.4 times: they report every problem with its JSON pointer, check required
+properties and nulls, and pass the request/response direction down to
+nested values.
 
 ## Generated server
 
@@ -66,5 +67,16 @@ M7 made generated structs decode token by token (`DecodeJSONFrom`, and
 members into a map and decoding each through reflection. Measured side by
 side, alternating runs, `Pet` decoding went from 13.8 µs, 3.5 KiB and 53
 allocations to 6.3 µs, 1.3 KiB and 30, from 4.1 to 2.0 times plain
-`encoding/json`. Unions and objects with inline unions still decode from
-the object's text, which they need whole.
+`encoding/json`.
+
+Then generated types got `AppendJSON`, which writes into one buffer with
+typed appends for strings, numbers, booleans, enums and nested generated
+types instead of a buffer and a reflective encoding per property; a
+discriminated union sets the discriminator on its variant instead of
+re-reading the variant's JSON to add it, and reads the discriminator
+token by token instead of collecting the object. Side by side with the
+code before M7: encoding `Pet` went from 6.4 µs and 57 allocations to
+3.2 µs and 17, encoding a discriminated union from 2.6 µs and 25
+allocations to 0.54 µs and 6, and decoding one from 3.4 µs to 2.5 µs.
+Unions still decode their variants from the value's text: an untagged
+union tries each, and a discriminator may come last.

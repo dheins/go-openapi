@@ -26,7 +26,7 @@ func (m *GetFile200ResponseBody) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *GetFile200ResponseBody) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -84,10 +84,20 @@ func (m GetFile200ResponseBody) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m GetFile200ResponseBody) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("name", m.Name)
-	enc.Field("ext", m.Ext)
-	return enc.Bytes()
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m GetFile200ResponseBody) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"name\":"...)
+	dst = oapi.AppendString(dst, m.Name)
+	dst = append(dst, ',')
+	dst = append(dst, "\"ext\":"...)
+	dst = oapi.AppendString(dst, m.Ext)
+	dst = append(dst, ',')
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

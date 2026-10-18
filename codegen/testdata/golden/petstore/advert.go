@@ -3,6 +3,7 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
 	"errors"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -28,23 +29,52 @@ func (m *Advert) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Advert) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		obj := oapi.BeginObject(dec)
+		var v Advert
+		var seen [1]bool
+		var problems [1]error
+		for obj.Next() {
+			switch obj.Name() {
+			case "title":
+				seen[0] = true
+				problems[0] = obj.Decode(&v.Title, false, dir)
+			default:
+				obj.Skip()
+			}
+		}
+		if err := obj.Err(); err != nil {
+			return err
+		}
+		var errs oapi.ValidationErrors
+		if seen[0] {
+			errs.Nested("/title", problems[0])
+		} else {
+			errs.Add("/title", "required property is missing")
+		}
+		errs.Nested("", v.OneOf.DecodeJSON(data, dir))
+		if err := errs.Err(); err != nil {
+			return err
+		}
+		*m = v
+		return nil
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Advert) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Advert) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	// The inline unions decode from the object's text.
+	data, err := dec.ReadValue()
 	if err != nil {
 		return err
 	}
-	var v Advert
-	var errs oapi.ValidationErrors
-	if raw, ok := fields["title"]; ok {
-		errs.Nested("/title", oapi.DecodeField(raw, &v.Title, false, dir))
-	} else {
-		errs.Add("/title", "required property is missing")
-	}
-	errs.Nested("", v.OneOf.DecodeJSON(data, dir))
-	if err := errs.Err(); err != nil {
-		return err
-	}
-	*m = v
-	return nil
+	return m.DecodeJSON(data, dir)
 }
 
 // MarshalJSON encodes every property that is present.
@@ -55,11 +85,22 @@ func (m Advert) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Advert) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Advert) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	skip := []string{"title"}
-	enc.Field("title", m.Title)
-	enc.Inline(m.OneOf, skip...)
-	return enc.Bytes()
+	dst = append(dst, "\"title\":"...)
+	dst = oapi.AppendString(dst, m.Title)
+	dst = append(dst, ',')
+	if dst, err = oapi.AppendInline(dst, m.OneOf, dir, skip...); err != nil {
+		return nil, err
+	}
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.
@@ -162,19 +203,24 @@ func (u AdvertOneOf) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u AdvertOneOf) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u AdvertOneOf) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case House:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "house"
 		}
-		return oapi.EnsureProperty(data, "kind", "house")
+		return x.AppendJSON(dst, dir)
 	case Flat:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "flat"
 		}
-		return oapi.EnsureProperty(data, "kind", "flat")
+		return x.AppendJSON(dst, dir)
 	}
 	return nil, errors.New("AdvertOneOf: no variant is set")
 }

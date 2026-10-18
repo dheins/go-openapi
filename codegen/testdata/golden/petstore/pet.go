@@ -4,6 +4,8 @@ package petstore
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -45,7 +47,7 @@ func (m *Pet) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Pet) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -175,43 +177,92 @@ func (m Pet) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Pet) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Pet) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	if dir != oapi.Request {
-		enc.Field("id", m.ID)
+		dst = append(dst, "\"id\":"...)
+		dst = strconv.AppendInt(dst, m.ID, 10)
+		dst = append(dst, ',')
 	}
-	enc.Field("name", m.Name)
-	enc.Field("status", m.Status)
+	dst = append(dst, "\"name\":"...)
+	dst = oapi.AppendString(dst, m.Name)
+	dst = append(dst, ',')
+	dst = append(dst, "\"status\":"...)
+	dst = oapi.AppendString(dst, string(m.Status))
+	dst = append(dst, ',')
 	if m.Tag.Set {
-		enc.Field("tag", m.Tag)
+		dst = append(dst, "\"tag\":"...)
+		if !m.Tag.Value.Valid {
+			dst = append(dst, "null"...)
+		} else {
+			dst = oapi.AppendString(dst, m.Tag.Value.Value)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Birthday.Set {
-		enc.Field("birthday", m.Birthday)
+		dst = append(dst, "\"birthday\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Birthday.Value, dir); err != nil {
+			return nil, fmt.Errorf("birthday: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.CreatedAt.Set {
-		enc.Field("createdAt", m.CreatedAt)
+		dst = append(dst, "\"createdAt\":"...)
+		if dst, err = oapi.AppendValue(dst, m.CreatedAt.Value, dir); err != nil {
+			return nil, fmt.Errorf("createdAt: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Weight.Set {
-		enc.Field("weight", m.Weight)
+		dst = append(dst, "\"weight\":"...)
+		if dst, err = oapi.AppendFloat(dst, m.Weight.Value, 64); err != nil {
+			return nil, fmt.Errorf("weight: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.PhotoURLs.Set {
-		enc.Field("photoUrls", m.PhotoURLs)
+		dst = append(dst, "\"photoUrls\":"...)
+		if dst, err = oapi.AppendValue(dst, m.PhotoURLs.Value, dir); err != nil {
+			return nil, fmt.Errorf("photoUrls: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Owner.Set {
-		enc.Field("owner", m.Owner)
+		dst = append(dst, "\"owner\":"...)
+		if dst, err = m.Owner.Value.AppendJSON(dst, dir); err != nil {
+			return nil, fmt.Errorf("owner: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Size.Set {
-		enc.Field("size", m.Size)
+		dst = append(dst, "\"size\":"...)
+		dst = strconv.AppendInt(dst, int64(m.Size.Value), 10)
+		dst = append(dst, ',')
 	}
 	if m.Labels.Set {
-		enc.Field("labels", m.Labels)
+		dst = append(dst, "\"labels\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Labels.Value, dir); err != nil {
+			return nil, fmt.Errorf("labels: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Kind.Set {
-		enc.Field("petType", m.Kind)
+		dst = append(dst, "\"petType\":"...)
+		dst = oapi.AppendString(dst, m.Kind.Value)
+		dst = append(dst, ',')
 	}
 	if m.Validate2.Set {
-		enc.Field("validate", m.Validate2)
+		dst = append(dst, "\"validate\":"...)
+		dst = strconv.AppendBool(dst, m.Validate2.Value)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.
@@ -282,7 +333,7 @@ func (m *PetOwner) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *PetOwner) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -338,12 +389,22 @@ func (m PetOwner) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m PetOwner) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("email", m.Email)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m PetOwner) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"email\":"...)
+	dst = oapi.AppendString(dst, m.Email)
+	dst = append(dst, ',')
 	if m.Phone.Set {
-		enc.Field("phone", m.Phone)
+		dst = append(dst, "\"phone\":"...)
+		dst = oapi.AppendString(dst, m.Phone.Value)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

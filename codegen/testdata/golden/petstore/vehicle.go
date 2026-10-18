@@ -5,6 +5,7 @@ package petstore
 import (
 	"encoding/json/jsontext"
 	"errors"
+	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -116,25 +117,30 @@ func (u Vehicle) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Vehicle) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Vehicle) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case VehicleBase:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "Vehicle"
 		}
-		return oapi.EnsureProperty(data, "kind", "Vehicle")
+		return x.AppendJSON(dst, dir)
 	case Car:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "automobile"
 		}
-		return oapi.EnsureProperty(data, "kind", "automobile")
+		return x.AppendJSON(dst, dir)
 	case Bike:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "Bike"
 		}
-		return oapi.EnsureProperty(data, "kind", "Bike")
+		return x.AppendJSON(dst, dir)
 	}
 	return nil, errors.New("Vehicle: no variant is set")
 }
@@ -173,7 +179,7 @@ func (m *VehicleBase) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *VehicleBase) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -231,10 +237,20 @@ func (m VehicleBase) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m VehicleBase) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("kind", m.Kind)
-	enc.Field("wheels", m.Wheels)
-	return enc.Bytes()
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m VehicleBase) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"kind\":"...)
+	dst = oapi.AppendString(dst, m.Kind)
+	dst = append(dst, ',')
+	dst = append(dst, "\"wheels\":"...)
+	dst = strconv.AppendInt(dst, m.Wheels, 10)
+	dst = append(dst, ',')
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

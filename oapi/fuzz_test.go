@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 type fuzzTarget struct {
@@ -139,4 +140,24 @@ func same[T any](t *testing.T, data []byte) {
 	if errText == nil && !reflect.DeepEqual(byText, byTokens) {
 		t.Fatalf("%T from %s:\nby text:   %#v\nby tokens: %#v", byText, data, byText, byTokens)
 	}
+}
+
+// FuzzAppendValue checks the fast paths of AppendValue against
+// encoding/json, which they must match byte for byte.
+func FuzzAppendValue(f *testing.F) {
+	f.Add(1.5, "a<b>& \xff", int64(1e18), 2024, 2, 29)
+	f.Add(1e21, "", int64(-1), -1, 13, 0)
+	f.Add(1e-7, "\"\\", int64(0), 10000, 1, 1)
+	f.Add(123456789.0, "plain", int64(5), 1, 12, 31)
+	f.Fuzz(func(t *testing.T, x float64, s string, sec int64, year, month, day int) {
+		tm := time.Unix(sec, int64(year)).UTC()
+		date := Date{Year: year, Month: time.Month(month), Day: day}
+		for _, v := range []any{x, float32(x), s, []string{s, s}, tm, date, Optional[float64]{Value: x, Set: true}} {
+			want, wantErr := json.Marshal(v)
+			got, err := AppendValue([]byte("prefix"), v, Request)
+			if (err != nil) != (wantErr != nil) || err == nil && string(got) != "prefix"+string(want) {
+				t.Fatalf("%T %v: got %s (%v), want %s (%v)", v, v, got, err, want, wantErr)
+			}
+		}
+	})
 }

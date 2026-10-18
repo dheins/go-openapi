@@ -263,9 +263,9 @@ func (f *fileGen) funcs() template.FuncMap {
 		},
 		"fieldDoc":          fieldDoc,
 		"tag":               tag,
-		"decodeStmts":       f.decodeStmts,
 		"streamDecodeStmts": f.streamDecodeStmts,
-		"encodeStmts":       f.encodeStmts,
+		"appendStmts":       f.appendStmts,
+		"unionAppendStmts":  f.unionAppendStmts,
 
 		"alternativeMethods": f.alternativeMethods,
 		"validateStmts":      f.validateStmts,

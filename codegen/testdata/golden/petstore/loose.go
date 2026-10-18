@@ -96,11 +96,16 @@ func (u Loose) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Loose) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Loose) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case LooseInteger:
-		return oapi.EncodeValue(int64(val), dir)
+		return oapi.AppendValue(dst, int64(val), dir)
 	case LooseVariant2:
-		return oapi.EncodeValue(val.Value, dir)
+		return oapi.AppendValue(dst, val.Value, dir)
 	}
 	return nil, errors.New("Loose: no variant is set")
 }

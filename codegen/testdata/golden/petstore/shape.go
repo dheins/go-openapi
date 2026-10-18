@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -101,11 +102,16 @@ func (u Shape) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Shape) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Shape) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case ShapeVariant1:
-		return oapi.EncodeValue(val, dir)
+		return oapi.AppendValue(dst, val, dir)
 	case ShapeVariant2:
-		return oapi.EncodeValue(val, dir)
+		return oapi.AppendValue(dst, val, dir)
 	}
 	return nil, errors.New("Shape: no variant is set")
 }
@@ -141,7 +147,7 @@ func (m *ShapeVariant1) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *ShapeVariant1) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -189,11 +195,22 @@ func (m ShapeVariant1) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m ShapeVariant1) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m ShapeVariant1) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	if m.Radius.Set {
-		enc.Field("radius", m.Radius)
+		dst = append(dst, "\"radius\":"...)
+		if dst, err = oapi.AppendFloat(dst, m.Radius.Value, 64); err != nil {
+			return nil, fmt.Errorf("radius: %w", err)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.
@@ -220,7 +237,7 @@ func (m *ShapeVariant2) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *ShapeVariant2) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -268,11 +285,22 @@ func (m ShapeVariant2) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m ShapeVariant2) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m ShapeVariant2) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	if m.Side.Set {
-		enc.Field("side", m.Side)
+		dst = append(dst, "\"side\":"...)
+		if dst, err = oapi.AppendFloat(dst, m.Side.Value, 64); err != nil {
+			return nil, fmt.Errorf("side: %w", err)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

@@ -39,9 +39,9 @@ shipped in.
   object parameters (nested objects and maps are supported). — later
 - Parameters and response headers with `content` other than JSON. — later
 - Callbacks, webhooks and links. — later
-- Generated encoders per type, and streaming decoders for unions and
-  objects with inline unions, to close the remaining gap to plain
-  `encoding/json` (see [docs/benchmarks.md](docs/benchmarks.md)). — later
+- Decoding union variants without their text: an untagged union decodes
+  each variant from it, and a discriminated one reads it twice (the
+  discriminator may come last). — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -77,7 +77,11 @@ Unreleased:
   files under `components` and rewrites the references to them. (d10c33c)
 - [x] Generated structs decode token by token (`DecodeJSONFrom`,
   `UnmarshalJSONFrom`), about twice as fast as before with a third of the
-  memory.
+  memory. (0ddd4f7)
+- [x] Generated encoders: structs and sealed unions append their JSON to
+  one buffer (`AppendJSON`), with typed appends for known property types;
+  objects with inline unions decode token by token too, and discriminators
+  are read without collecting the object.
 
 v0.3.1:
 

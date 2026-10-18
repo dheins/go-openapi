@@ -748,6 +748,12 @@ func TestDecodeProblems(t *testing.T) {
 		{`{"name": "Rex", "status": "available", "photoUrls": [}`, "invalid JSON: invalid character '}' looking for beginning of value"},
 		{"  ", "expected object, got nothing"},
 		{`[1]`, "expected object, got array"},
+		// Something else than an object is reported as such, whatever
+		// follows it.
+		{`[1] x`, "expected object, got array"},
+		{`[1,`, "expected object, got array"},
+		{`xyz`, "expected object, got xyz"},
+		{`3 4`, "expected object, got number"},
 		// Declared properties in their order, then the others by name.
 		{`{"labels": {"b": 1, "a": 2}, "owner": {"email": 3}, "name": "Rex", "status": "available", "photoUrls": []}`,
 			"/owner/email: expected string, got number; /labels/a: expected string, got number; /labels/b: expected string, got number"},
@@ -764,6 +770,19 @@ func TestDecodeProblems(t *testing.T) {
 		var p Pet
 		if got := fmt.Sprint(p.DecodeJSON([]byte(tt.in), oapi.Request)); got != tt.want {
 			t.Errorf("%s:\ngot  %s\nwant %s", tt.in, got, tt.want)
+		}
+	}
+
+	// A discriminated union reads its discriminator the same way.
+	for _, tt := range []struct{ in, want string }{
+		{`[1] x`, "expected object, got array"},
+		{`{"kind": 3}`, "/kind: expected string, got number"},
+		{`{"kind": "kitty", "kind": "Doggo"}`, "<nil>"},
+		{`{"kind": "kitty"} x`, "invalid JSON: invalid character 'x' after top-level value"},
+	} {
+		var a Animal
+		if got := fmt.Sprint(a.DecodeJSON([]byte(tt.in), oapi.Request)); got != tt.want {
+			t.Errorf("Animal %s:\ngot  %s\nwant %s", tt.in, got, tt.want)
 		}
 	}
 }

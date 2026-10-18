@@ -4,6 +4,7 @@ package legacy
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -32,7 +33,7 @@ func (m *Item) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Item) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -120,25 +121,72 @@ func (m Item) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Item) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("sku", m.Sku)
-	enc.Field("price", m.Price)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Item) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
+	dst = append(dst, "\"sku\":"...)
+	dst = oapi.AppendString(dst, m.Sku)
+	dst = append(dst, ',')
+	dst = append(dst, "\"price\":"...)
+	if dst, err = oapi.AppendFloat(dst, m.Price, 64); err != nil {
+		return nil, fmt.Errorf("price: %w", err)
+	}
+	dst = append(dst, ',')
 	if m.Note != nil {
-		enc.Field("note", m.Note)
+		dst = append(dst, "\"note\":"...)
+		if m.Note == nil {
+			dst = append(dst, "null"...)
+		} else {
+			if !(*m.Note).Valid {
+				dst = append(dst, "null"...)
+			} else {
+				dst = oapi.AppendString(dst, (*m.Note).Value)
+			}
+		}
+		dst = append(dst, ',')
 	}
 	if len(m.Tags) > 0 {
-		enc.Field("tags", m.Tags)
+		dst = append(dst, "\"tags\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Tags, dir); err != nil {
+			return nil, fmt.Errorf("tags: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if len(m.Attributes) > 0 {
-		enc.Field("attributes", m.Attributes)
+		dst = append(dst, "\"attributes\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Attributes, dir); err != nil {
+			return nil, fmt.Errorf("attributes: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Supplier != nil {
-		enc.Field("supplier", m.Supplier)
+		dst = append(dst, "\"supplier\":"...)
+		if m.Supplier == nil {
+			dst = append(dst, "null"...)
+		} else {
+			if dst, err = (*m.Supplier).AppendJSON(dst, dir); err != nil {
+				return nil, fmt.Errorf("supplier: %w", err)
+			}
+		}
+		dst = append(dst, ',')
 	}
 	if m.Replacement != nil {
-		enc.Field("replacement", m.Replacement)
+		dst = append(dst, "\"replacement\":"...)
+		if m.Replacement == nil {
+			dst = append(dst, "null"...)
+		} else {
+			if dst, err = (*m.Replacement).AppendJSON(dst, dir); err != nil {
+				return nil, fmt.Errorf("replacement: %w", err)
+			}
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

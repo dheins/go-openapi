@@ -4,6 +4,8 @@ package model
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
+	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -29,7 +31,7 @@ func (m *Filter) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Filter) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -103,21 +105,44 @@ func (m Filter) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Filter) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("role", m.Role)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Filter) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
+	dst = append(dst, "\"role\":"...)
+	dst = oapi.AppendString(dst, m.Role)
+	dst = append(dst, ',')
 	if m.Age.Set {
-		enc.Field("age", m.Age)
+		dst = append(dst, "\"age\":"...)
+		dst = strconv.AppendInt(dst, m.Age.Value, 10)
+		dst = append(dst, ',')
 	}
 	if m.Tags.Set {
-		enc.Field("tags", m.Tags)
+		dst = append(dst, "\"tags\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Tags.Value, dir); err != nil {
+			return nil, fmt.Errorf("tags: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Owner.Set {
-		enc.Field("owner", m.Owner)
+		dst = append(dst, "\"owner\":"...)
+		if dst, err = m.Owner.Value.AppendJSON(dst, dir); err != nil {
+			return nil, fmt.Errorf("owner: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Labels.Set {
-		enc.Field("labels", m.Labels)
+		dst = append(dst, "\"labels\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Labels.Value, dir); err != nil {
+			return nil, fmt.Errorf("labels: %w", err)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.
@@ -152,7 +177,7 @@ func (m *FilterOwner) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *FilterOwner) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -206,14 +231,24 @@ func (m FilterOwner) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m FilterOwner) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m FilterOwner) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
 	if m.Name.Set {
-		enc.Field("name", m.Name)
+		dst = append(dst, "\"name\":"...)
+		dst = oapi.AppendString(dst, m.Name.Value)
+		dst = append(dst, ',')
 	}
 	if m.Age.Set {
-		enc.Field("age", m.Age)
+		dst = append(dst, "\"age\":"...)
+		dst = strconv.AppendInt(dst, m.Age.Value, 10)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

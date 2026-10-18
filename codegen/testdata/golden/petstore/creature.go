@@ -130,31 +130,36 @@ func (u Creature) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Creature) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Creature) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case CreatureBase:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Species == "" {
+			x.Species = "Creature"
 		}
-		return oapi.EnsureProperty(data, "species", "Creature")
+		return x.AppendJSON(dst, dir)
 	case HoundBase:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Species == "" {
+			x.Species = "Hound"
 		}
-		return oapi.EnsureProperty(data, "species", "Hound")
+		return x.AppendJSON(dst, dir)
 	case Puppy:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Species == "" {
+			x.Species = "pup"
 		}
-		return oapi.EnsureProperty(data, "species", "pup")
+		return x.AppendJSON(dst, dir)
 	case Mutt:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Species == "" {
+			x.Species = "Mutt"
 		}
-		return oapi.EnsureProperty(data, "species", "Mutt")
+		return x.AppendJSON(dst, dir)
 	}
 	return nil, errors.New("Creature: no variant is set")
 }
@@ -195,7 +200,7 @@ func (m *CreatureBase) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *CreatureBase) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -251,12 +256,22 @@ func (m CreatureBase) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m CreatureBase) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("species", m.Species)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m CreatureBase) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"species\":"...)
+	dst = oapi.AppendString(dst, m.Species)
+	dst = append(dst, ',')
 	if m.Name.Set {
-		enc.Field("name", m.Name)
+		dst = append(dst, "\"name\":"...)
+		dst = oapi.AppendString(dst, m.Name.Value)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

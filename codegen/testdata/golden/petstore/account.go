@@ -4,6 +4,7 @@ package petstore
 
 import (
 	"encoding/json/jsontext"
+	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -31,7 +32,7 @@ func (m *Account) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Account) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -117,21 +118,37 @@ func (m Account) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Account) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Account) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
 	if dir != oapi.Request {
-		enc.Field("id", m.ID)
+		dst = append(dst, "\"id\":"...)
+		dst = strconv.AppendInt(dst, m.ID, 10)
+		dst = append(dst, ',')
 	}
-	enc.Field("username", m.Username)
+	dst = append(dst, "\"username\":"...)
+	dst = oapi.AppendString(dst, m.Username)
+	dst = append(dst, ',')
 	if dir != oapi.Response {
-		enc.Field("password", m.Password)
+		dst = append(dst, "\"password\":"...)
+		dst = oapi.AppendString(dst, m.Password)
+		dst = append(dst, ',')
 	}
 	if m.Role.Set {
-		enc.Field("role", m.Role)
+		dst = append(dst, "\"role\":"...)
+		dst = oapi.AppendString(dst, m.Role.Value)
+		dst = append(dst, ',')
 	}
 	if m.Limit.Set {
-		enc.Field("limit", m.Limit)
+		dst = append(dst, "\"limit\":"...)
+		dst = strconv.AppendInt(dst, m.Limit.Value, 10)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

@@ -68,6 +68,16 @@ func DecodeJSONWith(data []byte, decode func(dec *jsontext.Decoder) error) error
 
 var errTrailingData = errors.New("unexpected data after the value")
 
+// DecodeObjectWith runs decode on data like DecodeJSONWith, for a value
+// that must be an object: data that does not start with one is reported
+// as such before its syntax is checked, as DecodeObject reports it.
+func DecodeObjectWith(data []byte, decode func(dec *jsontext.Decoder) error) error {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return &ValidationError{Message: "expected object, got " + valueType(trimmed)}
+	}
+	return DecodeJSONWith(data, decode)
+}
+
 // isSyntaxError reports whether err comes from reading the JSON text
 // rather than from a value that does not fit.
 func isSyntaxError(err error) bool {

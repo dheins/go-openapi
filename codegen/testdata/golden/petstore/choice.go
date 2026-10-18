@@ -104,11 +104,16 @@ func (u Choice) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Choice) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Choice) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case ChoiceVariant1:
-		return oapi.EncodeValue(val, dir)
+		return oapi.AppendValue(dst, val, dir)
 	case ChoiceInteger:
-		return oapi.EncodeValue(int64(val), dir)
+		return oapi.AppendValue(dst, int64(val), dir)
 	}
 	return nil, errors.New("Choice: no variant is set")
 }

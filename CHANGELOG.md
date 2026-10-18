@@ -41,7 +41,23 @@
   into a map first. Decoding the fixture's `Pet` is about twice as fast
   with a third of the memory; the problems reported are unchanged. The
   runtime gains `oapi.DecodeFrom`, `oapi.DecodeJSONWith`,
-  `oapi.BeginObject` and `oapi.StreamDecoder`.
+  `oapi.DecodeObjectWith`, `oapi.BeginObject` and `oapi.StreamDecoder`.
+  Objects with inline unions decode token by token too.
+- Generated structs and sealed unions append their JSON to one buffer
+  (`AppendJSON`), writing strings, numbers, booleans, enums and nested
+  generated types directly; output is unchanged. Encoding the fixture's
+  `Pet` is about twice as fast with a third of the allocations, and a
+  discriminated union about five times as fast. The runtime gains
+  `oapi.AppendValue`, `oapi.Appender`, `oapi.AppendString`,
+  `oapi.AppendFloat`, `oapi.AppendInline`, `oapi.EndObject` and
+  `oapi.Date.AppendText`.
+- `oapi.DiscriminatorValue` reads the discriminator token by token
+  instead of collecting the object.
+
+### Fixed
+
+- `oapi.EnsureProperty` accepted data after the object, and returned it
+  unchanged when the property was set. Found by `FuzzEnsureProperty`.
 
 ### Changed
 

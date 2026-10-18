@@ -4,6 +4,7 @@ package petstore
 
 import (
 	"encoding/json/jsontext"
+	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -26,7 +27,7 @@ func (m *Doggo) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Doggo) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -82,12 +83,22 @@ func (m Doggo) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Doggo) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("kind", m.Kind)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Doggo) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"kind\":"...)
+	dst = oapi.AppendString(dst, m.Kind)
+	dst = append(dst, ',')
 	if m.Good.Set {
-		enc.Field("good", m.Good)
+		dst = append(dst, "\"good\":"...)
+		dst = strconv.AppendBool(dst, m.Good.Value)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

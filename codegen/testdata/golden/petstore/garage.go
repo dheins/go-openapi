@@ -4,6 +4,7 @@ package petstore
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -25,7 +26,7 @@ func (m *Garage) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Garage) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -73,11 +74,22 @@ func (m Garage) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Garage) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Garage) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	if m.Vehicles.Set {
-		enc.Field("vehicles", m.Vehicles)
+		dst = append(dst, "\"vehicles\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Vehicles.Value, dir); err != nil {
+			return nil, fmt.Errorf("vehicles: %w", err)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

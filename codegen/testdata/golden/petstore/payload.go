@@ -107,13 +107,18 @@ func (u Payload) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Payload) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Payload) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case PayloadArray:
-		return oapi.EncodeValue([]string(val), dir)
+		return oapi.AppendValue(dst, []string(val), dir)
 	case PayloadBoolean:
-		return oapi.EncodeValue(bool(val), dir)
+		return oapi.AppendValue(dst, bool(val), dir)
 	case PayloadWhen:
-		return oapi.EncodeValue(When(val), dir)
+		return oapi.AppendValue(dst, When(val), dir)
 	}
 	return nil, errors.New("Payload: no variant is set")
 }

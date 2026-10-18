@@ -121,11 +121,23 @@ func (d Date) In(loc *time.Location) time.Time {
 }
 
 func (d Date) String() string {
-	return fmt.Sprintf("%04d-%02d-%02d", d.Year, d.Month, d.Day)
+	b, _ := d.AppendText(nil)
+	return string(b)
 }
 
 func (d Date) MarshalText() ([]byte, error) {
-	return []byte(d.String()), nil
+	return d.AppendText(nil)
+}
+
+// AppendText appends the date as YYYY-MM-DD.
+func (d Date) AppendText(dst []byte) ([]byte, error) {
+	if d.Year < 0 || d.Year > 9999 || d.Month < 0 || d.Month > 99 || d.Day < 0 || d.Day > 99 {
+		return fmt.Appendf(dst, "%04d-%02d-%02d", d.Year, d.Month, d.Day), nil
+	}
+	return append(dst,
+		byte('0'+d.Year/1000), byte('0'+d.Year/100%10), byte('0'+d.Year/10%10), byte('0'+d.Year%10), '-',
+		byte('0'+d.Month/10), byte('0'+d.Month%10), '-',
+		byte('0'+d.Day/10), byte('0'+d.Day%10)), nil
 }
 
 func (d *Date) UnmarshalText(data []byte) error {

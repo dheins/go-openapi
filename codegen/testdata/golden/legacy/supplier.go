@@ -4,6 +4,7 @@ package legacy
 
 import (
 	"encoding/json/jsontext"
+	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -26,7 +27,7 @@ func (m *Supplier) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Supplier) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -82,12 +83,26 @@ func (m Supplier) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Supplier) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("name", m.Name)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Supplier) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"name\":"...)
+	dst = oapi.AppendString(dst, m.Name)
+	dst = append(dst, ',')
 	if m.Rating != nil {
-		enc.Field("rating", m.Rating)
+		dst = append(dst, "\"rating\":"...)
+		if m.Rating == nil {
+			dst = append(dst, "null"...)
+		} else {
+			dst = strconv.AppendInt(dst, (*m.Rating), 10)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

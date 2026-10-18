@@ -27,7 +27,7 @@ func (m *Settings) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Settings) DecodeJSON(data []byte, dir oapi.Direction) error {
-	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
 		return m.DecodeJSONFrom(dec, dir)
 	})
 }
@@ -87,17 +87,29 @@ func (m Settings) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Settings) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Settings) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
 	if m.A.Set {
-		enc.Field("a", m.A)
+		dst = append(dst, "\"a\":"...)
+		dst = oapi.AppendString(dst, m.A.Value)
+		dst = append(dst, ',')
 	}
 	if m.B.Set {
-		enc.Field("b", m.B)
+		dst = append(dst, "\"b\":"...)
+		dst = oapi.AppendString(dst, m.B.Value)
+		dst = append(dst, ',')
 	}
 	if m.C.Set {
-		enc.Field("c", m.C)
+		dst = append(dst, "\"c\":"...)
+		dst = oapi.AppendString(dst, m.C.Value)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

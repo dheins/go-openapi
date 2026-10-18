@@ -3,7 +3,9 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
 	"errors"
+	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -29,31 +31,65 @@ func (m *Listing) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Listing) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		obj := oapi.BeginObject(dec)
+		var v Listing
+		var seen [2]bool
+		var problems [2]error
+		var unknown []oapi.NamedError
+		for obj.Next() {
+			switch obj.Name() {
+			case "id":
+				seen[0] = true
+				problems[0] = obj.Decode(&v.ID, false, dir)
+			case "kind":
+				seen[1] = true
+				problems[1] = obj.Decode(&v.Kind, false, dir)
+			case "rooms", "floor":
+				obj.Skip()
+			default:
+				obj.Skip()
+				unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: &oapi.ValidationError{Message: "property is not allowed"}})
+			}
+		}
+		if err := obj.Err(); err != nil {
+			return err
+		}
+		var errs oapi.ValidationErrors
+		if seen[0] {
+			errs.Nested("/id", problems[0])
+		} else {
+			errs.Add("/id", "required property is missing")
+		}
+		if seen[1] {
+			errs.Nested("/kind", problems[1])
+		} else {
+			errs.Add("/kind", "required property is missing")
+		}
+		errs.Nested("", v.OneOf.DecodeJSON(data, dir))
+		oapi.AddNamed(&errs, unknown)
+		if err := errs.Err(); err != nil {
+			return err
+		}
+		*m = v
+		return nil
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Listing) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Listing) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	// The inline unions decode from the object's text.
+	data, err := dec.ReadValue()
 	if err != nil {
 		return err
 	}
-	var v Listing
-	var errs oapi.ValidationErrors
-	if raw, ok := fields["id"]; ok {
-		errs.Nested("/id", oapi.DecodeField(raw, &v.ID, false, dir))
-	} else {
-		errs.Add("/id", "required property is missing")
-	}
-	if raw, ok := fields["kind"]; ok {
-		errs.Nested("/kind", oapi.DecodeField(raw, &v.Kind, false, dir))
-	} else {
-		errs.Add("/kind", "required property is missing")
-	}
-	errs.Nested("", v.OneOf.DecodeJSON(data, dir))
-	for _, name := range oapi.UnknownFields(fields, "id", "kind", "rooms", "floor") {
-		errs.Add(oapi.Field("", name), "property is not allowed")
-	}
-	if err := errs.Err(); err != nil {
-		return err
-	}
-	*m = v
-	return nil
+	return m.DecodeJSON(data, dir)
 }
 
 // MarshalJSON encodes every property that is present.
@@ -64,15 +100,28 @@ func (m Listing) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Listing) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Listing) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	skip := []string{"id"}
-	enc.Field("id", m.ID)
+	dst = append(dst, "\"id\":"...)
+	dst = strconv.AppendInt(dst, m.ID, 10)
+	dst = append(dst, ',')
 	if m.Kind != "" {
-		enc.Field("kind", m.Kind)
+		dst = append(dst, "\"kind\":"...)
+		dst = oapi.AppendString(dst, m.Kind)
+		dst = append(dst, ',')
 		skip = append(skip, "kind")
 	}
-	enc.Inline(m.OneOf, skip...)
-	return enc.Bytes()
+	if dst, err = oapi.AppendInline(dst, m.OneOf, dir, skip...); err != nil {
+		return nil, err
+	}
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.
@@ -175,19 +224,24 @@ func (u ListingOneOf) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u ListingOneOf) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u ListingOneOf) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case House:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "house"
 		}
-		return oapi.EnsureProperty(data, "kind", "house")
+		return x.AppendJSON(dst, dir)
 	case Flat:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "flat"
 		}
-		return oapi.EnsureProperty(data, "kind", "flat")
+		return x.AppendJSON(dst, dir)
 	}
 	return nil, errors.New("ListingOneOf: no variant is set")
 }
