@@ -39,9 +39,6 @@ shipped in.
   object parameters (nested objects and maps are supported). — later
 - Parameters and response headers with `content` other than JSON. — later
 - Callbacks, webhooks and links. — later
-- Serving a document split over several files as one (today
-  `server.WithDocument` serves the root file only, so its references to
-  other files cannot be followed by clients). — later
 - Generating a decoder per type instead of decoding through `oapi`
   reflection helpers, to close the remaining gap to plain `encoding/json`
   (see [docs/benchmarks.md](docs/benchmarks.md)). — later
@@ -74,7 +71,10 @@ Unreleased:
   with brackets (`a[b][c]=v`) or as JSON. (d6a9821)
 - [x] Response headers with JSON `content`, sent as compact JSON.
 - [x] Security scheme names written as URI references (3.2), resolved by
-  the loader (`loader.Spec.SecurityScheme`).
+  the loader (`loader.Spec.SecurityScheme`). (d2e4dbe)
+- [x] Serving a document split over several files as one: generated
+  servers embed `loader.Spec.Bundle`, which copies the objects of other
+  files under `components` and rewrites the references to them.
 
 v0.3.1:
 

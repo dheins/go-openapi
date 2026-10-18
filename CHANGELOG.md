@@ -29,6 +29,12 @@
   and a name and a URI leading to the same scheme share one
   `SecurityHandler` method. Operations using them used to be answered
   with 501.
+- `loader.Spec.Bundle`: the document as written as one JSON document, with
+  the objects it refers to in other files copied under `components` (path
+  items in place of their reference) and every reference to them
+  rewritten as a pointer. `goapi generate server` embeds it, so
+  `server.WithDocument` serves a split document whole; a single-file
+  document is embedded unchanged.
 
 ### Changed
 

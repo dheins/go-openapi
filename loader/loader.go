@@ -38,6 +38,9 @@ type Spec struct {
 	// schemes are the security schemes that requirements name with a URI
 	// reference.
 	schemes map[schemeKey]*oas.SecurityScheme
+	// written is the root document as JSON before the 3.0 upgrade, for
+	// 3.0 documents only; root is still as written otherwise.
+	written []byte
 }
 
 // schemeKey is a scheme name in the security requirements of owner, the
@@ -234,6 +237,11 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 	r.addSource(src)
 
 	if is30(version) {
+		written, err := nodeJSON(src.root)
+		if err != nil {
+			return nil, &Error{Location: Location{URI: src.URI()}, Err: err}
+		}
+		spec.written = written
 		upgrade30(src.root, (*oas.Document)(nil))
 	}
 	var doc oas.Document

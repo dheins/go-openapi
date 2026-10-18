@@ -246,3 +246,19 @@ func readFile(t *testing.T, name string) string {
 	}
 	return string(data)
 }
+
+func TestGenerateServerBundlesDocument(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "multiapi")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"generate", "server", "-out", out, "-operations", "", "-models", "", "../../loader/testdata/multi/openapi.yaml"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	doc := readFile(t, filepath.Join(out, "openapi.json"))
+	// Only $self still names a file.
+	if strings.Count(doc, ".yaml") != 1 || !strings.Contains(doc, `"$self":"https://api.example.com/specs/openapi.yaml"`) {
+		t.Errorf("the embedded document refers to other files:\n%s", doc)
+	}
+	if !strings.Contains(doc, `"$ref":"#/components/schemas/pet"`) {
+		t.Errorf("schemas/pet.yaml is not copied in:\n%s", doc)
+	}
+}

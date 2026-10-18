@@ -3,6 +3,7 @@ package loader
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -601,5 +602,157 @@ paths: {}
 `), WithFetcher(fetch), WithBaseURI("file:///api/openapi.yaml"))
 	if err == nil || !strings.Contains(err.Error(), "neither a component nor a resolvable reference") {
 		t.Errorf("unresolvable scheme: %v", err)
+	}
+}
+
+// noFetcher refuses every external document, to show a bundle needs none.
+func noFetcher(u *url.URL) ([]byte, error) {
+	return nil, fmt.Errorf("fetched %s", u)
+}
+
+func TestBundleMultiFile(t *testing.T) {
+	spec, err := Load("testdata/multi/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := spec.Bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundled, err := LoadBytes(data, WithFetcher(noFetcher), WithBaseURI("file:///served/openapi.json"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, data)
+	}
+	if len(bundled.Fragments()) != 0 {
+		t.Errorf("the bundle still refers to other files: %v", bundled.Fragments())
+	}
+	doc := bundled.Document
+	path, _ := doc.Paths.Items.Get("/pets/{id}")
+	ok, _ := path.Get.Responses.Items.Get("200")
+	content, _ := ok.Content.Get("application/json")
+	pet := content.Schema.Resolved
+	sibling, _ := pet.Properties.Get("sibling")
+	id, _ := pet.Properties.Get("id")
+	owner, _ := pet.Properties.Get("owner")
+	ownerDef, _ := pet.Defs.Get("Owner")
+	pets, _ := ownerDef.Properties.Get("pets")
+	switch {
+	case sibling.Resolved != pet || pets.Items.Resolved != pet:
+		t.Error("references back to pet.yaml do not lead to its copy")
+	case owner.Resolved != ownerDef:
+		t.Error("#/$defs/Owner inside pet.yaml does not lead into its copy")
+	case path.Parameters[0].Deref().Schema.Resolved != id:
+		// pet.yaml was referenced whole and at /properties/id: one copy.
+		t.Error("params.yaml's reference into pet.yaml does not lead into the same copy")
+	}
+	if def, _ := path.Get.Responses.Items.Get("default"); def.Deref().Description != "error" {
+		t.Errorf("$self-relative response = %+v", def.Deref())
+	}
+	// Root references within the file are kept as written, $id included.
+	node, _ := doc.Components.Schemas.Get("Node")
+	tag, _ := node.Properties.Get("tag")
+	if node.ID != "https://schemas.example.com/node" || tag.Ref != "#tag" {
+		t.Errorf("Node changed: %+v", node)
+	}
+}
+
+func TestBundleSingleFileUnchanged(t *testing.T) {
+	for _, name := range []string{"testdata/petstore-3.2.yaml", "testdata/petstore-3.0.yaml"} {
+		spec, err := Load(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, err := Parse(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := src.JSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := spec.Bundle(); err != nil || string(got) != string(want) {
+			t.Errorf("%s: bundle differs from the document as written (%v)", name, err)
+		}
+	}
+}
+
+func TestBundleRewrites(t *testing.T) {
+	files := map[string]string{
+		"file:///api/paths.yaml": `
+pets:
+  get:
+    responses:
+      "200":
+        description: ok
+        links:
+          self: {operationRef: "#/pets/get"}
+`,
+		"file:///api/common.yaml": `
+components:
+  schemas:
+    Pet:
+      oneOf: [{$ref: "#/components/schemas/Cat"}]
+      discriminator: {propertyName: kind, mapping: {cat: "#/components/schemas/Cat"}}
+    Cat: {type: object}
+  securitySchemes:
+    key: {type: apiKey, in: header, name: X-Key}
+`,
+		"file:///api/tree.yaml": `
+$id: https://example.com/tree
+type: object
+properties:
+  pet: {$ref: "file:///api/common.yaml#/components/schemas/Pet"}
+  self: {$ref: "#"}
+`,
+	}
+	fetch := func(u *url.URL) ([]byte, error) {
+		if doc, ok := files[u.String()]; ok {
+			return []byte(doc), nil
+		}
+		return nil, fmt.Errorf("%s not found", u)
+	}
+	spec, err := LoadBytes([]byte(`openapi: 3.0.3
+info: {title: t, version: v}
+security:
+  - common.yaml#/components/securitySchemes/key: []
+paths:
+  /pets:
+    $ref: paths.yaml#/pets
+  /trees:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: tree.yaml}
+components:
+  schemas:
+    Pet: {type: string}
+`), WithFetcher(fetch), WithBaseURI("file:///api/openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := spec.Bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"openapi":"3.0.3"`,
+		// The path item replaces its reference, and links into it follow.
+		`"/pets":{"get":{"responses":{"200":{"description":"ok","links":{"self":{"operationRef":"#/paths/~1pets/get"}}}}}}`,
+		// The root's Pet is kept; common.yaml's gets another name.
+		`"Pet":{"type":"string"}`,
+		`"Pet2":{"oneOf":[{"$ref":"#/components/schemas/Cat"}],"discriminator":{"propertyName":"kind","mapping":{"cat":"#/components/schemas/Cat"}}}`,
+		`"security":[{"#/components/securitySchemes/key":[]}]`,
+		// tree.yaml's $id would change what the pointers mean.
+		`"tree":{"type":"object","properties":{"pet":{"$ref":"#/components/schemas/Pet2"},"self":{"$ref":"#/components/schemas/tree"}}}`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("bundle lacks %s:\n%s", want, data)
+		}
+	}
+	if _, err := LoadBytes(data, WithFetcher(noFetcher), WithBaseURI("file:///served/openapi.json")); err != nil {
+		t.Errorf("bundle does not load on its own: %v", err)
 	}
 }

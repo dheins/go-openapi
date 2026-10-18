@@ -463,7 +463,7 @@ credentials that are present and wrong are still rejected.
 |---|---|
 | `server.WithBasePath("/v1")` | serve below a prefix; the default is the path of the first `servers` URL (`gen.BasePath`) |
 | `server.WithMiddleware(mw...)` | wrap every operation; middleware gets a `server.Operation` (ID, method, path) |
-| `server.WithDocument("/openapi.json")` | serve the document the server was generated from |
+| `server.WithDocument("/openapi.json")` | serve the document the server was generated from, as JSON; a document split over several files is served as one, with the objects it refers to in other files copied under `components` (`loader.Spec.Bundle`) |
 | `server.WithResponseValidation()` | check response bodies against the document; invalid ones become a logged 500 |
 | `server.WithMaxBodyBytes(n)` | request body limit (default 10 MiB) |
 | `server.WithErrorHandler(f)` | write errors yourself |
