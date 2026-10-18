@@ -76,6 +76,9 @@ func ParseBytes(data []byte, uri string) (*Source, error) {
 	if doc.Kind == 0 || len(doc.Content) == 0 {
 		return nil, fmt.Errorf("%s: empty document", displayURI(uri))
 	}
+	if err := checkDuplicateKeys(doc.Content[0], "", u.String()); err != nil {
+		return nil, err
+	}
 	s := &Source{uri: u, root: doc.Content[0], base: u}
 	if self := s.stringField("$self"); self != "" {
 		su, err := url.Parse(self)
@@ -163,6 +166,42 @@ func (s *Source) baseAt(ptr string) (*url.URL, error) {
 		}
 	}
 	return base, nil
+}
+
+// checkDuplicateKeys reports the first mapping key below n that repeats a
+// key of the same mapping: YAML and JSON parsers keep one of the values
+// and drop the other, and OpenAPI requires names to be unique. Aliases
+// are not followed, since what they point to is checked where it is
+// defined.
+func checkDuplicateKeys(n *yaml.Node, ptr, uri string) error {
+	switch n.Kind {
+	case yaml.MappingNode:
+		first := map[string]*yaml.Node{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			if key.Kind != yaml.ScalarNode {
+				continue
+			}
+			if prev, ok := first[key.Value]; ok {
+				return &Error{
+					Location: Location{URI: uri, Pointer: oas.JoinPointer(ptr, key.Value)},
+					Position: Position{Line: key.Line, Column: key.Column},
+					Err:      fmt.Errorf("duplicate key %q (first defined on line %d)", key.Value, prev.Line),
+				}
+			}
+			first[key.Value] = key
+			if err := checkDuplicateKeys(value, oas.JoinPointer(ptr, key.Value), uri); err != nil {
+				return err
+			}
+		}
+	case yaml.SequenceNode:
+		for i, item := range n.Content {
+			if err := checkDuplicateKeys(item, oas.JoinPointer(ptr, strconv.Itoa(i)), uri); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func childNode(n *yaml.Node, tok string) *yaml.Node {

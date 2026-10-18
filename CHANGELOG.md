@@ -73,6 +73,9 @@
 - An integer form field or object parameter property written with leading
   zeros or a plus sign (`007`, `+7`) made invalid JSON; it is the integer
   it denotes. Found by `FuzzXMLToJSON`.
+- A mapping that repeated a key, in YAML or JSON, loaded silently with one
+  of the values dropped (two `/pets:` paths became one operation). The
+  loader reports the repeated key with its position.
 
 ### Changed
 
@@ -95,6 +98,9 @@
   request bodies with a schema are decoded instead of being answered with
   415 next to JSON, or passed on as bytes when alone; `text/xml` with a
   schema is no longer a string.
+- Documents, and the files they refer to, that repeat a key in a mapping
+  no longer load: `goapi validate` and `goapi generate` report the key
+  and where it is repeated.
 - Operations with multipart bodies other than `multipart/form-data` used
   to be answered with 501, and such responses could not be returned; they
   are generated now, so the `Handler` interface gains their methods.
