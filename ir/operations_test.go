@@ -282,11 +282,18 @@ components:
 	for _, bm := range o.Body.Media {
 		media = append(media, bm.MediaType+"="+bm.Kind)
 	}
-	// A form cannot carry the binary photo; text/plain is a different kind
-	// than the first (structured) media type; request streams are not
-	// supported. All three are answered with 415.
-	if strings.Join(media, " ") != "application/json=json multipart/form-data=multipart" {
+	// A form cannot carry the binary photo and request streams are not
+	// supported: both are answered with 415. text/plain is a different
+	// kind than the first (structured) media type and gets its own field.
+	if strings.Join(media, " ") != "application/json=json multipart/form-data=multipart text/plain=text" {
 		t.Fatalf("body media = %v", media)
+	}
+	var fields []string
+	for _, f := range o.Body.Fields {
+		fields = append(fields, fmt.Sprintf("%s:%d", f.Name, len(f.Media)))
+	}
+	if strings.Join(fields, " ") != "Body:2 TextBody:1" || o.Body.Fields[1].Type.Kind != Optional {
+		t.Errorf("body fields = %v", fields)
 	}
 	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] []} {photo file false [] []} {tags string true [] []}]" {
 		t.Errorf("multipart properties = %s", props)
@@ -296,7 +303,7 @@ components:
 		warnings = append(warnings, w.Message)
 	}
 	all := strings.Join(warnings, "\n")
-	for _, want := range []string{"form bodies must be objects", "text/plain cannot share a Go type", "application/jsonl are not supported yet"} {
+	for _, want := range []string{"form bodies must be objects", "application/jsonl are not supported yet"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no warning mentioning %q in:\n%s", want, all)
 		}
@@ -401,5 +408,40 @@ components:
 	}
 	if pdf.Kind != Builtin || pdf.Name != "string" {
 		t.Errorf("Doc.pdf = %+v", pdf)
+	}
+}
+
+func TestBodyFieldsPerSchema(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /pets:
+    post:
+      operationId: create
+      parameters:
+        - {name: jsonBody, in: query, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object, properties: {a: {type: string}}}}
+          application/merge-patch+json: {schema: {type: object, properties: {b: {type: string}}}}
+          application/vnd.pet+json: {schema: {type: object, properties: {c: {type: string}}}}
+          application/xml: {schema: {type: object, properties: {a: {type: string}}}}
+          application/octet-stream: {schema: {type: string, format: binary}}
+      responses: {"204": {description: ok}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Create")
+	var fields []string
+	for _, f := range o.Body.Fields {
+		fields = append(fields, f.Name+"="+f.Media[0].MediaType)
+	}
+	// The parameter claimed JSONBody, so the media type names the field; XML with an object schema is
+	// answered with 415, but bytes described as a string are passed on.
+	want := "Body=application/json ApplicationMergePatchJSONBody=application/merge-patch+json ApplicationVndPetJSONBody=application/vnd.pet+json BinaryBody=application/octet-stream"
+	if got := strings.Join(fields, " "); got != want {
+		t.Errorf("fields:\n%s\nwant\n%s", got, want)
+	}
+	if o.Body.Fields[0].Type.Kind == Optional || o.Body.Fields[1].Type.Kind != Optional {
+		t.Errorf("Body should be required and the others optional: %+v", o.Body.Fields)
 	}
 }

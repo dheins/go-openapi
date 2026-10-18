@@ -232,9 +232,16 @@ func paramDoc(p *ir.Param) string {
 	return comment("\t", lines)
 }
 
-func bodyDoc(b *ir.Body) string {
-	lines := []string{"Body is the request body."}
-	if b.Doc != "" {
+func bodyDoc(b *ir.Body, f *ir.BodyField) string {
+	lines := []string{fmt.Sprintf("%s is the request body.", f.Name)}
+	if len(b.Fields) > 1 {
+		var media []string
+		for _, m := range f.Media {
+			media = append(media, strconv.Quote(m.MediaType))
+		}
+		lines[0] = fmt.Sprintf("%s is the request body when it is sent as %s.", f.Name, strings.Join(media, ", "))
+	}
+	if b.Doc != "" && f == b.Fields[0] {
 		lines = append(lines, b.Doc)
 	}
 	return comment("\t", lines)
@@ -420,26 +427,27 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 	for _, m := range body.Media {
 		mediaTypes = append(mediaTypes, m.MediaType)
 	}
-	// Only form and multipart bodies name the value type; computing it
-	// records its import.
-	elem := func() string { return f.goType(body.Value) }
 	w(1, "if body, mediaType, ok := %s.ReadBody(w, r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
 	if len(body.Media) > 1 {
 		w(2, "req.ContentType = mediaType")
 	}
-	validate := func(depth int) {
-		if stmts := f.validation("req.Body", body.Type, depth); stmts != "" {
-			w(depth, "var errs oapi.ValidationErrors")
-			w(0, "%s", strings.TrimSuffix(stmts, "\n"))
-			w(depth, "b.Body(errs.Err())")
-		}
-	}
 	w(2, "switch mediaType {")
 	for _, m := range body.Media {
+		field := "req." + m.Field.Name
+		// Only form and multipart bodies name the value type; computing it
+		// records its import.
+		elem := func() string { return f.goType(m.Field.Value) }
+		validate := func(depth int) {
+			if stmts := f.validation(field, m.Field.Type, depth); stmts != "" {
+				w(depth, "var errs oapi.ValidationErrors")
+				w(0, "%s", strings.TrimSuffix(stmts, "\n"))
+				w(depth, "b.Body(errs.Err())")
+			}
+		}
 		w(2, "case %q:", m.MediaType)
 		switch m.Kind {
 		case "json":
-			w(3, "if err := %s.DecodeRequest(body, &req.Body); err != nil {", f.imp(oapiImport, "oapi"))
+			w(3, "if err := %s.DecodeRequest(body, &%s); err != nil {", f.imp(oapiImport, "oapi"), field)
 			w(4, "b.Body(err)")
 			w(3, "} else {")
 			validate(4)
@@ -455,14 +463,14 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			}
 			w(4, "b.Body(err)")
 			w(3, "} else {")
-			w(4, "req.Body = %s", wrapValue(f, body.Type, "v"))
+			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
 			validate(4)
 			w(3, "}")
 		case "text":
-			w(3, "req.Body = %s", wrapValue(f, body.Type, "string(body)"))
+			w(3, "%s = %s", field, wrapValue(f, m.Field.Type, "string(body)"))
 			validate(3)
 		case "binary":
-			w(3, "req.Body = %s", wrapValue(f, body.Type, "body"))
+			w(3, "%s = %s", field, wrapValue(f, m.Field.Type, "body"))
 		}
 	}
 	w(2, "}")

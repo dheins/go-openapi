@@ -346,8 +346,17 @@ not checked yet). In a JSON
 body, an `oapi.File` is a string: its data must be UTF-8, or encoding fails
 (use `contentEncoding: base64` for binary data in JSON, generated as
 `[]byte`). When an
-operation accepts several media types with the same schema, `req.Body` holds
-the decoded value and `req.ContentType` says which one arrived.
+operation accepts several media types, `req.ContentType` says which one
+arrived. Media types that decode to the first one's Go type (the same
+schema, or one written the same way) are decoded into `req.Body`; each
+other Go type gets an optional field of its own, named after its kind
+(`JSONBody`, `FormBody`, `MultipartBody`, `TextBody`, `BinaryBody`) or,
+if that is taken, after its media type. Only the field for the media type
+that arrived is set, so a handler for such an operation must look at
+`req.ContentType` (or the fields' `Set`) rather than assume `req.Body`. A
+media type other than the first that is neither JSON, form, multipart nor
+text and has a schema describing structured data, such as XML, is
+answered with 415, since nothing would check its bytes.
 
 ## Responses
 

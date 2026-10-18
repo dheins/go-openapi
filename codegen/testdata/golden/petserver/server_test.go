@@ -145,6 +145,11 @@ func (s *store) UploadRecords(_ context.Context, req *api.UploadRecordsRequest) 
 	return api.UploadRecords204Response{}, nil
 }
 
+func (s *store) ImportPet(_ context.Context, req *api.ImportPetRequest) (api.ImportPetResponse, error) {
+	s.seen["ImportPet"] = req
+	return api.ImportPet204Response{}, nil
+}
+
 func (s *store) GetPhoto(_ context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {
 	if req.PetID == 2 {
 		return api.GetPhoto200ImageResponse{ContentType: "text/plain", Body: []byte("oops")}, nil
@@ -658,6 +663,44 @@ func TestMultipartFileParts(t *testing.T) {
 	ct, body = recordsBody(t, part("report", "r.pdf", "application/pdf"), []byte("%PDF"))
 	r = do(t, h, "POST", "/pets/1/records", ct, body)
 	if got := problemErrors(t, r); !slices.Equal(got, []string{`body /report: part header "X-Checksum" is missing`}) {
+		t.Errorf("errors = %q", got)
+	}
+}
+
+func TestBodiesWithDifferentSchemas(t *testing.T) {
+	s, h := newTestServer()
+	importPet := func(contentType, body string) *api.ImportPetRequest {
+		t.Helper()
+		r := do(t, h, "POST", "/pets/import", contentType, body)
+		if r.status != 204 {
+			t.Fatalf("%s: %d %s", contentType, r.status, r.body)
+		}
+		return s.seen["ImportPet"].(*api.ImportPetRequest)
+	}
+	if got := importPet("application/json", `{"name": "Rex", "photoUrls": []}`); !got.Body.Set || got.Body.Value.Name != "Rex" || got.JSONBody.Set {
+		t.Errorf("json = %+v", got)
+	}
+	// Equal schemas share a field.
+	if got := importPet("application/merge-patch+json", `{"name": "Rex"}`); got.Body.Set || got.JSONBody.Value.Name.Value != "Rex" || got.ContentType != "application/merge-patch+json" {
+		t.Errorf("merge patch = %+v", got)
+	}
+	if got := importPet("application/x-www-form-urlencoded", "name=Rex"); got.JSONBody.Value.Name.Value != "Rex" || got.ContentType != "application/x-www-form-urlencoded" {
+		t.Errorf("form = %+v", got)
+	}
+	ct, body := recordsBody(t, part("photo", "rex.png", "image/png"), []byte("PNG"))
+	if got := importPet(ct, body); string(got.MultipartBody.Value.Photo.Data) != "PNG" {
+		t.Errorf("multipart = %+v", got)
+	}
+	if got := importPet("text/csv", "name\nRex\n"); got.TextBody.Value != "name\nRex\n" || got.Body.Set {
+		t.Errorf("csv = %+v", got)
+	}
+	if got := importPet("", ""); got.Body.Set || got.JSONBody.Set || got.MultipartBody.Set || got.TextBody.Set {
+		t.Errorf("no body = %+v", got)
+	}
+
+	// Each field validates against its own schema.
+	r := do(t, h, "POST", "/pets/import", "application/merge-patch+json", `{"name": ""}`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /name: length must be at least 1"}) {
 		t.Errorf("errors = %q", got)
 	}
 }

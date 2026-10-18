@@ -11,11 +11,21 @@
 - The `encoding` object of `multipart/form-data` bodies: a part declaring a
   content type outside `contentType` is a 400, as is a missing `required`
   part header. `oapi.File.Header` holds the part's headers.
+- Request bodies whose media types need different Go types: media types
+  that used to be answered with 415 because their schema differed from
+  the first one's are decoded into a field of their own (`FormBody`,
+  `MultipartBody`, `TextBody`, ...); `req.ContentType` says which arrived.
+  Media types with schemas written the same way share a type.
 
 ### Changed
 
 - Regenerate servers: multipart properties typed `string` or `any` because
   of a `contentMediaType` or a missing type become `oapi.File`.
+- Operations accepting media types with different schemas now accept all
+  of them instead of answering 415 for the later ones. Their handlers are
+  called with `req.Body` unset for those media types: check
+  `req.ContentType`. Structured media types the server cannot decode, such
+  as XML with an object schema, are still answered with 415.
 
 ## v0.3.1
 

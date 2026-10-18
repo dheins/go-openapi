@@ -310,6 +310,43 @@ paths:
       responses:
         "204":
           description: Stored.
+  /pets/import:
+    post:
+      operationId: importPet
+      description: Media types with different schemas.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+          text/csv:
+            schema:
+              type: string
+      responses:
+        "204":
+          description: Imported.
   /pets/form:
     post:
       operationId: submitForm

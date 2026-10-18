@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -120,15 +121,28 @@ type ParamProperty struct {
 	Headers []string
 }
 
-// Body is the JSON request body of an operation.
+// Body is the request body of an operation.
 type Body struct {
 	Required bool
-	// Media are the accepted media types, which share one Go type.
+	// Media are the accepted media types.
 	Media []*BodyMedia
 	Doc   string
-	// Value is the body's type, and Type the field type: Value, made
-	// optional if the body is not required.
+	// Value is the type of the first media type's body, and Type the type
+	// of the Body field: Value, made optional if the body is not required.
 	Value, Type *Ref
+	// Fields are the request fields bodies are decoded into: Body, then
+	// one per Go type other media types need, in document order.
+	Fields []*BodyField
+}
+
+// BodyField is a request field holding the body when it arrives as one
+// of the media types decoded into it.
+type BodyField struct {
+	Name string
+	// Value is the body's type, and Type the field type. Fields other
+	// than Body are always optional: only one of them is set.
+	Value, Type *Ref
+	Media       []*BodyMedia
 }
 
 // BodyMedia is one media type a request body accepts.
@@ -138,6 +152,8 @@ type BodyMedia struct {
 	Kind string
 	// Properties are the object properties, for form and multipart.
 	Properties []ParamProperty
+	// Field is the request field the body is decoded into.
+	Field *BodyField
 }
 
 // Response is one declared response, a variant the handler can return.
@@ -285,7 +301,7 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 	}
 
 	if rb := op.RequestBody.Deref(); rb != nil {
-		o.Body = b.body(o, op, rb)
+		o.Body = b.body(o, op, rb, fields)
 	}
 	var responses *oas.OrderedMap[*oas.Response]
 	if op.Responses != nil {
@@ -566,10 +582,16 @@ func structured(kind string) bool {
 	return kind == "json" || kind == "form" || kind == "multipart"
 }
 
-func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Body {
+func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fields namespace) *Body {
 	body := &Body{Required: rb.Required, Doc: strings.TrimSpace(rb.Description)}
-	var first *oas.Schema
-	var group string
+	// groups are the fields, keyed like their media types: text and binary
+	// bodies share one per kind, structured ones one per schema.
+	type group struct {
+		kind   string
+		schema *oas.Schema
+		field  *BodyField
+	}
+	var groups []*group
 	var rejected []string
 	for mt, m := range rb.Content.All() {
 		kind := mediaKind(mt)
@@ -586,18 +608,31 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Bo
 		if structured(kind) {
 			g = "structured"
 		}
+		i := slices.IndexFunc(groups, func(gr *group) bool {
+			return gr.kind == g && (g != "structured" || sameSchema(gr.schema, deref(schema)))
+		})
+		var field *BodyField
 		switch {
-		case body.Value == nil:
-			group, first = g, deref(schema)
-			body.Value = b.bodyValue(o, kind, schema)
-		case g != group || (g == "structured" && deref(schema) != first):
-			b.warnAt(m, nil, fmt.Sprintf("request body type %s cannot share a Go type with the operation's first media type and is answered with 415", mt))
+		case i >= 0:
+			field = groups[i].field
+		case len(groups) > 0 && kind == "binary" && !opaque(deref(schema)):
+			// Handing over bytes a schema describes but nothing checked,
+			// such as XML, would surprise handlers written for Body.
+			b.warnAt(m, nil, fmt.Sprintf("request bodies of type %s are not decoded from their schema yet and are answered with 415", mt))
 			rejected = append(rejected, mt)
 			continue
+		default:
+			field = &BodyField{Name: "Body"}
+			hint := o.Name + "RequestBody"
+			if len(groups) > 0 {
+				field.Name = bodyFieldName(fields, kind, mt)
+				hint = o.Name + strings.TrimSuffix(field.Name, "Body") + "RequestBody"
+			}
+			field.Value = b.bodyValue(kind, schema, hint)
 		}
-		media := &BodyMedia{MediaType: mt, Kind: kind}
+		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field}
 		if kind == "form" || kind == "multipart" {
-			props, ok := objectProperties(body.Value, kind == "multipart")
+			props, ok := objectProperties(field.Value, kind == "multipart")
 			if !ok {
 				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects of primitive values or arrays of them; %s is answered with 415", kind, mt))
 				rejected = append(rejected, mt)
@@ -608,17 +643,59 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Bo
 			}
 			media.Properties = props
 		}
+		if i < 0 {
+			if len(groups) > 0 {
+				field.Name = fields.claim(field.Name)
+			}
+			groups = append(groups, &group{kind: g, schema: deref(schema), field: field})
+			body.Fields = append(body.Fields, field)
+		}
+		field.Media = append(field.Media, media)
 		body.Media = append(body.Media, media)
 	}
 	if len(body.Media) == 0 {
 		b.unsupported(o, op.RequestBody, fmt.Sprintf("request bodies of type %s are not supported yet", strings.Join(rejected, ", ")))
 		return nil
 	}
-	body.Type = body.Value
-	if !body.Required {
-		body.Type = b.optional(body.Value)
+	for i, f := range body.Fields {
+		f.Type = f.Value
+		if i > 0 || !body.Required {
+			f.Type = b.optional(f.Value)
+		}
 	}
+	body.Value, body.Type = body.Fields[0].Value, body.Fields[0].Type
 	return body
+}
+
+// opaque reports whether a binary body's schema leaves its bytes
+// undescribed: no schema, or a string.
+func opaque(s *oas.Schema) bool {
+	if s == nil || s.Bool != nil {
+		return true
+	}
+	types, _ := splitTypes(s)
+	if len(types) == 0 {
+		return inferType(s) == "" || inferType(s) == "string"
+	}
+	return slices.Equal(types, []string{"string"})
+}
+
+// sameSchema reports whether two body schemas are the same or written
+// the same way, so that they can share a Go type.
+func sameSchema(a, b *oas.Schema) bool {
+	return a == b || a != nil && b != nil && reflect.DeepEqual(*a, *b)
+}
+
+// bodyFieldName names the request field for bodies of a media type that
+// cannot be decoded into Body: after its kind, or after the media type if
+// another field has that name. The caller claims it once the field is used.
+func bodyFieldName(fields namespace, kind, mediaType string) string {
+	name := map[string]string{"json": "JSON", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary"}[kind] + "Body"
+	if fields[name] {
+		mt, _, _ := strings.Cut(mediaType, ";")
+		name = GoName(mt) + "Body"
+	}
+	return name
 }
 
 // partEncodings applies the encoding object of a multipart media type to
@@ -734,7 +811,7 @@ func isFilePart(s *oas.Schema) bool {
 
 // bodyValue returns the Go type of a body of the given kind: the schema's
 // type for structured bodies, a string for text and bytes for binary.
-func (b *builder) bodyValue(o *Operation, kind string, schema *oas.Schema) *Ref {
+func (b *builder) bodyValue(kind string, schema *oas.Schema, hint string) *Ref {
 	switch kind {
 	case "text":
 		if s := deref(schema); s != nil && slices.Equal([]string(s.Type), []string{"string"}) {
@@ -744,7 +821,7 @@ func (b *builder) bodyValue(o *Operation, kind string, schema *oas.Schema) *Ref 
 	case "binary":
 		return &Ref{Kind: Builtin, Name: "[]byte"}
 	}
-	return b.use(schema, o.Name+"RequestBody", nil)
+	return b.use(schema, hint, nil)
 }
 
 func (b *builder) response(o *Operation, status string, resp *oas.Response) []*Response {
@@ -782,7 +859,7 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			}
 			suffix = "JSON"
 		case "text":
-			v.Body = b.bodyValue(o, kind, media.Schema)
+			v.Body = b.bodyValue(kind, media.Schema, "")
 			suffix = "Text"
 		case "binary":
 			v.Body = &Ref{Kind: Builtin, Name: "[]byte"}

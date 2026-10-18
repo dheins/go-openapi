@@ -30,6 +30,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "getPhoto", Name: "GetPhoto", Method: "GET", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleGetPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadPhoto", Name: "UploadPhoto", Method: "PUT", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleUploadPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadRecords", Name: "UploadRecords", Method: "POST", Path: "/pets/{petId}/records"}, "/pets/{p0}/records", api.HandleUploadRecords(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "importPet", Name: "ImportPet", Method: "POST", Path: "/pets/import"}, "/pets/import", api.HandleImportPet(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "submitForm", Name: "SubmitForm", Method: "POST", Path: "/pets/form"}, "/pets/form", api.HandleSubmitForm(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "shout", Name: "Shout", Method: "POST", Path: "/notes"}, "/notes", api.HandleShout(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "exportPets", Name: "ExportPets", Method: "GET", Path: "/export"}, "/export", api.HandleExportPets(cfg, h, sec))

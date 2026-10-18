@@ -1,4 +1,4 @@
-70:13: request body type application/xml cannot share a Go type with the operation's first media type and is answered with 415
+70:13: request bodies of type application/xml are not decoded from their schema yet and are answered with 415
 305:21: the value of part header "X-Checksum" is not checked yet, only its presence
-371:13: multipart bodies must be objects of primitive values or arrays of them; multipart/form-data is answered with 415
-369:9: request bodies of type multipart/form-data are not supported yet; the operation is answered with 501 Not Implemented
+408:13: multipart bodies must be objects of primitive values or arrays of them; multipart/form-data is answered with 415
+406:9: request bodies of type multipart/form-data are not supported yet; the operation is answered with 501 Not Implemented

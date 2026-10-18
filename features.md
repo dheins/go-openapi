@@ -38,8 +38,6 @@ shipped in.
 - Form and multipart bodies, object parameters and `querystring` whose
   properties are nested objects; free-form (`additionalProperties`) form
   bodies. — later
-- Request bodies whose media types use different schemas (only the first
-  schema's media types are accepted; the rest get 415). — later
 - Header parameters and response headers with `content`. — later
 - Security scheme names written as URI references (3.2). Operations using
   them are answered with 501. — later
@@ -70,6 +68,10 @@ Unreleased:
 - [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
   schema without a type) and the multipart `encoding` object: per-part
   content types and required part headers, exposed as `oapi.File.Header`.
+  (6e89155)
+- [x] Request bodies whose media types use different schemas: each Go type
+  gets its own request field next to `Body`; equal inline schemas share
+  one.
 
 v0.3.1:
 
