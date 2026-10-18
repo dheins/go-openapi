@@ -150,6 +150,11 @@ func (s *store) ImportPet(_ context.Context, req *api.ImportPetRequest) (api.Imp
 	return api.ImportPet204Response{}, nil
 }
 
+func (s *store) Upload(_ context.Context, req *api.UploadRequest) (api.UploadResponse, error) {
+	s.seen["Upload"] = req
+	return api.Upload204Response{}, nil
+}
+
 func (s *store) GetPhoto(_ context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {
 	if req.PetID == 2 {
 		return api.GetPhoto200ImageResponse{ContentType: "text/plain", Body: []byte("oops")}, nil
@@ -705,6 +710,48 @@ func TestBodiesWithDifferentSchemas(t *testing.T) {
 	}
 }
 
+func TestNestedFields(t *testing.T) {
+	s, h := newTestServer()
+	// A form body, a deepObject parameter and a form querystring write
+	// nested objects and maps with brackets.
+	if r := do(t, h, "POST", "/pets/form", "application/x-www-form-urlencoded", "role=admin&owner[name]=Ann&owner[age]=40&labels[a]=1&labels[b]=2"); r.status != 204 {
+		t.Fatalf("form: %d %s", r.status, r.body)
+	}
+	got := s.seen["SubmitForm"].(*api.SubmitFormRequest).Body
+	if got.Owner.Value.Name.Value != "Ann" || got.Owner.Value.Age.Value != 40 || got.Labels.Value["b"] != 2 {
+		t.Errorf("form = %+v", got)
+	}
+	if r := do(t, h, "GET", "/reports/;ids=1?filter[role]=admin&filter[owner][age]=7&filter[labels][x]=3", "", ""); r.status != 204 {
+		t.Fatalf("deepObject: %d %s", r.status, r.body)
+	}
+	f := s.seen["GetReports"].(*api.GetReportsRequest).Filter.Value
+	if f.Owner.Value.Age.Value != 7 || f.Labels.Value["x"] != 3 {
+		t.Errorf("deepObject filter = %+v", f)
+	}
+	if r := do(t, h, "GET", "/lookup?role=user&owner[name]=Bo", "", ""); r.status != 204 {
+		t.Fatalf("querystring: %d %s", r.status, r.body)
+	}
+	if c := s.seen["Lookup"].(*api.LookupRequest).Criteria.Value; c.Owner.Value.Name.Value != "Bo" {
+		t.Errorf("querystring = %+v", c)
+	}
+
+	// Errors point into the nested value.
+	r := do(t, h, "POST", "/pets/form", "application/x-www-form-urlencoded", "role=admin&owner[age]=old&labels[a]=x")
+	want := []string{"body /labels/a: expected integer, got string", "body /owner/age: expected integer, got string"}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+
+	// A free-form multipart body keeps every field.
+	ct, body := recordsBody(t, part("a", "", ""), []byte("1"), part("b", "", ""), []byte("x"))
+	if r := do(t, h, "POST", "/upload", ct, body); r.status != 204 {
+		t.Fatalf("upload: %d %s", r.status, r.body)
+	}
+	if got := s.seen["Upload"].(*api.UploadRequest).Body.Value; got["a"] != "1" || got["b"] != "x" {
+		t.Errorf("upload = %v", got)
+	}
+}
+
 func TestFormAndJSONBodies(t *testing.T) {
 	s, h := newTestServer()
 	if r := do(t, h, "POST", "/pets/form", "application/x-www-form-urlencoded", "role=admin&age=3&tags=a&tags=b"); r.status != 204 {
@@ -787,10 +834,6 @@ func TestQueryMethodWithOptionalBody(t *testing.T) {
 
 func TestUnsupportedAndMisbehavingOperations(t *testing.T) {
 	_, h := newTestServer()
-	r := do(t, h, "POST", "/upload", "multipart/form-data", "")
-	if r.status != 501 || !strings.Contains(r.body, "multipart/form-data") {
-		t.Errorf("upload: %d %s", r.status, r.body)
-	}
 	// Secure returns neither a response nor an error.
 	if r := do(t, h, "GET", "/secure", "", "", "X-API-Key", "good"); r.status != 500 {
 		t.Errorf("nil response: %d %s", r.status, r.body)

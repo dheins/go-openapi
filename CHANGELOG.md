@@ -16,6 +16,12 @@
   the first one's are decoded into a field of their own (`FormBody`,
   `MultipartBody`, `TextBody`, ...); `req.ContentType` says which arrived.
   Media types with schemas written the same way share a type.
+- Nested objects and maps (`additionalProperties`) in form and multipart
+  bodies, object parameters and form `querystring` parameters, written
+  with brackets (`?filter[owner][name]=Ann`) or, for an object sent as one
+  value, as JSON. Arrays may also be written `a[]=1` or `a[0]=1`.
+  Operations with such bodies or parameters used to be answered with 501
+  or 415.
 
 ### Changed
 
@@ -26,6 +32,11 @@
   called with `req.Body` unset for those media types: check
   `req.ContentType`. Structured media types the server cannot decode, such
   as XML with an object schema, are still answered with 415.
+- `server.ObjectJSON`, `server.DecodeFields` and `server.DecodeMultipart`
+  take the object's `server.Property` (with `Properties` and `Additional`)
+  instead of a map of properties; regenerated servers pass it. In form
+  fields, an undeclared key with brackets such as `a[b]` is now the
+  nested property `b` of `a`.
 
 ## v0.3.1
 

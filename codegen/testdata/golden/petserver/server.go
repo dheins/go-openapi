@@ -35,7 +35,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "shout", Name: "Shout", Method: "POST", Path: "/notes"}, "/notes", api.HandleShout(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "exportPets", Name: "ExportPets", Method: "GET", Path: "/export"}, "/export", api.HandleExportPets(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "watch", Name: "Watch", Method: "GET", Path: "/events"}, "/events", api.HandleWatch(cfg, h, sec))
-	cfg.Handle(server.Operation{ID: "upload", Name: "Upload", Method: "POST", Path: "/upload"}, "/upload", server.NotImplemented("request bodies of type multipart/form-data are not supported yet"))
+	cfg.Handle(server.Operation{ID: "upload", Name: "Upload", Method: "POST", Path: "/upload"}, "/upload", api.HandleUpload(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "admin", Name: "Admin", Method: "GET", Path: "/admin"}, "/admin", api.HandleAdmin(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "secure", Name: "Secure", Method: "GET", Path: "/secure"}, "/secure", api.HandleSecure(cfg, h, sec))
 	cfg.ServeDocument(openAPIDocument)

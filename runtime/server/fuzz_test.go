@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -61,7 +62,30 @@ func FuzzMultipart(f *testing.F) {
 			Name  string `json:"name"`
 			Photo []byte `json:"photo"`
 		}
-		props := map[string]Property{"name": {Type: "string"}, "photo": {Type: "file"}}
+		props := Property{Type: "object", Properties: map[string]Property{"name": {Type: "string"}, "photo": {Type: "file"}}}
 		_, _ = DecodeMultipart[upload](bytes.Clone(body), "multipart/form-data; boundary="+boundary, props)
+	})
+}
+
+// FuzzObjectJSON checks that converting fields with bracketed keys never
+// panics and only produces valid JSON.
+func FuzzObjectJSON(f *testing.F) {
+	f.Add("owner[age]=3&owner[name]=Ann&ids[]=1&ids[1]=2&meta[x][y]=z")
+	f.Add("a[b]=1&owner=%7B%22age%22%3A1%7D&x[=1&[c]=3")
+	obj := Property{Type: "object", Properties: map[string]Property{
+		"owner": {Type: "object", Properties: map[string]Property{"age": {Type: "integer"}}},
+		"ids":   {Type: "integer", Array: true},
+		"meta":  {Type: "object", Additional: &Property{Type: "any"}},
+		"a[b]":  {Type: "string"},
+	}}
+	f.Fuzz(func(t *testing.T, query string) {
+		q, err := url.ParseQuery(query)
+		if err != nil {
+			return
+		}
+		data, err := ObjectJSON(q, obj)
+		if err == nil && !json.Valid(data) {
+			t.Fatalf("invalid JSON %s for %q", data, query)
+		}
 	})
 }

@@ -35,9 +35,8 @@ shipped in.
 - Checking the values of multipart part headers against their schemas
   (only `required` is checked), and `contentEncoding` (`[]byte`) parts.
   — later
-- Form and multipart bodies, object parameters and `querystring` whose
-  properties are nested objects; free-form (`additionalProperties`) form
-  bodies. — later
+- Arrays of objects and recursive types in form and multipart bodies and
+  object parameters (nested objects and maps are supported). — later
 - Header parameters and response headers with `content`. — later
 - Security scheme names written as URI references (3.2). Operations using
   them are answered with 501. — later
@@ -71,7 +70,10 @@ Unreleased:
   (6e89155)
 - [x] Request bodies whose media types use different schemas: each Go type
   gets its own request field next to `Body`; equal inline schemas share
-  one.
+  one. (e681e03)
+- [x] Nested objects and free-form (`additionalProperties`) objects in form
+  and multipart bodies, object parameters and form `querystring`, written
+  with brackets (`a[b][c]=v`) or as JSON.
 
 v0.3.1:
 

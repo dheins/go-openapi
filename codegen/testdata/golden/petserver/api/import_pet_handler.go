@@ -12,9 +12,9 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var importPetFormProperties = map[string]server.Property{"name": {Type: "string", Array: false}}
+var importPetFormProperties = server.Property{Type: "object", Properties: map[string]server.Property{"name": {Type: "string"}}}
 
-var importPetMultipartProperties = map[string]server.Property{"photo": {Type: "file", Array: false}}
+var importPetMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"photo": {Type: "file"}}}
 
 // HandleImportPet returns the HTTP handler of ImportPet.
 //

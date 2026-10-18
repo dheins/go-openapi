@@ -14,7 +14,7 @@ import (
 
 var uploadRecordsPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: false, Shape: server.Scalar}
 
-var uploadRecordsMultipartProperties = map[string]server.Property{"report": {Type: "file", Array: false, ContentTypes: []string{"application/pdf"}, Headers: []string{"X-Checksum"}}, "scans": {Type: "file", Array: true, ContentTypes: []string{"image/png", "image/jpeg"}}, "attachment": {Type: "file", Array: false}}
+var uploadRecordsMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"report": {Type: "file", ContentTypes: []string{"application/pdf"}, Headers: []string{"X-Checksum"}}, "scans": {Type: "file", Array: true, ContentTypes: []string{"image/png", "image/jpeg"}}, "attachment": {Type: "file"}}}
 
 // HandleUploadRecords returns the HTTP handler of UploadRecords.
 //

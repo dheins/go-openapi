@@ -14,7 +14,7 @@ import (
 
 var uploadPhotoPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: false, Shape: server.Scalar}
 
-var uploadPhotoMultipartProperties = map[string]server.Property{"caption": {Type: "string", Array: false}, "photo": {Type: "file", Array: false}}
+var uploadPhotoMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"caption": {Type: "string"}, "photo": {Type: "file"}}}
 
 // HandleUploadPhoto returns the HTTP handler of UploadPhoto.
 //

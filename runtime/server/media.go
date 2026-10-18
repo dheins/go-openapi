@@ -35,7 +35,7 @@ func FormFields(body []byte) (map[string][]string, error) {
 // Optional[File], *File, []File or Optional[[]File]) with the matching
 // JSON name. A part must have one of its property's ContentTypes, if it
 // declares a content type, and carry its Headers.
-func DecodeMultipart[T any](body []byte, contentType string, props map[string]Property) (T, error) {
+func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, error) {
 	var v T
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil || params["boundary"] == "" {
@@ -61,7 +61,7 @@ func DecodeMultipart[T any](body []byte, contentType string, props map[string]Pr
 		if err != nil {
 			return v, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
 		}
-		prop := props[name]
+		prop := obj.Properties[name]
 		if msg := checkPart(part.Header, prop); msg != "" {
 			errs.Add(oapi.Field("", name), msg)
 			continue
@@ -78,7 +78,7 @@ func DecodeMultipart[T any](body []byte, contentType string, props map[string]Pr
 	if err := errs.Err(); err != nil {
 		return v, err
 	}
-	data, err := ObjectJSON(fields, props)
+	data, err := ObjectJSON(fields, obj)
 	if err != nil {
 		return v, err
 	}

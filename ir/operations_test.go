@@ -74,7 +74,7 @@ paths:
       operationId: replaceItem
       security: [{}]
       parameters:
-        - {name: filter, in: query, style: deepObject, schema: {type: object}}
+        - {name: filter, in: query, schema: {type: array, items: {type: object}}}
       responses:
         "204": {description: ok}
   /a/{x}/b:
@@ -121,7 +121,7 @@ components:
 	}
 
 	if put := operationNamed(t, m, "ReplaceItem"); !strings.Contains(put.Unsupported, "not a primitive value, an array of them, or an object of them") {
-		t.Errorf("deepObject with a free-form object: %q", put.Unsupported)
+		t.Errorf("array of objects: %q", put.Unsupported)
 	}
 	if second := operationNamed(t, m, "Second"); !strings.Contains(second.Unsupported, "conflicts") || second.Pattern != "" {
 		t.Errorf("conflicting route: %+v", second)
@@ -229,7 +229,7 @@ components:
 		t.Errorf("params:\n%s\nwant\n%s", strings.Join(got, " "), want)
 	}
 	filter := styles.Params[1]
-	if fmt.Sprint(filter.Properties) != "[{role string false [] []} {age integer false [] []} {tags string true [] []}]" {
+	if fmt.Sprint(filter.Properties) != "[{role string false [] <nil> [] []} {age integer false [] <nil> [] []} {tags string true [] <nil> [] []}]" {
 		t.Errorf("properties = %v", filter.Properties)
 	}
 	if !styles.Params[3].AllowEmptyValue {
@@ -295,7 +295,7 @@ components:
 	if strings.Join(fields, " ") != "Body:2 TextBody:1" || o.Body.Fields[1].Type.Kind != Optional {
 		t.Errorf("body fields = %v", fields)
 	}
-	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] []} {photo file false [] []} {tags string true [] []}]" {
+	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] <nil> [] []} {photo file false [] <nil> [] []} {tags string true [] <nil> [] []}]" {
 		t.Errorf("multipart properties = %s", props)
 	}
 	var warnings []string
@@ -398,7 +398,7 @@ components:
         pdf: {type: string, contentMediaType: application/pdf}
 `, Options{Operations: true})
 	props := operationNamed(t, m, "Upload").Body.Media[0].Properties
-	if got := fmt.Sprint(props); got != "[{pdf file false [application/pdf] [X-Sum]} {untyped file false [] []} {anything file false [] []} {scans file true [] []} {caption string false [] []}]" {
+	if got := fmt.Sprint(props); got != "[{pdf file false [] <nil> [application/pdf] [X-Sum]} {untyped file false [] <nil> [] []} {anything file false [] <nil> [] []} {scans file true [] <nil> [] []} {caption string false [] <nil> [] []}]" {
 		t.Errorf("multipart properties = %s", got)
 	}
 	// Outside multipart, a contentMediaType string holds text.
@@ -443,5 +443,58 @@ paths:
 	}
 	if o.Body.Fields[0].Type.Kind == Optional || o.Body.Fields[1].Type.Kind != Optional {
 		t.Errorf("Body should be required and the others optional: %+v", o.Body.Fields)
+	}
+}
+
+func TestNestedObjectParameters(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /deep:
+    get:
+      operationId: deep
+      parameters:
+        - {name: f, in: query, style: deepObject, explode: true, schema: {$ref: "#/components/schemas/Filter"}}
+        - {name: m, in: query, style: deepObject, explode: true, schema: {type: object, additionalProperties: {type: integer}}}
+      responses: {"204": {description: ok}}
+  /exploded:
+    get:
+      operationId: exploded
+      parameters:
+        - {name: m, in: query, schema: {type: object, additionalProperties: {type: string}}}
+      responses: {"204": {description: ok}}
+  /recursive:
+    get:
+      operationId: recursive
+      parameters:
+        - {name: n, in: query, style: deepObject, explode: true, schema: {$ref: "#/components/schemas/Node"}}
+      responses: {"204": {description: ok}}
+components:
+  schemas:
+    Filter:
+      type: object
+      properties:
+        owner: {type: object, properties: {age: {type: integer}}}
+        any: {}
+    Node:
+      type: object
+      properties:
+        child: {$ref: "#/components/schemas/Node"}
+`, Options{Operations: true})
+	deep := operationNamed(t, m, "Deep")
+	if deep.Unsupported != "" {
+		t.Fatalf("deep: %s", deep.Unsupported)
+	}
+	if got := fmt.Sprint(deep.Params[0].Properties); got != "[{owner object false [{age integer false [] <nil> [] []}] <nil> [] []} {any any false [] <nil> [] []}]" {
+		t.Errorf("nested properties = %s", got)
+	}
+	if a := deep.Params[1].Additional; a == nil || a.Type != "integer" {
+		t.Errorf("map additional = %+v", a)
+	}
+	if o := operationNamed(t, m, "Exploded"); !strings.Contains(o.Unsupported, "cannot use the exploded form style") {
+		t.Errorf("exploded map: %q", o.Unsupported)
+	}
+	if o := operationNamed(t, m, "Recursive"); !strings.Contains(o.Unsupported, "not a primitive value") {
+		t.Errorf("recursive: %q", o.Unsupported)
 	}
 }

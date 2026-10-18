@@ -93,10 +93,11 @@ type Param struct {
 	Style   string
 	Explode bool
 	Content string
-	// Array and Object give the shape of the value; an object's
-	// Properties are primitive values or arrays of them.
+	// Array and Object give the shape of the value; an object has
+	// Properties, and Additional gives the type of any others.
 	Array, Object   bool
 	Properties      []ParamProperty
+	Additional      *ParamProperty
 	AllowEmptyValue bool
 	// Elem is the type of the value, or of each item for an array.
 	Elem *Ref
@@ -108,12 +109,16 @@ type Param struct {
 	Default string
 }
 
-// ParamProperty is a property of an object parameter: its JSON Schema
-// type, and whether it is an array of that type.
+// ParamProperty is a property of an object parameter or form body: its
+// JSON Schema type ("any" for a value of any type), and whether it is an
+// array of that type. An object (type "object") has Properties, and
+// Additional gives the type of any others.
 type ParamProperty struct {
-	Name  string
-	Type  string
-	Array bool
+	Name       string
+	Type       string
+	Array      bool
+	Properties []ParamProperty
+	Additional *ParamProperty
 	// ContentTypes are the media types (or ranges) a multipart part may
 	// declare, from its encoding; empty allows any.
 	ContentTypes []string
@@ -150,8 +155,10 @@ type BodyMedia struct {
 	MediaType string
 	// Kind is json, form, multipart, text or binary.
 	Kind string
-	// Properties are the object properties, for form and multipart.
+	// Properties are the object properties, for form and multipart, and
+	// Additional the type of any others.
 	Properties []ParamProperty
+	Additional *ParamProperty
 	// Field is the request field the body is decoded into.
 	Field *BodyField
 }
@@ -372,7 +379,7 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 		param.Elem = ref
 		if formQuery {
 			if !b.objectParam(param, ref) {
-				return nil, fmt.Sprintf("querystring parameter %q must be an object of primitive values or arrays of them", p.Name)
+				return nil, fmt.Sprintf("querystring parameter %q must be an object of primitive values, arrays of them or objects of them", p.Name)
 			}
 		}
 	} else {
@@ -403,6 +410,11 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 		}
 		if why := checkStyle(param); why != "" {
 			return nil, why
+		}
+		if param.Additional != nil && param.Explode && param.Style == "form" {
+			// Each property is a parameter of its own, so the names of
+			// others are not known.
+			return nil, fmt.Sprintf("parameter %q: an object with additional properties cannot use the exploded form style; use deepObject or explode: false", p.Name)
 		}
 	}
 
@@ -450,45 +462,87 @@ func checkStyle(p *Param) string {
 	return ""
 }
 
-// objectParam reports whether ref is an object whose properties are
-// primitive values or arrays of them, and if so records them on p.
+// objectParam reports whether ref is an object an object parameter can
+// carry (see objectProperties), and if so records its properties on p.
 func (b *builder) objectParam(p *Param, ref *Ref) bool {
-	props, ok := objectProperties(ref, false)
+	props, additional, ok := objectProperties(ref, false)
 	if ok {
-		p.Object, p.Properties = true, props
+		p.Object, p.Properties, p.Additional = true, props, additional
 	}
 	return ok
 }
 
-// objectProperties returns the properties of an object whose properties
-// are primitive values or arrays of them; with files, oapi.File values
-// (type "file") are allowed too.
-func objectProperties(ref *Ref, files bool) ([]ParamProperty, bool) {
+// objectProperties returns the properties of an object whose values are
+// primitive values, arrays of them, or such objects in turn, and the type
+// of its additional properties if it allows typed ones. With files,
+// oapi.File values (type "file") are allowed at the top level too.
+// Recursive types and arrays of objects cannot be written as fields.
+func objectProperties(ref *Ref, files bool) ([]ParamProperty, *ParamProperty, bool) {
+	return objectShape(ref, files, map[*Type]bool{})
+}
+
+func objectShape(ref *Ref, files bool, seen map[*Type]bool) ([]ParamProperty, *ParamProperty, bool) {
 	for ref.Kind == Named && ref.Type.Kind == Alias {
 		ref = ref.Type.Underlying
 	}
-	if ref.Kind != Named || ref.Type.Kind != Struct {
-		return nil, false
+	switch {
+	case ref.Kind == Map:
+		additional, ok := valueShape(ref.Elem, false, seen)
+		return nil, &additional, ok
+	case ref.Kind != Named || ref.Type.Kind != Struct || seen[ref.Type]:
+		return nil, nil, false
 	}
+	t := ref.Type
+	seen[t] = true
+	defer delete(seen, t)
 	var props []ParamProperty
-	for _, f := range ref.Type.Fields {
-		r := f.Type
-		for r.Kind == Optional || r.Kind == Nullable || r.Kind == Pointer {
-			r = r.Elem
+	for _, f := range t.Fields {
+		prop, ok := valueShape(f.Type, files, seen)
+		if !ok {
+			return nil, nil, false
 		}
-		prop := ParamProperty{Name: f.JSONName}
-		if r.Kind == Slice {
-			prop.Array = true
-			r = stripNullable(r.Elem)
-		}
-		if files && isFile(r) {
-			prop.Type = "file"
-		} else if prop.Type = jsonType(r); prop.Type == "" {
-			return nil, false
-		}
+		prop.Name = f.JSONName
 		props = append(props, prop)
 	}
-	return props, true
+	var additional *ParamProperty
+	if a := t.Additional; a != nil && !a.Forbidden && a.Value != nil {
+		shape, ok := valueShape(a.Value, false, seen)
+		if !ok {
+			return nil, nil, false
+		}
+		additional = &shape
+	}
+	return props, additional, true
+}
+
+// valueShape describes a property value of type r, or reports that it
+// cannot be written as fields.
+func valueShape(r *Ref, files bool, seen map[*Type]bool) (ParamProperty, bool) {
+	for r.Kind == Optional || r.Kind == Nullable || r.Kind == Pointer {
+		r = r.Elem
+	}
+	var prop ParamProperty
+	if r.Kind == Slice {
+		prop.Array = true
+		r = stripNullable(r.Elem)
+	}
+	switch {
+	case files && isFile(r):
+		prop.Type = "file"
+	case jsonType(r) != "":
+		prop.Type = jsonType(r)
+	case r.Kind == Any:
+		prop.Type = "any"
+	case prop.Array:
+		return prop, false
+	default:
+		props, additional, ok := objectShape(r, false, seen)
+		if !ok {
+			return prop, false
+		}
+		prop.Type, prop.Properties, prop.Additional = "object", props, additional
+	}
+	return prop, true
 }
 
 // isFile reports whether r is oapi.File or an alias of it.
@@ -632,16 +686,16 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 		}
 		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field}
 		if kind == "form" || kind == "multipart" {
-			props, ok := objectProperties(field.Value, kind == "multipart")
+			props, additional, ok := objectProperties(field.Value, kind == "multipart")
 			if !ok {
-				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects of primitive values or arrays of them; %s is answered with 415", kind, mt))
+				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects of primitive values, arrays of them or objects of them; %s is answered with 415", kind, mt))
 				rejected = append(rejected, mt)
 				continue
 			}
 			if kind == "multipart" {
 				b.partEncodings(m.Deref(), props)
 			}
-			media.Properties = props
+			media.Properties, media.Additional = props, additional
 		}
 		if i < 0 {
 			if len(groups) > 0 {

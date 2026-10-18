@@ -56,6 +56,8 @@ type Handler interface {
 	ExportPets(ctx context.Context, req *ExportPetsRequest) (ExportPetsResponse, error)
 	// Watch handles GET /events.
 	Watch(ctx context.Context, req *WatchRequest) (WatchResponse, error)
+	// Upload handles POST /upload.
+	Upload(ctx context.Context, req *UploadRequest) (UploadResponse, error)
 	// Admin handles GET /admin.
 	Admin(ctx context.Context, req *AdminRequest) (AdminResponse, error)
 	// Secure handles GET /secure.

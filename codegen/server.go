@@ -453,7 +453,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			validate(4)
 			w(3, "}")
 		case "form", "multipart":
-			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", propertyMap(m.Properties))
+			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional))
 			if m.Kind == "form" {
 				w(3, "if fields, err := server.FormFields(body); err != nil {")
 				w(4, "b.Body(err)")
@@ -477,22 +477,37 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 	w(1, "}")
 }
 
-// propertyMap renders the property types of an object for server.Property.
-func propertyMap(props []ir.ParamProperty) string {
+// objectProperty renders an object with the given properties, and type
+// of additional ones, as a server.Property.
+func objectProperty(props []ir.ParamProperty, additional *ir.ParamProperty) string {
+	return "server.Property" + propertyFields(ir.ParamProperty{Type: "object", Properties: props, Additional: additional})
+}
+
+// propertyFields renders the braced fields of a server.Property literal.
+func propertyFields(prop ir.ParamProperty) string {
 	var b strings.Builder
-	b.WriteString("map[string]server.Property{")
-	for i, prop := range props {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%q: {Type: %q, Array: %t", prop.Name, prop.Type, prop.Array)
-		if len(prop.ContentTypes) > 0 {
-			fmt.Fprintf(&b, ", ContentTypes: %s", stringSlice(prop.ContentTypes))
-		}
-		if len(prop.Headers) > 0 {
-			fmt.Fprintf(&b, ", Headers: %s", stringSlice(prop.Headers))
+	fmt.Fprintf(&b, "{Type: %q", prop.Type)
+	if prop.Array {
+		b.WriteString(", Array: true")
+	}
+	if prop.Type == "object" && len(prop.Properties) > 0 {
+		b.WriteString(", Properties: map[string]server.Property{")
+		for i, p := range prop.Properties {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q: %s", p.Name, propertyFields(p))
 		}
 		b.WriteString("}")
+	}
+	if prop.Additional != nil {
+		fmt.Fprintf(&b, ", Additional: &server.Property%s", propertyFields(*prop.Additional))
+	}
+	if len(prop.ContentTypes) > 0 {
+		fmt.Fprintf(&b, ", ContentTypes: %s", stringSlice(prop.ContentTypes))
+	}
+	if len(prop.Headers) > 0 {
+		fmt.Fprintf(&b, ", Headers: %s", stringSlice(prop.Headers))
 	}
 	b.WriteString("}")
 	return b.String()
@@ -600,7 +615,7 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 
 // propertiesVar declares the property types of an object parameter.
 func (f *fileGen) propertiesVar(o *ir.Operation, p *ir.Param) string {
-	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", propertyMap(p.Properties))
+	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", objectProperty(p.Properties, p.Additional))
 }
 
 // bindValue writes the branches that record a parse error or store and

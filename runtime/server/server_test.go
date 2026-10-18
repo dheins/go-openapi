@@ -56,7 +56,7 @@ func TestPathStyles(t *testing.T) {
 }
 
 func TestQueryStyles(t *testing.T) {
-	q, _ := url.ParseQuery("ids=1,2&ids=3&one=a,b&sp=a%20b&pp=a|b&f[role]=admin&f[age]=3&role=user&age=4&rep=1&rep=2")
+	q, _ := url.ParseQuery("ids=1,2&ids=3&one=a,b&sp=a%20b&pp=a|b&f[role]=admin&f[age]=3&f[owner][name]=Ann&role=user&age=4&rep=1&rep=2")
 	tests := []struct {
 		p    Param
 		want Values
@@ -66,7 +66,7 @@ func TestQueryStyles(t *testing.T) {
 		{Param{Name: "one", Style: "form", Shape: Array}, Values{Items: []string{"a", "b"}}},
 		{Param{Name: "sp", Style: "spaceDelimited", Shape: Array}, Values{Items: []string{"a", "b"}}},
 		{Param{Name: "pp", Style: "pipeDelimited", Shape: Array}, Values{Items: []string{"a", "b"}}},
-		{Param{Name: "f", Style: "deepObject", Explode: true, Shape: Object}, Values{Fields: map[string][]string{"role": {"admin"}, "age": {"3"}}}},
+		{Param{Name: "f", Style: "deepObject", Explode: true, Shape: Object}, Values{Fields: map[string][]string{"role": {"admin"}, "age": {"3"}, "owner[name]": {"Ann"}}}},
 		{Param{Name: "x", Style: "form", Explode: true, Shape: Object, Properties: []string{"role", "age", "missing"}},
 			Values{Fields: map[string][]string{"role": {"user"}, "age": {"4"}}}},
 	}
@@ -141,16 +141,62 @@ func TestHeaderAndCookieStyles(t *testing.T) {
 func TestObjectJSON(t *testing.T) {
 	got, err := ObjectJSON(map[string][]string{
 		"age": {"3"}, "ratio": {"0.5"}, "ok": {"true"}, "bad": {"x"}, "tags": {"a", "b"}, "ids": {"1", "y"}, "extra": {"e"},
-	}, map[string]Property{
+	}, Property{Type: "object", Properties: map[string]Property{
 		"age": {Type: "integer"}, "ratio": {Type: "number"}, "ok": {Type: "boolean"}, "bad": {Type: "integer"},
 		"tags": {Type: "string", Array: true}, "ids": {Type: "integer", Array: true},
-	})
+	}})
 	want := `{"age":3,"bad":"x","extra":"e","ids":[1,"y"],"ok":true,"ratio":0.5,"tags":["a","b"]}`
 	if err != nil || string(got) != want {
 		t.Errorf("ObjectJSON = %s, %v\nwant %s", got, err, want)
 	}
-	if _, err := ObjectJSON(map[string][]string{"age": {"1", "2"}}, map[string]Property{"age": {Type: "integer"}}); err == nil {
+	if _, err := ObjectJSON(map[string][]string{"age": {"1", "2"}}, Property{Type: "object", Properties: map[string]Property{"age": {Type: "integer"}}}); err == nil {
 		t.Error("two values accepted for a scalar property")
+	}
+}
+
+func TestObjectJSONNested(t *testing.T) {
+	owner := Property{Type: "object", Properties: map[string]Property{"age": {Type: "integer"}}}
+	obj := Property{Type: "object", Properties: map[string]Property{
+		"owner": owner,
+		"ids":   {Type: "integer", Array: true},
+		"tags":  {Type: "string", Array: true},
+		"meta":  {Type: "object", Additional: &Property{Type: "integer"}},
+		"note":  owner,
+		"a[b]":  {Type: "string"},
+		"free":  {Type: "any"},
+	}}
+	tests := []struct {
+		query, want, err string
+	}{
+		{query: "owner[age]=3&owner[name]=Ann", want: `{"owner":{"age":3,"name":"Ann"}}`},
+		{query: "ids[]=1&ids[]=2&tags[1]=b&tags[0]=a", want: `{"ids":[1,2],"tags":["a","b"]}`},
+		{query: "meta[x]=1&meta[y]=z", want: `{"meta":{"x":1,"y":"z"}}`},
+		// An object given as one value is JSON; otherwise it stays a
+		// string for decoding to reject.
+		{query: `owner={"age":3}&note=x`, want: `{"note":"x","owner":{"age":3}}`},
+		// A declared name is taken literally; undeclared nesting is kept.
+		{query: "a[b]=1&free[x][y]=2&other[z]=3", want: `{"a[b]":"1","free":{"x":{"y":"2"}},"other":{"z":"3"}}`},
+		// Keys that are not bracket paths are names of their own.
+		{query: "x[=1&y[a]b=2&[c]=3", want: `{"[c]":"3","x[":"1","y[a]b":"2"}`},
+		{query: "owner=1&owner[age]=2", err: "/owner: both a value and nested properties"},
+		{query: "ids[a]=1", err: "/ids/a: expected an array item with an index"},
+		{query: "owner[age][x]=1", err: "/owner/age: expected a value, got nested properties"},
+	}
+	for _, tt := range tests {
+		q, err := url.ParseQuery(tt.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ObjectJSON(q, obj)
+		if tt.err != "" {
+			if err == nil || err.Error() != tt.err {
+				t.Errorf("%s: error %v, want %s", tt.query, err, tt.err)
+			}
+			continue
+		}
+		if err != nil || string(got) != tt.want {
+			t.Errorf("%s: %s, %v\nwant %s", tt.query, got, err, tt.want)
+		}
 	}
 }
 
@@ -466,7 +512,7 @@ func TestMultipart(t *testing.T) {
 		Age   oapi.Optional[int64]     `json:"age,omitzero"`
 		Photo oapi.Optional[oapi.File] `json:"photo,omitzero"`
 	}
-	props := map[string]Property{"name": {Type: "string"}, "age": {Type: "integer"}, "photo": {Type: "file"}}
+	props := Property{Type: "object", Properties: map[string]Property{"name": {Type: "string"}, "age": {Type: "integer"}, "photo": {Type: "file"}}}
 	got, err := DecodeMultipart[upload](body.Bytes(), mw.FormDataContentType(), props)
 	if err != nil {
 		t.Fatal(err)

@@ -333,6 +333,17 @@ location (form-encoded or JSON); `allowEmptyValue` (`?q=` is the empty
 string, or no items for an array; for numbers and booleans it means the
 parameter is not given); defaults.
 
+Objects in parameters, form bodies and multipart bodies may nest objects
+and maps (`additionalProperties`), written with brackets as `deepObject`
+does: `?filter[owner][name]=Ann`, `owner[age]=40&labels[a]=1` in a form.
+Arrays may repeat the key (`tags=a&tags=b`), or use `tags[]` or
+`tags[0]`. An object sent as one value (`owner={"age":40}`, or a multipart
+part) is read as JSON, the default content type of objects in form and
+multipart bodies. Recursive types and arrays of objects cannot be written
+this way and are not supported; nor are objects with additional properties
+in the exploded `form` style, which sends each property as a parameter of
+its own (use `deepObject` or `explode: false`).
+
 Supported request bodies: JSON (`application/json`, `*+json`),
 `application/x-www-form-urlencoded`, `multipart/form-data`, `text/*` (a
 string) and anything else as bytes. In a multipart body, a part is a file,

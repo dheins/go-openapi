@@ -465,6 +465,17 @@ components:
           type: array
           items:
             type: string
+        owner:
+          type: object
+          properties:
+            name:
+              type: string
+            age:
+              type: integer
+        labels:
+          type: object
+          additionalProperties:
+            type: integer
     Prefs:
       type: object
       properties:
