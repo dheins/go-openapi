@@ -48,6 +48,10 @@ type Handler interface {
 	//
 	// Media types with different schemas.
 	ImportPet(ctx context.Context, req *ImportPetRequest) (ImportPetResponse, error)
+	// GetCard handles GET /pets/{petId}/card.
+	GetCard(ctx context.Context, req *GetCardRequest) (GetCardResponse, error)
+	// PutCard handles PUT /pets/{petId}/card.
+	PutCard(ctx context.Context, req *PutCardRequest) (PutCardResponse, error)
 	// SubmitForm handles POST /pets/form.
 	SubmitForm(ctx context.Context, req *SubmitFormRequest) (SubmitFormResponse, error)
 	// Shout handles POST /notes.

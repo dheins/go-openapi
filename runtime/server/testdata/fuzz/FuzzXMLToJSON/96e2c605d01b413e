@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<p:pet xmlns:p=\"urn:pets\"><A0000 :=\"\"/></p:pet>")

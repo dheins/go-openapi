@@ -156,6 +156,22 @@ func (s *store) Upload(_ context.Context, req *api.UploadRequest) (api.UploadRes
 	return api.Upload204Response{}, nil
 }
 
+func (s *store) GetCard(ctx context.Context, req *api.GetCardRequest) (api.GetCardResponse, error) {
+	card := model.Card{ID: req.PetID, Name: "Rex", Nicknames: oapi.Some([]string{"T-Rex"}), Secret: oapi.Some("hidden"),
+		Vets: oapi.Some([]model.Vet{{Name: oapi.Some("Dr. Who"), Phone: oapi.Some("555")}}),
+		Note: oapi.Some(model.Note{Lang: oapi.Some("en"), Text: oapi.Some("likes <bones>")})}
+	r, _ := server.HTTPRequest(ctx)
+	if server.Negotiate(r, "application/json", "application/xml") == "application/xml" {
+		return api.GetCard200XMLResponse{Body: card}, nil
+	}
+	return api.GetCard200JSONResponse{Body: card}, nil
+}
+
+func (s *store) PutCard(_ context.Context, req *api.PutCardRequest) (api.PutCardResponse, error) {
+	s.seen["PutCard"] = req
+	return api.PutCard204Response{}, nil
+}
+
 func (s *store) GetPhoto(_ context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {
 	if req.PetID == 2 {
 		return api.GetPhoto200ImageResponse{ContentType: "text/plain", Body: []byte("oops")}, nil
@@ -435,9 +451,13 @@ func TestCreatePet(t *testing.T) {
 	if got := problemErrors(t, r); !slices.Equal(got, []string{"body: request body is required"}) {
 		t.Errorf("missing body = %q", got)
 	}
-	r = do(t, h, "POST", "/pets", "application/xml", "<pet/>")
-	if r.status != 415 {
+	// Without an xml name, the root element is named after the component.
+	if r := do(t, h, "POST", "/pets", "application/xml", "<Pet><name>Rex</name></Pet>"); r.status != 201 {
 		t.Errorf("xml body: %d %s", r.status, r.body)
+	}
+	r = do(t, h, "POST", "/pets", "application/xml", "<pet/>")
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body: expected element <Pet>, got <pet>"}) {
+		t.Errorf("xml root = %q", got)
 	}
 }
 
@@ -750,6 +770,59 @@ func TestNestedFields(t *testing.T) {
 	}
 	if got := s.seen["Upload"].(*api.UploadRequest).Body.Value; got["a"] != "1" || got["b"] != "x" {
 		t.Errorf("upload = %v", got)
+	}
+}
+
+func TestXMLBodies(t *testing.T) {
+	s, h := newTestServer()
+	doc := `<?xml version="1.0"?>
+<p:card xmlns:p="urn:example:pets" id="7">
+  <p:name>Rex</p:name>
+  <nicknames><nickname>T-Rex</nickname><nickname>Rexy</nickname></nicknames>
+  <vet phone="555">Dr. Who</vet>
+  <vet>Dr. No</vet>
+  <remark lang="en"><![CDATA[likes <bones>]]></remark>
+  <secret>s3</secret>
+</p:card>`
+	if r := do(t, h, "PUT", "/pets/7/card", "application/xml", doc); r.status != 204 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	got := s.seen["PutCard"].(*api.PutCardRequest).Body
+	if got.ID != 7 || got.Name != "Rex" || len(got.Nicknames.Value) != 2 || len(got.Vets.Value) != 2 ||
+		got.Vets.Value[0].Name.Value != "Dr. Who" || got.Vets.Value[0].Phone.Value != "555" ||
+		got.Note.Value.Text.Value != "likes <bones>" || got.Note.Value.Lang.Value != "en" || got.Secret.Value != "s3" {
+		t.Errorf("card = %+v", got)
+	}
+
+	// Problems point into the value, as for JSON.
+	r := do(t, h, "PUT", "/pets/7/card", "application/xml", `<p:card xmlns:p="urn:example:pets" id="x"><p:name></p:name><nicknames><x/></nicknames></p:card>`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /nicknames/0: expected element <nickname>, got <x>"}) {
+		t.Errorf("errors = %q", got)
+	}
+	r = do(t, h, "PUT", "/pets/7/card", "application/xml", `<p:card xmlns:p="urn:example:pets" id="x"><p:name></p:name></p:card>`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /id: expected integer, got string"}) {
+		t.Errorf("errors = %q", got)
+	}
+	r = do(t, h, "PUT", "/pets/7/card", "application/xml", `<p:card xmlns:p="urn:example:pets" id="7"><p:name></p:name></p:card>`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /name: length must be at least 1"}) {
+		t.Errorf("errors = %q", got)
+	}
+	r = do(t, h, "PUT", "/pets/7/card", "application/xml", `<card`)
+	if got := problemErrors(t, r); len(got) != 1 || !strings.HasPrefix(got[0], "body: invalid XML:") {
+		t.Errorf("errors = %q", got)
+	}
+
+	// Responses are negotiated; write-only properties are left out.
+	r = do(t, h, "GET", "/pets/7/card", "", "", "Accept", "application/xml")
+	want := `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
+		`<p:card xmlns:p="urn:example:pets" id="7"><p:name>Rex</p:name><nicknames><nickname>T-Rex</nickname></nicknames>` +
+		`<vet phone="555">Dr. Who</vet><remark lang="en"><![CDATA[likes <bones>]]></remark></p:card>`
+	if r.status != 200 || r.header.Get("Content-Type") != "application/xml" || r.body != want {
+		t.Errorf("xml response: %d %s\n%s\nwant\n%s", r.status, r.header.Get("Content-Type"), r.body, want)
+	}
+	r = do(t, h, "GET", "/pets/7/card", "", "", "Accept", "application/json")
+	if r.status != 200 || !strings.Contains(r.body, `"nicknames":["T-Rex"]`) || strings.Contains(r.body, "secret") {
+		t.Errorf("json response: %d %s", r.status, r.body)
 	}
 }
 

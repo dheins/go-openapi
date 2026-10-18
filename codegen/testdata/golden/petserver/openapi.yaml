@@ -357,6 +357,37 @@ paths:
       responses:
         "204":
           description: Imported.
+  /pets/{petId}/card:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getCard
+      responses:
+        "200":
+          description: The pet's card, as JSON or XML.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Card"
+    put:
+      operationId: putCard
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/Card"
+      responses:
+        "204":
+          description: Stored.
   /pets/form:
     post:
       operationId: submitForm
@@ -462,6 +493,68 @@ components:
         secret:
           type: string
           writeOnly: true
+    Card:
+      type: object
+      required: [id, name]
+      xml:
+        name: card
+        namespace: urn:example:pets
+        prefix: p
+      properties:
+        id:
+          type: integer
+          format: int64
+          xml:
+            attribute: true
+        name:
+          type: string
+          minLength: 1
+          xml:
+            namespace: urn:example:pets
+            prefix: p
+        nicknames:
+          type: array
+          xml:
+            wrapped: true
+          items:
+            type: string
+            xml:
+              name: nickname
+        vets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vet"
+        note:
+          $ref: "#/components/schemas/Note"
+        secret:
+          type: string
+          writeOnly: true
+    Vet:
+      type: object
+      xml:
+        name: vet
+      properties:
+        name:
+          type: string
+          xml:
+            nodeType: text
+        phone:
+          type: string
+          xml:
+            nodeType: attribute
+    Note:
+      type: object
+      xml:
+        name: remark
+      properties:
+        lang:
+          type: string
+          xml:
+            attribute: true
+        text:
+          type: string
+          xml:
+            nodeType: cdata
     Filter:
       type: object
       required: [role]

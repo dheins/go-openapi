@@ -171,6 +171,8 @@ func TestObjectJSONNested(t *testing.T) {
 		{query: "owner[age]=3&owner[name]=Ann", want: `{"owner":{"age":3,"name":"Ann"}}`},
 		{query: "ids[]=1&ids[]=2&tags[1]=b&tags[0]=a", want: `{"ids":[1,2],"tags":["a","b"]}`},
 		{query: "meta[x]=1&meta[y]=z", want: `{"meta":{"x":1,"y":"z"}}`},
+		// Integers are written as parsed, so that the JSON is valid.
+		{query: "ids=007&ids=%2B8", want: `{"ids":[7,8]}`},
 		// An object given as one value is JSON; otherwise it stays a
 		// string for decoding to reject.
 		{query: `owner={"age":3}&note=x`, want: `{"note":"x","owner":{"age":3}}`},

@@ -155,12 +155,14 @@ type BodyField struct {
 // BodyMedia is one media type a request body accepts.
 type BodyMedia struct {
 	MediaType string
-	// Kind is json, form, multipart, text or binary.
+	// Kind is json, xml, form, multipart, text or binary.
 	Kind string
 	// Properties are the object properties, for form and multipart, and
 	// Additional the type of any others.
 	Properties []ParamProperty
 	Additional *ParamProperty
+	// XML describes the document, for xml.
+	XML *XMLNode
 	// Field is the request field the body is decoded into.
 	Field *BodyField
 }
@@ -175,12 +177,14 @@ type Response struct {
 	TypeName string
 	Doc      string
 	// MediaType is the media type of the body, or "" for none, and Kind
-	// how it is written: json, text, binary, jsonl (JSON Lines, a stream of
-	// Item values) or sse (a stream of server-sent events).
+	// how it is written: json, xml, text, binary, jsonl (JSON Lines, a
+	// stream of Item values) or sse (a stream of server-sent events).
 	MediaType string
 	Kind      string
 	Body      *Ref
 	Item      *Ref
+	// XML describes the document, for xml.
+	XML *XMLNode
 	// ContentTypeField means MediaType is a range such as "image/*", so
 	// the handler sets the actual type in a ContentType field.
 	ContentTypeField bool
@@ -610,8 +614,8 @@ func stripNullable(r *Ref) *Ref {
 	return r
 }
 
-// mediaKind classifies a media type for bodies: json, form, multipart,
-// jsonl, sse, text or binary. Other multipart types are "".
+// mediaKind classifies a media type for bodies: json, xml, form,
+// multipart, jsonl, sse, text or binary. Other multipart types are "".
 func mediaKind(mt string) string {
 	mt = strings.ToLower(strings.TrimSpace(mt))
 	if base, _, ok := strings.Cut(mt, ";"); ok {
@@ -620,6 +624,8 @@ func mediaKind(mt string) string {
 	switch {
 	case isJSONMediaType(mt):
 		return "json"
+	case isXMLMediaType(mt):
+		return "xml"
 	case mt == "application/x-www-form-urlencoded":
 		return "form"
 	case mt == "multipart/form-data":
@@ -636,9 +642,23 @@ func mediaKind(mt string) string {
 	return "binary"
 }
 
+// bodyKind classifies a body like mediaKind, except that XML without a
+// schema to map (none, or a string) stays text or bytes, as it was before
+// XML was decoded.
+func bodyKind(mt string, schema *oas.Schema) string {
+	kind := mediaKind(mt)
+	if kind == "xml" && opaque(deref(schema)) {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "text/") {
+			return "text"
+		}
+		return "binary"
+	}
+	return kind
+}
+
 // structured reports whether a body kind decodes into a schema's type.
 func structured(kind string) bool {
-	return kind == "json" || kind == "form" || kind == "multipart"
+	return kind == "json" || kind == "xml" || kind == "form" || kind == "multipart"
 }
 
 func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fields namespace) *Body {
@@ -653,8 +673,8 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 	var groups []*group
 	var rejected []string
 	for mt, m := range rb.Content.All() {
-		kind := mediaKind(mt)
 		schema := m.Deref().Schema
+		kind := bodyKind(mt, schema)
 		if kind == "" || kind == "jsonl" || kind == "sse" {
 			b.warnAt(m, nil, fmt.Sprintf("request bodies of type %s are not supported yet and are answered with 415", mt))
 			rejected = append(rejected, mt)
@@ -690,6 +710,15 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			field.Value = b.bodyValue(kind, schema, hint)
 		}
 		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field}
+		if kind == "xml" {
+			node, why := b.xmlRoot(field.Value, schema)
+			if why != "" {
+				b.warnAt(m, nil, fmt.Sprintf("%s; %s is answered with 415", why, mt))
+				rejected = append(rejected, mt)
+				continue
+			}
+			media.XML = node
+		}
 		if kind == "form" || kind == "multipart" {
 			props, additional, ok := objectProperties(field.Value, kind == "multipart")
 			if !ok {
@@ -906,8 +935,8 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 	var out []*Response
 	seen := map[string]bool{}
 	for mt, m := range r.Content.All() {
-		kind := mediaKind(mt)
 		media := m.Deref()
+		kind := bodyKind(mt, media.Schema)
 		v := &Response{Status: status, Code: code, Doc: doc, Headers: headers, MediaType: mt, Kind: kind}
 		var suffix string
 		switch kind {
@@ -917,6 +946,15 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 				v.MediaType = "application/json"
 			}
 			suffix = "JSON"
+		case "xml":
+			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
+			node, why := b.xmlRoot(v.Body, media.Schema)
+			if why != "" {
+				b.warnAt(m, nil, fmt.Sprintf("%s; response %s of type %s cannot be returned", why, status, mt))
+				continue
+			}
+			v.XML = node
+			suffix = "XML"
 		case "text":
 			v.Body = b.bodyValue(kind, media.Schema, "")
 			suffix = "Text"

@@ -7,9 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/server"
 )
+
+var createPetXMLShape = &server.XMLNode{Name: "Pet", Type: "object", Properties: []server.XMLProperty{{Name: "id", Node: &server.XMLNode{Name: "id", Type: "integer"}}, {Name: "name", Node: &server.XMLNode{Name: "name", Type: "string"}}, {Name: "tag", Node: &server.XMLNode{Name: "tag", Type: "string"}}, {Name: "secret", Node: &server.XMLNode{Name: "secret", Type: "string"}}}}
 
 // HandleCreatePet returns the HTTP handler of CreatePet.
 //
@@ -20,12 +23,22 @@ func HandleCreatePet(c *server.Config, h Handler, sec SecurityHandler) http.Hand
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req CreatePetRequest
 		var b server.Binder
-		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"application/json"}, true); ok {
+		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"application/json", "application/xml"}, true); ok {
+			req.ContentType = mediaType
 			switch mediaType {
 			case "application/json":
 				if err := oapi.DecodeRequest(body, &req.Body); err != nil {
 					b.Body(err)
 				} else {
+					var errs oapi.ValidationErrors
+					errs.Nested("", req.Body.Validate())
+					b.Body(errs.Err())
+				}
+			case "application/xml":
+				if v, err := server.DecodeXML[model.Pet](body, createPetXMLShape); err != nil {
+					b.Body(err)
+				} else {
+					req.Body = v
 					var errs oapi.ValidationErrors
 					errs.Nested("", req.Body.Validate())
 					b.Body(errs.Err())

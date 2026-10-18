@@ -534,3 +534,80 @@ $defs:
 		t.Errorf("a = %q %+v, b = %q %+v", a.Unsupported, a.Security, b.Unsupported, b.Security)
 	}
 }
+
+func TestXMLBodies(t *testing.T) {
+	m := build(t, `openapi: 3.0.3
+info: {title: t, version: v}
+paths:
+  /ok:
+    post:
+      operationId: ok
+      requestBody:
+        content:
+          application/xml: {schema: {$ref: "#/components/schemas/Book"}}
+          text/plain: {schema: {type: string}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/atom+xml:
+              schema: {type: array, items: {$ref: "#/components/schemas/Book"}}
+            text/xml: {}
+  /bad:
+    post:
+      operationId: bad
+      requestBody:
+        content:
+          application/xml: {schema: {type: object, additionalProperties: {type: integer}}}
+          application/json: {schema: {type: object, additionalProperties: {type: integer}}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/xml: {schema: {$ref: "#/components/schemas/Node"}}
+            application/json: {schema: {$ref: "#/components/schemas/Node"}}
+components:
+  schemas:
+    Book:
+      type: object
+      properties:
+        isbn: {type: string, xml: {attribute: true}}
+        authors: {type: array, items: {type: string, xml: {name: author}}, xml: {wrapped: true}}
+    Node:
+      type: object
+      properties:
+        next: {$ref: "#/components/schemas/Node"}
+`, Options{Operations: true})
+	ok := operationNamed(t, m, "Ok")
+	book := ok.Body.Media[0].XML
+	if book == nil || book.Name != "Book" || book.Properties[0].Node.Kind != "attribute" ||
+		!book.Properties[1].Node.Wrapped || book.Properties[1].Node.Items.Name != "author" {
+		t.Errorf("Book shape = %+v", book)
+	}
+	var kinds []string
+	for _, r := range ok.Responses {
+		kinds = append(kinds, r.MediaType+"="+r.Kind)
+	}
+	// A schema-less text/xml body stays text; a root array is wrapped.
+	if got := strings.Join(kinds, " "); got != "application/atom+xml=xml text/xml=text" {
+		t.Errorf("responses = %s", got)
+	}
+	if list := ok.Responses[0].XML; !list.Wrapped || list.Name != "items" || list.Items.Name != "Book" {
+		t.Errorf("list shape = %+v", list)
+	}
+
+	bad := operationNamed(t, m, "Bad")
+	if len(bad.Body.Media) != 1 || bad.Body.Media[0].MediaType != "application/json" || len(bad.Responses) != 1 {
+		t.Errorf("bad: media %+v, responses %+v", bad.Body.Media, bad.Responses)
+	}
+	all := ""
+	for _, w := range m.Warnings {
+		all += w.Message + "\n"
+	}
+	for _, want := range []string{"a map cannot be written as XML yet; application/xml is answered with 415",
+		"Node refers to itself, which cannot be written as XML yet; response 200 of type application/xml cannot be returned"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no warning %q in:\n%s", want, all)
+		}
+	}
+}

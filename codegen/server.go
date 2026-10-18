@@ -452,6 +452,14 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			w(3, "} else {")
 			validate(4)
 			w(3, "}")
+		case "xml":
+			shape := f.declareVar(lowerFirst(o.Name)+"XMLShape", xmlNodeLiteral(m.XML))
+			w(3, "if v, err := server.DecodeXML[%s](body, %s); err != nil {", elem(), shape)
+			w(4, "b.Body(err)")
+			w(3, "} else {")
+			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
+			validate(4)
+			w(3, "}")
 		case "form", "multipart":
 			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional))
 			if m.Kind == "form" {
@@ -475,6 +483,43 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 	}
 	w(2, "}")
 	w(1, "}")
+}
+
+// xmlNodeLiteral renders an XML shape as a *server.XMLNode.
+func xmlNodeLiteral(n *ir.XMLNode) string {
+	var b strings.Builder
+	b.WriteString("&server.XMLNode{")
+	var fields []string
+	add := func(name, value string) { fields = append(fields, name+": "+value) }
+	if n.Name != "" {
+		add("Name", strconv.Quote(n.Name))
+	}
+	if n.Namespace != "" {
+		add("Namespace", strconv.Quote(n.Namespace))
+	}
+	if n.Prefix != "" {
+		add("Prefix", strconv.Quote(n.Prefix))
+	}
+	if n.Kind != "" {
+		add("Kind", strconv.Quote(n.Kind))
+	}
+	add("Type", strconv.Quote(n.Type))
+	if n.Wrapped {
+		add("Wrapped", "true")
+	}
+	if n.Items != nil {
+		add("Items", xmlNodeLiteral(n.Items))
+	}
+	if len(n.Properties) > 0 {
+		props := make([]string, len(n.Properties))
+		for i, p := range n.Properties {
+			props[i] = fmt.Sprintf("{Name: %q, Node: %s}", p.Name, xmlNodeLiteral(p.Node))
+		}
+		add("Properties", "[]server.XMLProperty{"+strings.Join(props, ", ")+"}")
+	}
+	b.WriteString(strings.Join(fields, ", "))
+	b.WriteString("}")
+	return b.String()
 }
 
 // objectProperty renders an object with the given properties, and type
@@ -671,7 +716,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(2, "return err")
 		w(1, "}")
 	}
-	if r.Kind == "json" {
+	if r.Kind == "json" || r.Kind == "xml" {
 		if stmts := f.validation("r.Body", r.Body, 2); stmts != "" {
 			w(1, "if c.ValidateResponses {")
 			w(2, "var errs oapi.ValidationErrors")
@@ -724,6 +769,9 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	switch r.Kind {
 	case "json":
 		w(1, "return c.WriteJSON(w, %s, %s, r.Body, %s)", status, contentType, header)
+	case "xml":
+		shape := f.declareVar(lowerFirst(r.TypeName)+"XMLShape", xmlNodeLiteral(r.XML))
+		w(1, "return c.WriteXML(w, %s, %s, r.Body, %s, %s)", status, contentType, shape, header)
 	case "text":
 		w(1, "return server.WriteText(w, %s, %s, string(r.Body), %s)", status, contentType, header)
 	case "binary":
