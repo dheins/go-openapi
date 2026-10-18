@@ -3,6 +3,8 @@
 package model
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -28,27 +30,64 @@ func (m *Pet) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Pet) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Pet) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Pet) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Pet
+	var seen [4]bool
+	var problems [4]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "id":
+			if dir == oapi.Request {
+				obj.Skip()
+				continue
+			}
+			seen[0] = true
+			problems[0] = obj.Decode(&v.ID, false, dir)
+		case "name":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Name, false, dir)
+		case "tag":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Tag, false, dir)
+		case "secret":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Secret, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Pet
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["id"]; ok && dir != oapi.Request {
-		errs.Nested("/id", oapi.DecodeField(raw, &v.ID, false, dir))
+	if seen[0] {
+		errs.Nested("/id", problems[0])
 	} else if dir == oapi.Response {
 		errs.Add("/id", "required property is missing")
 	}
-	if raw, ok := fields["name"]; ok {
-		errs.Nested("/name", oapi.DecodeField(raw, &v.Name, false, dir))
+	if seen[1] {
+		errs.Nested("/name", problems[1])
 	} else {
 		errs.Add("/name", "required property is missing")
 	}
-	if raw, ok := fields["tag"]; ok {
-		errs.Nested("/tag", oapi.DecodeField(raw, &v.Tag, false, dir))
+	if seen[2] {
+		errs.Nested("/tag", problems[2])
 	}
-	if raw, ok := fields["secret"]; ok {
-		errs.Nested("/secret", oapi.DecodeField(raw, &v.Secret, false, dir))
+	if seen[3] {
+		errs.Nested("/secret", problems[3])
 	}
 	if err := errs.Err(); err != nil {
 		return err

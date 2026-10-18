@@ -39,9 +39,9 @@ shipped in.
   object parameters (nested objects and maps are supported). — later
 - Parameters and response headers with `content` other than JSON. — later
 - Callbacks, webhooks and links. — later
-- Generating a decoder per type instead of decoding through `oapi`
-  reflection helpers, to close the remaining gap to plain `encoding/json`
-  (see [docs/benchmarks.md](docs/benchmarks.md)). — later
+- Generated encoders per type, and streaming decoders for unions and
+  objects with inline unions, to close the remaining gap to plain
+  `encoding/json` (see [docs/benchmarks.md](docs/benchmarks.md)). — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -74,7 +74,10 @@ Unreleased:
   the loader (`loader.Spec.SecurityScheme`). (d2e4dbe)
 - [x] Serving a document split over several files as one: generated
   servers embed `loader.Spec.Bundle`, which copies the objects of other
-  files under `components` and rewrites the references to them.
+  files under `components` and rewrites the references to them. (d10c33c)
+- [x] Generated structs decode token by token (`DecodeJSONFrom`,
+  `UnmarshalJSONFrom`), about twice as fast as before with a third of the
+  memory.
 
 v0.3.1:
 

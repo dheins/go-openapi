@@ -3,6 +3,8 @@
 package model
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -25,22 +27,52 @@ func (m *UploadRecordsRequestBody) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *UploadRecordsRequestBody) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *UploadRecordsRequestBody) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *UploadRecordsRequestBody) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v UploadRecordsRequestBody
+	var seen [3]bool
+	var problems [3]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "report":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Report, false, dir)
+		case "scans":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Scans, false, dir)
+		case "attachment":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Attachment, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v UploadRecordsRequestBody
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["report"]; ok {
-		errs.Nested("/report", oapi.DecodeField(raw, &v.Report, false, dir))
+	if seen[0] {
+		errs.Nested("/report", problems[0])
 	} else {
 		errs.Add("/report", "required property is missing")
 	}
-	if raw, ok := fields["scans"]; ok {
-		errs.Nested("/scans", oapi.DecodeField(raw, &v.Scans, false, dir))
+	if seen[1] {
+		errs.Nested("/scans", problems[1])
 	}
-	if raw, ok := fields["attachment"]; ok {
-		errs.Nested("/attachment", oapi.DecodeField(raw, &v.Attachment, false, dir))
+	if seen[2] {
+		errs.Nested("/attachment", problems[2])
 	}
 	if err := errs.Err(); err != nil {
 		return err

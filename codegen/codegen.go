@@ -261,10 +261,11 @@ func (f *fileGen) funcs() template.FuncMap {
 		"typeDoc": func(t *ir.Type) string {
 			return typeDoc(t)
 		},
-		"fieldDoc":    fieldDoc,
-		"tag":         tag,
-		"decodeStmts": f.decodeStmts,
-		"encodeStmts": f.encodeStmts,
+		"fieldDoc":          fieldDoc,
+		"tag":               tag,
+		"decodeStmts":       f.decodeStmts,
+		"streamDecodeStmts": f.streamDecodeStmts,
+		"encodeStmts":       f.encodeStmts,
 
 		"alternativeMethods": f.alternativeMethods,
 		"validateStmts":      f.validateStmts,

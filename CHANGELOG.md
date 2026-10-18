@@ -35,6 +35,13 @@
   rewritten as a pointer. `goapi generate server` embeds it, so
   `server.WithDocument` serves a split document whole; a single-file
   document is embedded unchanged.
+- Generated structs decode token by token: `DecodeJSONFrom` (with a
+  direction) and `UnmarshalJSONFrom`, which `encoding/json` uses, read the
+  object's members from a `jsontext.Decoder` instead of collecting them
+  into a map first. Decoding the fixture's `Pet` is about twice as fast
+  with a third of the memory; the problems reported are unchanged. The
+  runtime gains `oapi.DecodeFrom`, `oapi.DecodeJSONWith`,
+  `oapi.BeginObject` and `oapi.StreamDecoder`.
 
 ### Changed
 
@@ -52,6 +59,9 @@
   nested property `b` of `a`.
 - A security requirement naming a scheme by a URI reference that does not
   resolve is a loading error, like an unresolvable `$ref`.
+- Properties named like the methods of generated structs (`DecodeJSON`,
+  `EncodeJSON`, `DecodeJSONFrom`, `UnmarshalJSONFrom`) get a numbered field
+  name, as `Validate` already did.
 
 ## v0.3.1
 

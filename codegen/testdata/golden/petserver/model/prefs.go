@@ -3,6 +3,8 @@
 package model
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -24,17 +26,44 @@ func (m *Prefs) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Prefs) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Prefs) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Prefs) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Prefs
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "theme":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Theme, false, dir)
+		case "compact":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Compact, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Prefs
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["theme"]; ok {
-		errs.Nested("/theme", oapi.DecodeField(raw, &v.Theme, false, dir))
+	if seen[0] {
+		errs.Nested("/theme", problems[0])
 	}
-	if raw, ok := fields["compact"]; ok {
-		errs.Nested("/compact", oapi.DecodeField(raw, &v.Compact, false, dir))
+	if seen[1] {
+		errs.Nested("/compact", problems[1])
 	}
 	if err := errs.Err(); err != nil {
 		return err

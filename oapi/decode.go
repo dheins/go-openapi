@@ -128,6 +128,14 @@ func DecodeField(raw json.RawMessage, dst any, nullable bool, dir Direction) err
 	if done := decodeScalar(raw, dst); done {
 		return nil
 	}
+	if _, directional := dst.(DirectionalDecoder); !directional && !isNull(raw) {
+		// Calling the method directly skips encoding/json's checks of a
+		// value that is known to be valid; a failure goes the long way
+		// below, for the error encoding/json reports.
+		if u, ok := dst.(json.Unmarshaler); ok && u.UnmarshalJSON(raw) == nil {
+			return nil
+		}
+	}
 	rv := reflect.ValueOf(dst)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("oapi: DecodeField needs a non-nil pointer, got %T", dst)

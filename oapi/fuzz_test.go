@@ -2,6 +2,8 @@ package oapi
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -99,4 +101,42 @@ func FuzzEnsureProperty(f *testing.F) {
 			t.Fatalf("output is not an object: %v\n%s", err, out)
 		}
 	})
+}
+
+// FuzzDecodeFrom checks that decoding token by token gives the same value
+// and the same problems as decoding the value's text.
+func FuzzDecodeFrom(f *testing.F) {
+	for _, seed := range []string{
+		`{"s": "a", "n": null, "l": [true, null], "m": {"b": [1], "a": ["x"]}, "a": {"k": 1}, "p": {"s": 1}, "d": "2024-02-29", "f": {"z": 1}}`,
+		`[1, "a", null]`, `{"a": 1, "a": 2}`, `"\u00e9"`, `{"x": [1, {"y": [2, "z"]}]}`, `null`, `[]`, `{}`, `1e400`, `{"m": null}`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if !json.Valid(data) {
+			return
+		}
+		same[fuzzTarget](t, data)
+		same[[]Optional[Nullable[int64]]](t, data)
+		same[map[string][]Optional[string]](t, data)
+		same[Optional[map[string]*fuzzTarget]](t, data)
+		same[Nullable[[]Date]](t, data)
+		same[*[]bool](t, data)
+		same[any](t, data)
+	})
+}
+
+func same[T any](t *testing.T, data []byte) {
+	t.Helper()
+	var byText, byTokens T
+	errText := DecodeField(data, &byText, false, Request)
+	errTokens := DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return DecodeFrom(dec, &byTokens, false, Request)
+	})
+	if fmt.Sprint(errText) != fmt.Sprint(errTokens) {
+		t.Fatalf("%T from %s:\nby text:   %v\nby tokens: %v", byText, data, errText, errTokens)
+	}
+	if errText == nil && !reflect.DeepEqual(byText, byTokens) {
+		t.Fatalf("%T from %s:\nby text:   %#v\nby tokens: %#v", byText, data, byText, byTokens)
+	}
 }

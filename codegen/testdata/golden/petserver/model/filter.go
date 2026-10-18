@@ -3,6 +3,8 @@
 package model
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -27,28 +29,64 @@ func (m *Filter) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Filter) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Filter) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Filter) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Filter
+	var seen [5]bool
+	var problems [5]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "role":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Role, false, dir)
+		case "age":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Age, false, dir)
+		case "tags":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Tags, false, dir)
+		case "owner":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Owner, false, dir)
+		case "labels":
+			seen[4] = true
+			problems[4] = obj.Decode(&v.Labels, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Filter
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["role"]; ok {
-		errs.Nested("/role", oapi.DecodeField(raw, &v.Role, false, dir))
+	if seen[0] {
+		errs.Nested("/role", problems[0])
 	} else {
 		errs.Add("/role", "required property is missing")
 	}
-	if raw, ok := fields["age"]; ok {
-		errs.Nested("/age", oapi.DecodeField(raw, &v.Age, false, dir))
+	if seen[1] {
+		errs.Nested("/age", problems[1])
 	}
-	if raw, ok := fields["tags"]; ok {
-		errs.Nested("/tags", oapi.DecodeField(raw, &v.Tags, false, dir))
+	if seen[2] {
+		errs.Nested("/tags", problems[2])
 	}
-	if raw, ok := fields["owner"]; ok {
-		errs.Nested("/owner", oapi.DecodeField(raw, &v.Owner, false, dir))
+	if seen[3] {
+		errs.Nested("/owner", problems[3])
 	}
-	if raw, ok := fields["labels"]; ok {
-		errs.Nested("/labels", oapi.DecodeField(raw, &v.Labels, false, dir))
+	if seen[4] {
+		errs.Nested("/labels", problems[4])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -114,17 +152,44 @@ func (m *FilterOwner) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *FilterOwner) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *FilterOwner) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *FilterOwner) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v FilterOwner
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "name":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Name, false, dir)
+		case "age":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Age, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v FilterOwner
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["name"]; ok {
-		errs.Nested("/name", oapi.DecodeField(raw, &v.Name, false, dir))
+	if seen[0] {
+		errs.Nested("/name", problems[0])
 	}
-	if raw, ok := fields["age"]; ok {
-		errs.Nested("/age", oapi.DecodeField(raw, &v.Age, false, dir))
+	if seen[1] {
+		errs.Nested("/age", problems[1])
 	}
 	if err := errs.Err(); err != nil {
 		return err

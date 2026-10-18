@@ -4,6 +4,7 @@ package petstore
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -140,14 +141,38 @@ func (m *ShapeVariant1) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *ShapeVariant1) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *ShapeVariant1) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *ShapeVariant1) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v ShapeVariant1
+	var seen [1]bool
+	var problems [1]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "radius":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Radius, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v ShapeVariant1
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["radius"]; ok {
-		errs.Nested("/radius", oapi.DecodeField(raw, &v.Radius, false, dir))
+	if seen[0] {
+		errs.Nested("/radius", problems[0])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -195,14 +220,38 @@ func (m *ShapeVariant2) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *ShapeVariant2) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *ShapeVariant2) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *ShapeVariant2) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v ShapeVariant2
+	var seen [1]bool
+	var problems [1]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "side":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Side, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v ShapeVariant2
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["side"]; ok {
-		errs.Nested("/side", oapi.DecodeField(raw, &v.Side, false, dir))
+	if seen[0] {
+		errs.Nested("/side", problems[0])
 	}
 	if err := errs.Err(); err != nil {
 		return err

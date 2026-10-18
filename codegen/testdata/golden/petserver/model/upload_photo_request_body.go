@@ -3,6 +3,8 @@
 package model
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -24,17 +26,44 @@ func (m *UploadPhotoRequestBody) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *UploadPhotoRequestBody) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *UploadPhotoRequestBody) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *UploadPhotoRequestBody) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v UploadPhotoRequestBody
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "caption":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Caption, false, dir)
+		case "photo":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Photo, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v UploadPhotoRequestBody
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["caption"]; ok {
-		errs.Nested("/caption", oapi.DecodeField(raw, &v.Caption, false, dir))
+	if seen[0] {
+		errs.Nested("/caption", problems[0])
 	}
-	if raw, ok := fields["photo"]; ok {
-		errs.Nested("/photo", oapi.DecodeField(raw, &v.Photo, false, dir))
+	if seen[1] {
+		errs.Nested("/photo", problems[1])
 	} else {
 		errs.Add("/photo", "required property is missing")
 	}

@@ -3,6 +3,7 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
 	"time"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -43,59 +44,126 @@ func (m *Dog) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Dog) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Dog) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Dog) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Dog
+	var seen [14]bool
+	var problems [14]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "id":
+			if dir == oapi.Request {
+				obj.Skip()
+				continue
+			}
+			seen[0] = true
+			problems[0] = obj.Decode(&v.ID, false, dir)
+		case "name":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Name, false, dir)
+		case "status":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Status, false, dir)
+		case "tag":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Tag, false, dir)
+		case "birthday":
+			seen[4] = true
+			problems[4] = obj.Decode(&v.Birthday, false, dir)
+		case "createdAt":
+			seen[5] = true
+			problems[5] = obj.Decode(&v.CreatedAt, false, dir)
+		case "weight":
+			seen[6] = true
+			problems[6] = obj.Decode(&v.Weight, false, dir)
+		case "photoUrls":
+			seen[7] = true
+			problems[7] = obj.Decode(&v.PhotoURLs, false, dir)
+		case "owner":
+			seen[8] = true
+			problems[8] = obj.Decode(&v.Owner, false, dir)
+		case "size":
+			seen[9] = true
+			problems[9] = obj.Decode(&v.Size, false, dir)
+		case "labels":
+			seen[10] = true
+			problems[10] = obj.Decode(&v.Labels, false, dir)
+		case "petType":
+			seen[11] = true
+			problems[11] = obj.Decode(&v.Kind, false, dir)
+		case "validate":
+			seen[12] = true
+			problems[12] = obj.Decode(&v.Validate2, false, dir)
+		case "barks":
+			seen[13] = true
+			problems[13] = obj.Decode(&v.Barks, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Dog
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["id"]; ok && dir != oapi.Request {
-		errs.Nested("/id", oapi.DecodeField(raw, &v.ID, false, dir))
+	if seen[0] {
+		errs.Nested("/id", problems[0])
 	} else if dir == oapi.Response {
 		errs.Add("/id", "required property is missing")
 	}
-	if raw, ok := fields["name"]; ok {
-		errs.Nested("/name", oapi.DecodeField(raw, &v.Name, false, dir))
+	if seen[1] {
+		errs.Nested("/name", problems[1])
 	} else {
 		errs.Add("/name", "required property is missing")
 	}
-	if raw, ok := fields["status"]; ok {
-		errs.Nested("/status", oapi.DecodeField(raw, &v.Status, false, dir))
+	if seen[2] {
+		errs.Nested("/status", problems[2])
 	} else {
 		errs.Add("/status", "required property is missing")
 	}
-	if raw, ok := fields["tag"]; ok {
-		errs.Nested("/tag", oapi.DecodeField(raw, &v.Tag, false, dir))
+	if seen[3] {
+		errs.Nested("/tag", problems[3])
 	}
-	if raw, ok := fields["birthday"]; ok {
-		errs.Nested("/birthday", oapi.DecodeField(raw, &v.Birthday, false, dir))
+	if seen[4] {
+		errs.Nested("/birthday", problems[4])
 	}
-	if raw, ok := fields["createdAt"]; ok {
-		errs.Nested("/createdAt", oapi.DecodeField(raw, &v.CreatedAt, false, dir))
+	if seen[5] {
+		errs.Nested("/createdAt", problems[5])
 	}
-	if raw, ok := fields["weight"]; ok {
-		errs.Nested("/weight", oapi.DecodeField(raw, &v.Weight, false, dir))
+	if seen[6] {
+		errs.Nested("/weight", problems[6])
 	}
-	if raw, ok := fields["photoUrls"]; ok {
-		errs.Nested("/photoUrls", oapi.DecodeField(raw, &v.PhotoURLs, false, dir))
+	if seen[7] {
+		errs.Nested("/photoUrls", problems[7])
 	}
-	if raw, ok := fields["owner"]; ok {
-		errs.Nested("/owner", oapi.DecodeField(raw, &v.Owner, false, dir))
+	if seen[8] {
+		errs.Nested("/owner", problems[8])
 	}
-	if raw, ok := fields["size"]; ok {
-		errs.Nested("/size", oapi.DecodeField(raw, &v.Size, false, dir))
+	if seen[9] {
+		errs.Nested("/size", problems[9])
 	}
-	if raw, ok := fields["labels"]; ok {
-		errs.Nested("/labels", oapi.DecodeField(raw, &v.Labels, false, dir))
+	if seen[10] {
+		errs.Nested("/labels", problems[10])
 	}
-	if raw, ok := fields["petType"]; ok {
-		errs.Nested("/petType", oapi.DecodeField(raw, &v.Kind, false, dir))
+	if seen[11] {
+		errs.Nested("/petType", problems[11])
 	}
-	if raw, ok := fields["validate"]; ok {
-		errs.Nested("/validate", oapi.DecodeField(raw, &v.Validate2, false, dir))
+	if seen[12] {
+		errs.Nested("/validate", problems[12])
 	}
-	if raw, ok := fields["barks"]; ok {
-		errs.Nested("/barks", oapi.DecodeField(raw, &v.Barks, false, dir))
+	if seen[13] {
+		errs.Nested("/barks", problems[13])
 	} else {
 		errs.Add("/barks", "required property is missing")
 	}

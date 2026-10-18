@@ -3,6 +3,8 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -24,19 +26,46 @@ func (m *Node) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Node) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Node) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Node) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Node
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "value":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Value, false, dir)
+		case "next":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Next, true, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Node
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["value"]; ok {
-		errs.Nested("/value", oapi.DecodeField(raw, &v.Value, false, dir))
+	if seen[0] {
+		errs.Nested("/value", problems[0])
 	} else {
 		errs.Add("/value", "required property is missing")
 	}
-	if raw, ok := fields["next"]; ok {
-		errs.Nested("/next", oapi.DecodeField(raw, &v.Next, true, dir))
+	if seen[1] {
+		errs.Nested("/next", problems[1])
 	} else {
 		errs.Add("/next", "required property is missing")
 	}

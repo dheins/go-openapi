@@ -47,8 +47,27 @@ func (m *{{.Name}}) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *{{.Name}}) DecodeJSON(data []byte, dir oapi.Direction) error {
+{{- if .InlineUnions}}
 {{decodeStmts .}}
+{{- else}}
+	return oapi.DecodeJSONWith(data, func(dec *{{imp "encoding/json/jsontext" "jsontext"}}.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+{{- end}}
 }
+{{- if not .InlineUnions}}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *{{.Name}}) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *{{.Name}}) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+{{streamDecodeStmts .}}
+}
+{{- end}}
 
 
 // MarshalJSON encodes every property that is present.

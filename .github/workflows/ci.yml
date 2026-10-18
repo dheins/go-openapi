@@ -71,6 +71,7 @@ jobs:
           oapi FuzzDecode
           oapi FuzzDecodeScalar
           oapi FuzzEnsureProperty
+          oapi FuzzDecodeFrom
           runtime/server FuzzParamStyles
           runtime/server FuzzNegotiate
           runtime/server FuzzMultipart

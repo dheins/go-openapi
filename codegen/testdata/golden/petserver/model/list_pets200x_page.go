@@ -3,6 +3,8 @@
 package model
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -24,17 +26,44 @@ func (m *ListPets200XPage) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *ListPets200XPage) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *ListPets200XPage) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *ListPets200XPage) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v ListPets200XPage
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "size":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Size, false, dir)
+		case "after":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.After, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v ListPets200XPage
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["size"]; ok {
-		errs.Nested("/size", oapi.DecodeField(raw, &v.Size, false, dir))
+	if seen[0] {
+		errs.Nested("/size", problems[0])
 	}
-	if raw, ok := fields["after"]; ok {
-		errs.Nested("/after", oapi.DecodeField(raw, &v.After, false, dir))
+	if seen[1] {
+		errs.Nested("/after", problems[1])
 	}
 	if err := errs.Err(); err != nil {
 		return err

@@ -736,3 +736,34 @@ func TestECMAPatterns(t *testing.T) {
 		assertMessages(t, bad.Validate(), "must match the pattern ^(?=.*[0-9])(?=.*[A-Z]).{8,}$")
 	}
 }
+
+// TestDecodeProblems pins the problems a generated decoder reports, which
+// stayed the same when decoding moved from collecting the object's
+// members to reading its tokens: their order, syntax errors, repeated
+// names and nulls.
+func TestDecodeProblems(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{`{"id": 1,`, "invalid JSON: unexpected end of JSON input"},
+		{`{"id": 1} x`, "invalid JSON: invalid character 'x' after top-level value"},
+		{`{"name": "Rex", "status": "available", "photoUrls": [}`, "invalid JSON: invalid character '}' looking for beginning of value"},
+		{"  ", "expected object, got nothing"},
+		{`[1]`, "expected object, got array"},
+		// Declared properties in their order, then the others by name.
+		{`{"labels": {"b": 1, "a": 2}, "owner": {"email": 3}, "name": "Rex", "status": "available", "photoUrls": []}`,
+			"/owner/email: expected string, got number; /labels/a: expected string, got number; /labels/b: expected string, got number"},
+		{`{"createdAt": 5, "birthday": "x", "photoUrls": [1, "a", 2], "name": "Rex", "status": "available"}`,
+			`/birthday: invalid date "x": expected YYYY-MM-DD; /createdAt: expected object, got number; /photoUrls/0: expected string, got number; /photoUrls/2: expected string, got number`},
+		// A repeated name counts with its last value.
+		{`{"name": "Rex", "name": 5, "status": "available", "photoUrls": []}`, "/name: expected string, got number"},
+		{`{"name": 5, "name": "Rex", "status": "available", "photoUrls": []}`, "<nil>"},
+		{`{"name": "Rex", "status": "available", "photoUrls": [], "weight": null}`, "/weight: must not be null"},
+		// Read-only properties are ignored in requests.
+		{`{"id": "a", "name": 3, "photoUrls": []}`, "/name: expected string, got number; /status: required property is missing"},
+	}
+	for _, tt := range tests {
+		var p Pet
+		if got := fmt.Sprint(p.DecodeJSON([]byte(tt.in), oapi.Request)); got != tt.want {
+			t.Errorf("%s:\ngot  %s\nwant %s", tt.in, got, tt.want)
+		}
+	}
+}

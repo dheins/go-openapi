@@ -79,6 +79,92 @@ func (f *fileGen) decodeStmts(t *ir.Type) (string, error) {
 	return strings.TrimSuffix(b.String(), "\n"), nil
 }
 
+// streamDecodeStmts returns the body of a struct's DecodeJSONFrom, which
+// decodes like decodeStmts while reading the object's members from the
+// decoder. Problems are reported in the same order: properties in the
+// order they are declared, then undeclared ones by name.
+func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
+	var b strings.Builder
+	w := func(depth int, format string, args ...any) {
+		b.WriteString(strings.Repeat("\t", depth))
+		fmt.Fprintf(&b, format, args...)
+		b.WriteByte('\n')
+	}
+	n := len(t.Fields)
+	w(1, "obj := oapi.BeginObject(dec)")
+	w(1, "var v %s", t.Name)
+	if n > 0 {
+		w(1, "var seen [%d]bool", n)
+		w(1, "var problems [%d]error", n)
+	}
+	a := t.Additional
+	if a != nil {
+		w(1, "var unknown []oapi.NamedError")
+	}
+	w(1, "for obj.Next() {")
+	w(2, "switch obj.Name() {")
+	for i, fd := range t.Fields {
+		if !validTagName(fd.JSONName) {
+			return "", fmt.Errorf("property name %q cannot be used in a Go struct tag", fd.JSONName)
+		}
+		w(2, "case %s:", strconv.Quote(fd.JSONName))
+		if fd.ReadOnly {
+			// Ignored in requests, as if absent.
+			w(3, "if dir == oapi.Request {")
+			w(4, "obj.Skip()")
+			w(4, "continue")
+			w(3, "}")
+		}
+		w(3, "seen[%d] = true", i)
+		w(3, "problems[%d] = obj.Decode(&v.%s, %t, dir)", i, fd.Name, fd.CyclePointer && fd.Nullable)
+	}
+	w(2, "default:")
+	switch {
+	case a == nil:
+		w(3, "obj.Skip()")
+	case a.Forbidden:
+		w(3, "obj.Skip()")
+		w(3, "unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: &oapi.ValidationError{Message: \"property is not allowed\"}})")
+	default:
+		w(3, "var value %s", f.goType(a.Value))
+		// Recorded even without a problem: a repeated name counts once.
+		w(3, "unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: obj.Decode(&value, false, dir)})")
+		w(3, "if v.%s == nil {", a.FieldName)
+		w(4, "v.%s = make(map[string]%s)", a.FieldName, f.goType(a.Value))
+		w(3, "}")
+		w(3, "v.%s[obj.Name()] = value", a.FieldName)
+	}
+	w(2, "}")
+	w(1, "}")
+	w(1, "if err := obj.Err(); err != nil {")
+	w(2, "return err")
+	w(1, "}")
+	w(1, "var errs oapi.ValidationErrors")
+	for i, fd := range t.Fields {
+		path := pointerLiteral(fd.JSONName)
+		w(1, "if seen[%d] {", i)
+		w(2, "errs.Nested(%s, problems[%d])", path, i)
+		switch cond := requiredCondition(fd); {
+		case cond != "":
+			w(1, "} %s {", cond)
+			w(2, "errs.Add(%s, \"required property is missing\")", path)
+		case fd.Default != "" && !fd.ReadOnly:
+			w(1, "} else if dir == oapi.Request {")
+			w(2, "errs.Nested(%s, oapi.DecodeField([]byte(%s), &v.%s, %t, dir))", path, strconv.Quote(fd.Default), fd.Name, fd.CyclePointer && fd.Nullable)
+		}
+		w(1, "}")
+	}
+	if a != nil {
+		w(1, "oapi.AddNamed(&errs, unknown)")
+	}
+	w(1, "if err := errs.Err(); err != nil {")
+	w(2, "return err")
+	w(1, "}")
+	w(1, "*m = v")
+	w(1, "return nil")
+	return strings.TrimSuffix(b.String(), "\n"), nil
+}
+
 // encodeStmts returns the body of a struct's EncodeJSON. Absent optional
 // properties are left out, as are read-only properties in requests and
 // write-only properties in responses.

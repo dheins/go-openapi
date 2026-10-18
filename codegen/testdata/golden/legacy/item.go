@@ -3,6 +3,8 @@
 package legacy
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -30,36 +32,78 @@ func (m *Item) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Item) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Item) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Item) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Item
+	var seen [7]bool
+	var problems [7]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "sku":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Sku, false, dir)
+		case "price":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Price, false, dir)
+		case "note":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Note, false, dir)
+		case "tags":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Tags, false, dir)
+		case "attributes":
+			seen[4] = true
+			problems[4] = obj.Decode(&v.Attributes, false, dir)
+		case "supplier":
+			seen[5] = true
+			problems[5] = obj.Decode(&v.Supplier, false, dir)
+		case "replacement":
+			seen[6] = true
+			problems[6] = obj.Decode(&v.Replacement, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Item
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["sku"]; ok {
-		errs.Nested("/sku", oapi.DecodeField(raw, &v.Sku, false, dir))
+	if seen[0] {
+		errs.Nested("/sku", problems[0])
 	} else {
 		errs.Add("/sku", "required property is missing")
 	}
-	if raw, ok := fields["price"]; ok {
-		errs.Nested("/price", oapi.DecodeField(raw, &v.Price, false, dir))
+	if seen[1] {
+		errs.Nested("/price", problems[1])
 	} else {
 		errs.Add("/price", "required property is missing")
 	}
-	if raw, ok := fields["note"]; ok {
-		errs.Nested("/note", oapi.DecodeField(raw, &v.Note, false, dir))
+	if seen[2] {
+		errs.Nested("/note", problems[2])
 	}
-	if raw, ok := fields["tags"]; ok {
-		errs.Nested("/tags", oapi.DecodeField(raw, &v.Tags, false, dir))
+	if seen[3] {
+		errs.Nested("/tags", problems[3])
 	}
-	if raw, ok := fields["attributes"]; ok {
-		errs.Nested("/attributes", oapi.DecodeField(raw, &v.Attributes, false, dir))
+	if seen[4] {
+		errs.Nested("/attributes", problems[4])
 	}
-	if raw, ok := fields["supplier"]; ok {
-		errs.Nested("/supplier", oapi.DecodeField(raw, &v.Supplier, false, dir))
+	if seen[5] {
+		errs.Nested("/supplier", problems[5])
 	}
-	if raw, ok := fields["replacement"]; ok {
-		errs.Nested("/replacement", oapi.DecodeField(raw, &v.Replacement, false, dir))
+	if seen[6] {
+		errs.Nested("/replacement", problems[6])
 	}
 	if err := errs.Err(); err != nil {
 		return err

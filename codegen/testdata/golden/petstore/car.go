@@ -3,6 +3,8 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -25,24 +27,54 @@ func (m *Car) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Car) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Car) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Car) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Car
+	var seen [3]bool
+	var problems [3]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "kind":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Kind, false, dir)
+		case "wheels":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Wheels, false, dir)
+		case "doors":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Doors, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Car
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["kind"]; ok {
-		errs.Nested("/kind", oapi.DecodeField(raw, &v.Kind, false, dir))
+	if seen[0] {
+		errs.Nested("/kind", problems[0])
 	} else {
 		errs.Add("/kind", "required property is missing")
 	}
-	if raw, ok := fields["wheels"]; ok {
-		errs.Nested("/wheels", oapi.DecodeField(raw, &v.Wheels, false, dir))
+	if seen[1] {
+		errs.Nested("/wheels", problems[1])
 	} else {
 		errs.Add("/wheels", "required property is missing")
 	}
-	if raw, ok := fields["doors"]; ok {
-		errs.Nested("/doors", oapi.DecodeField(raw, &v.Doors, false, dir))
+	if seen[2] {
+		errs.Nested("/doors", problems[2])
 	}
 	if err := errs.Err(); err != nil {
 		return err

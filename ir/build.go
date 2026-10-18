@@ -295,7 +295,7 @@ func (b *builder) fillEnum(t *Type, types []string) {
 }
 
 // reservedFieldNames are the methods of generated structs.
-var reservedFieldNames = []string{"Validate", "MarshalJSON", "UnmarshalJSON"}
+var reservedFieldNames = []string{"Validate", "MarshalJSON", "UnmarshalJSON", "UnmarshalJSONFrom", "DecodeJSON", "DecodeJSONFrom", "EncodeJSON"}
 
 func (b *builder) fillStruct(t *Type) {
 	t.Kind = Struct
