@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -543,5 +544,62 @@ func TestAliasBomb(t *testing.T) {
 		if d := time.Since(start); d > time.Minute {
 			t.Errorf("rejecting the document took %v", d)
 		}
+	}
+}
+
+func TestSecuritySchemeURIs(t *testing.T) {
+	files := map[string]string{
+		"file:///api/schemes.yaml": `key: {type: apiKey, in: header, name: X-Key}`,
+	}
+	fetch := func(u *url.URL) ([]byte, error) {
+		if doc, ok := files[u.String()]; ok {
+			return []byte(doc), nil
+		}
+		return nil, errors.New("not found")
+	}
+	spec, err := LoadBytes([]byte(`openapi: 3.2.0
+info: {title: t, version: v}
+security:
+  - "#/components/securitySchemes/basic": []
+paths:
+  /a:
+    get:
+      security:
+        - schemes.yaml#/key: []
+          basic: []
+      responses: {"204": {description: ok}}
+components:
+  securitySchemes:
+    basic: {type: http, scheme: basic}
+`), WithFetcher(fetch), WithBaseURI("file:///api/openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := spec.Document
+	basic, _ := doc.Components.SecuritySchemes.Get("basic")
+	path, _ := doc.Paths.Items.Get("/a")
+	op := path.Get
+	if got := spec.SecurityScheme(doc, "#/components/securitySchemes/basic"); got != basic {
+		t.Errorf("local URI = %+v", got)
+	}
+	if got := spec.SecurityScheme(op, "basic"); got != basic {
+		t.Errorf("component name = %+v", got)
+	}
+	if got := spec.SecurityScheme(op, "schemes.yaml#/key"); got == nil || got.Name != "X-Key" {
+		t.Errorf("external URI = %+v", got)
+	}
+	// URIs are resolved for the owner they were written in.
+	if got := spec.SecurityScheme(doc, "schemes.yaml#/key"); got != nil {
+		t.Errorf("URI of another owner = %+v", got)
+	}
+
+	_, err = LoadBytes([]byte(`openapi: 3.2.0
+info: {title: t, version: v}
+security:
+  - "#/components/securitySchemes/missing": []
+paths: {}
+`), WithFetcher(fetch), WithBaseURI("file:///api/openapi.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "neither a component nor a resolvable reference") {
+		t.Errorf("unresolvable scheme: %v", err)
 	}
 }

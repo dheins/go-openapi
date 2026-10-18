@@ -379,7 +379,9 @@ return api.GetPet404Response{}, nil
 return api.CreatePet4XXJSONResponse{StatusCode: 409, Body: problem}, nil // ranges and default carry a StatusCode
 ```
 
-Response headers are fields of the response type. Media types become
+Response headers are fields of the response type; a header with JSON
+`content` holds its schema's type and is sent as compact JSON. Media types
+become
 separate types: `...JSONResponse`, `...TextResponse`, binary ones named
 after the subtype (`...PNGResponse`; `image/*` adds a `ContentType` field),
 and streams:
@@ -423,7 +425,10 @@ Replace how errors are written with `server.WithErrorHandler`.
 ## Security
 
 When operations declare security, the generated `SecurityHandler` has one
-method per scheme, receiving the credentials and the required scopes:
+method per scheme, receiving the credentials and the required scopes.
+Requirements may name a scheme by component name or, as 3.2 allows, by
+URI reference (`"#/components/securitySchemes/key"`, `common.yaml#/key`);
+names leading to the same scheme share a method.
 
 | Scheme | Method parameters |
 |---|---|

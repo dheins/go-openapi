@@ -498,3 +498,39 @@ components:
 		t.Errorf("recursive: %q", o.Unsupported)
 	}
 }
+
+func TestSecuritySchemeURIs(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+security:
+  - "#/components/securitySchemes/apiKey": []
+paths:
+  /a:
+    get:
+      operationId: a
+      responses: {"204": {description: ok}}
+  /b:
+    get:
+      operationId: b
+      security: [{apiKey: []}, {"#/$defs/token": []}]
+      responses: {"204": {description: ok}}
+components:
+  securitySchemes:
+    apiKey: {type: apiKey, in: header, name: X-Key}
+$defs:
+  token: {type: http, scheme: bearer}
+`, Options{Operations: true})
+	var schemes []string
+	for _, s := range m.SecuritySchemes {
+		schemes = append(schemes, s.Name+"="+s.Method)
+	}
+	// The URI of a component and its name are one scheme, named after the
+	// component; other URIs are named after their last segment.
+	if got := strings.Join(schemes, " "); got != "apiKey=APIKey #/$defs/token=Token" {
+		t.Errorf("schemes = %s", got)
+	}
+	a, b := operationNamed(t, m, "A"), operationNamed(t, m, "B")
+	if a.Unsupported != "" || b.Unsupported != "" || a.Security[0][0].Scheme != b.Security[0][0].Scheme {
+		t.Errorf("a = %q %+v, b = %q %+v", a.Unsupported, a.Security, b.Unsupported, b.Security)
+	}
+}

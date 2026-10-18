@@ -47,7 +47,8 @@ func (s *store) ListPets(ctx context.Context, req *api.ListPetsRequest) (api.Lis
 	if n, ok := req.Limit.Get(); ok && int(n) < len(pets) {
 		pets = pets[:n]
 	}
-	return api.ListPets200JSONResponse{Body: pets, XTotal: int64(len(s.pets)), XNext: oapi.Some("cursor-2")}, nil
+	return api.ListPets200JSONResponse{Body: pets, XTotal: int64(len(s.pets)), XNext: oapi.Some("cursor-2"),
+		XPage: oapi.Some(model.ListPets200XPage{Size: oapi.Some(int64(len(s.pets))), After: oapi.Some("cursor-2")})}, nil
 }
 
 func (s *store) CreatePet(_ context.Context, req *api.CreatePetRequest) (api.CreatePetResponse, error) {
@@ -285,7 +286,7 @@ func newTestServer() (*store, http.Handler) {
 func TestListPets(t *testing.T) {
 	s, h := newTestServer()
 	r := do(t, h, "GET", "/pets?limit=1&tags=a,b", "", "", "X-Request-ID", "123e4567-e89b-12d3-a456-426614174000")
-	if r.status != 200 || r.header.Get("X-Total") != "2" || r.header.Get("X-Next") != "cursor-2" {
+	if r.status != 200 || r.header.Get("X-Total") != "2" || r.header.Get("X-Next") != "cursor-2" || r.header.Get("X-Page") != `{"size":2,"after":"cursor-2"}` {
 		t.Fatalf("%d %v %s", r.status, r.header, r.body)
 	}
 	if r.body != `[{"id":1,"name":"Rex"}]` {

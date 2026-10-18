@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -190,6 +191,14 @@ func (r *resolver) register(obj any, src *Source, ptr string) error {
 			if v.DynamicRef != "" {
 				r.extras = append(r.extras, extra{o, b, loc})
 			}
+		case *oas.Document:
+			if namesSchemeByURI(v.Security) {
+				r.extras = append(r.extras, extra{o, b, loc})
+			}
+		case *oas.Operation:
+			if namesSchemeByURI(v.Security) {
+				r.extras = append(r.extras, extra{o, b, loc})
+			}
 		}
 		return nil
 	})
@@ -214,8 +223,9 @@ func (r *resolver) run() error {
 }
 
 var (
-	schemaType    = reflect.TypeFor[*oas.Schema]()
-	operationType = reflect.TypeFor[*oas.Operation]()
+	schemaType         = reflect.TypeFor[*oas.Schema]()
+	operationType      = reflect.TypeFor[*oas.Operation]()
+	securitySchemeType = reflect.TypeFor[*oas.SecurityScheme]()
 )
 
 // resolveExtra resolves the references of e that are not $ref.
@@ -255,6 +265,47 @@ func (r *resolver) resolveExtra(e extra) {
 			return
 		}
 		v.DynamicResolved = target.(*oas.Schema)
+	case *oas.Document:
+		r.resolveSecurity(v, v.Security, e)
+	case *oas.Operation:
+		r.resolveSecurity(v, v.Security, e)
+	}
+}
+
+// namesSchemeByURI reports whether a security requirement names a scheme
+// with a URI reference, which 3.2 allows. Component names cannot contain
+// these characters.
+func namesSchemeByURI(reqs []oas.SecurityRequirement) bool {
+	for _, req := range reqs {
+		for name := range req.All() {
+			if isSchemeURI(name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isSchemeURI(name string) bool {
+	return strings.ContainsAny(name, "#/:")
+}
+
+// resolveSecurity resolves the scheme names of owner's security
+// requirements that are URI references rather than component names.
+func (r *resolver) resolveSecurity(owner any, reqs []oas.SecurityRequirement, e extra) {
+	for i, req := range reqs {
+		for name := range req.All() {
+			if !isSchemeURI(name) || r.spec.componentScheme(name) != nil {
+				continue
+			}
+			target, err := r.targetOf(name, e.base, securitySchemeType)
+			if err != nil {
+				r.fail(Location{e.loc.URI, oas.JoinPointer(e.loc.Pointer, "security", strconv.Itoa(i), name)},
+					fmt.Errorf("security scheme %q is neither a component nor a resolvable reference: %w", name, err))
+				continue
+			}
+			r.spec.schemes[schemeKey{owner, name}] = target.(*oas.SecurityScheme)
+		}
 	}
 }
 

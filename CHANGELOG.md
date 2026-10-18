@@ -22,6 +22,13 @@
   value, as JSON. Arrays may also be written `a[]=1` or `a[0]=1`.
   Operations with such bodies or parameters used to be answered with 501
   or 415.
+- Response headers with JSON `content`: a field of the schema's type, sent
+  as compact JSON (`server.FormatJSON`). They used to be left out.
+- Security scheme names written as URI references (3.2), local or in
+  other files: the loader resolves them (`loader.Spec.SecurityScheme`),
+  and a name and a URI leading to the same scheme share one
+  `SecurityHandler` method. Operations using them used to be answered
+  with 501.
 
 ### Changed
 
@@ -37,6 +44,8 @@
   instead of a map of properties; regenerated servers pass it. In form
   fields, an undeclared key with brackets such as `a[b]` is now the
   nested property `b` of `a`.
+- A security requirement naming a scheme by a URI reference that does not
+  resolve is a loading error, like an unresolvable `$ref`.
 
 ## v0.3.1
 

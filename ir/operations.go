@@ -60,6 +60,8 @@ type SecurityScheme struct {
 	// In and ParamName locate an API key.
 	In, ParamName string
 	Doc           string
+
+	def *oas.SecurityScheme
 }
 
 // SecurityUse is a scheme in a security requirement, with the scopes (or
@@ -192,8 +194,11 @@ type Header struct {
 	Doc      string
 	Required bool
 	Array    bool
-	Elem     *Ref
-	Type     *Ref
+	// Content is the media type a header with content is serialized
+	// with (JSON), or "" for a header in the simple style.
+	Content string
+	Elem    *Ref
+	Type    *Ref
 }
 
 // reservedServerNames are exported identifiers the generated server
@@ -956,13 +961,25 @@ func (b *builder) responseHeaders(o *Operation, statusName string, r *oas.Respon
 			continue
 		}
 		hdr := h.Deref()
-		if hdr == nil || hdr.Content.Len() > 0 {
-			b.warnAt(h, nil, fmt.Sprintf("header %q with content is not supported yet and is not sent", name))
+		if hdr == nil {
 			continue
 		}
-		ref := stripNullable(b.use(hdr.Schema, o.Name+statusName+GoName(name), nil))
 		header := &Header{Name: name, Doc: strings.TrimSpace(hdr.Description), Required: hdr.Required}
+		schema := hdr.Schema
+		for mt, m := range hdr.Content.All() {
+			header.Content, schema = strings.ToLower(mt), m.Deref().Schema
+			break
+		}
+		if header.Content != "" && !isJSONMediaType(header.Content) {
+			b.warnAt(h, nil, fmt.Sprintf("header %q with content of type %s is not supported yet and is not sent", name, header.Content))
+			continue
+		}
+		ref := stripNullable(b.use(schema, o.Name+statusName+GoName(name), nil))
 		switch {
+		case header.Content != "":
+			// Any value can be written as JSON.
+			header.Elem = ref
+			header.Type = ref
 		case isScalar(ref):
 			header.Elem = ref
 			header.Type = ref
@@ -1080,11 +1097,17 @@ func (b *builder) security(o *Operation, op *oas.Operation) {
 	if len(reqs) == 0 {
 		return
 	}
+	// Scheme names written as relative URI references are resolved
+	// against the file of the requirement's owner.
+	var owner any = b.spec.Document
+	if op.Security != nil {
+		owner = op
+	}
 	o.Security = [][]*SecurityUse{}
 	for _, req := range reqs {
 		uses := []*SecurityUse{}
 		for name, scopes := range req.All() {
-			scheme, why := b.securityScheme(name)
+			scheme, why := b.securityScheme(owner, name)
 			if why != "" {
 				b.unsupported(o, op, why)
 				return
@@ -1095,21 +1118,21 @@ func (b *builder) security(o *Operation, op *oas.Operation) {
 	}
 }
 
-// securityScheme returns the scheme named name, mapping it on first use.
-func (b *builder) securityScheme(name string) (*SecurityScheme, string) {
+// securityScheme returns the scheme a requirement of owner names, by
+// component name or URI reference, mapping it on first use. Names that
+// lead to the same scheme share one SecurityHandler method.
+func (b *builder) securityScheme(owner any, name string) (*SecurityScheme, string) {
+	def := b.spec.SecurityScheme(owner, name)
+	if def == nil {
+		return nil, fmt.Sprintf("security scheme %q is not defined", name)
+	}
 	for _, s := range b.model.SecuritySchemes {
-		if s.Name == name {
+		if s.def == def {
 			return s, ""
 		}
 	}
-	var def *oas.SecurityScheme
-	if c := b.spec.Document.Components; c != nil {
-		def, _ = c.SecuritySchemes.Get(name)
-	}
-	if def = def.Deref(); def == nil {
-		return nil, fmt.Sprintf("security scheme %q is not a component (URI references to schemes are not supported yet)", name)
-	}
-	s := &SecurityScheme{Name: name, Type: def.Type, Scheme: strings.ToLower(def.Scheme), Doc: strings.TrimSpace(def.Description)}
+	name = b.componentSchemeName(def, name)
+	s := &SecurityScheme{def: def, Name: name, Type: def.Type, Scheme: strings.ToLower(def.Scheme), Doc: strings.TrimSpace(def.Description)}
 	switch def.Type {
 	case "apiKey":
 		s.In, s.ParamName = def.In, def.Name
@@ -1117,9 +1140,28 @@ func (b *builder) securityScheme(name string) (*SecurityScheme, string) {
 	default:
 		return nil, fmt.Sprintf("security scheme %q has the unknown type %q", name, def.Type)
 	}
-	s.Method = b.securityMethods.claim(GoName(name))
+	method := name
+	if i := strings.LastIndexAny(method, "#/:"); i >= 0 {
+		// A URI reference not to a component: name the method after the
+		// last segment, as for a component.
+		method = method[i+1:]
+	}
+	s.Method = b.securityMethods.claim(GoName(method))
 	b.model.SecuritySchemes = append(b.model.SecuritySchemes, s)
 	return s, ""
+}
+
+// componentSchemeName returns the component name of def, or name if def
+// is not a component of the document.
+func (b *builder) componentSchemeName(def *oas.SecurityScheme, name string) string {
+	if c := b.spec.Document.Components; c != nil {
+		for key, s := range c.SecuritySchemes.All() {
+			if s.Deref() == def {
+				return key
+			}
+		}
+	}
+	return name
 }
 
 func nonEmpty(ss ...string) []string {

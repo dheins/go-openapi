@@ -696,7 +696,10 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	}
 	for i, h := range r.Headers {
 		format := "server.FormatScalar"
-		if h.Array {
+		switch {
+		case h.Content != "":
+			format = "server.FormatJSON"
+		case h.Array:
 			format = "server.FormatArray"
 		}
 		value, depth := "r."+h.Field, 1

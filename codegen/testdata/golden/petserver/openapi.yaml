@@ -50,6 +50,16 @@ paths:
               required: true
               schema:
                 type: integer
+            X-Page:
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      size:
+                        type: integer
+                      after:
+                        type: string
           content:
             application/json:
               schema:

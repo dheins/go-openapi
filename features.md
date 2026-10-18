@@ -37,9 +37,7 @@ shipped in.
   — later
 - Arrays of objects and recursive types in form and multipart bodies and
   object parameters (nested objects and maps are supported). — later
-- Header parameters and response headers with `content`. — later
-- Security scheme names written as URI references (3.2). Operations using
-  them are answered with 501. — later
+- Parameters and response headers with `content` other than JSON. — later
 - Callbacks, webhooks and links. — later
 - Serving a document split over several files as one (today
   `server.WithDocument` serves the root file only, so its references to
@@ -73,7 +71,10 @@ Unreleased:
   one. (e681e03)
 - [x] Nested objects and free-form (`additionalProperties`) objects in form
   and multipart bodies, object parameters and form `querystring`, written
-  with brackets (`a[b][c]=v`) or as JSON.
+  with brackets (`a[b][c]=v`) or as JSON. (d6a9821)
+- [x] Response headers with JSON `content`, sent as compact JSON.
+- [x] Security scheme names written as URI references (3.2), resolved by
+  the loader (`loader.Spec.SecurityScheme`).
 
 v0.3.1:
 
