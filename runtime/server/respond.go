@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"encoding"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -110,4 +112,19 @@ func FormatArray[T any](vs []T) (string, error) {
 		items[i] = s
 	}
 	return strings.Join(items, ","), nil
+}
+
+// FormatJSON formats the value of a header serialized as JSON, leaving
+// out write-only properties as in response bodies.
+func FormatJSON[T any](v T) (string, error) {
+	data, err := oapi.EncodeResponse(v)
+	if err != nil {
+		return "", fmt.Errorf("formatting header value: %w", err)
+	}
+	// A header value cannot hold line breaks a custom encoder may write.
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, data); err != nil {
+		return "", fmt.Errorf("formatting header value: %w", err)
+	}
+	return compact.String(), nil
 }

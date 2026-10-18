@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("{\"kind\":\"0\"}0")
+string("kind")
+string("0")

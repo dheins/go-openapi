@@ -32,24 +32,16 @@ shipped in.
   can stream already). — later
 - Bodies in other formats: XML, and multipart types other than
   `multipart/form-data`. — later
-- The multipart `encoding` object (per-part content types and headers), and
-  3.1-style file parts marked only with `contentMediaType` (today a file part
-  must be `format: binary`). — later
-- Form and multipart bodies, object parameters and `querystring` whose
-  properties are nested objects; free-form (`additionalProperties`) form
-  bodies. — later
-- Request bodies whose media types use different schemas (only the first
-  schema's media types are accepted; the rest get 415). — later
-- Header parameters and response headers with `content`. — later
-- Security scheme names written as URI references (3.2). Operations using
-  them are answered with 501. — later
+- Checking the values of multipart part headers against their schemas
+  (only `required` is checked), and `contentEncoding` (`[]byte`) parts.
+  — later
+- Arrays of objects and recursive types in form and multipart bodies and
+  object parameters (nested objects and maps are supported). — later
+- Parameters and response headers with `content` other than JSON. — later
 - Callbacks, webhooks and links. — later
-- Serving a document split over several files as one (today
-  `server.WithDocument` serves the root file only, so its references to
-  other files cannot be followed by clients). — later
-- Generating a decoder per type instead of decoding through `oapi`
-  reflection helpers, to close the remaining gap to plain `encoding/json`
-  (see [docs/benchmarks.md](docs/benchmarks.md)). — later
+- Decoding union variants without their text: an untagged union decodes
+  each variant from it, and a discriminated one reads it twice (the
+  discriminator may come last). — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -64,6 +56,32 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   — not planned
 
 ## Implemented
+
+Unreleased:
+
+- [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
+  schema without a type) and the multipart `encoding` object: per-part
+  content types and required part headers, exposed as `oapi.File.Header`.
+  (6e89155)
+- [x] Request bodies whose media types use different schemas: each Go type
+  gets its own request field next to `Body`; equal inline schemas share
+  one. (e681e03)
+- [x] Nested objects and free-form (`additionalProperties`) objects in form
+  and multipart bodies, object parameters and form `querystring`, written
+  with brackets (`a[b][c]=v`) or as JSON. (d6a9821)
+- [x] Response headers with JSON `content`, sent as compact JSON.
+- [x] Security scheme names written as URI references (3.2), resolved by
+  the loader (`loader.Spec.SecurityScheme`). (d2e4dbe)
+- [x] Serving a document split over several files as one: generated
+  servers embed `loader.Spec.Bundle`, which copies the objects of other
+  files under `components` and rewrites the references to them. (d10c33c)
+- [x] Generated structs decode token by token (`DecodeJSONFrom`,
+  `UnmarshalJSONFrom`), about twice as fast as before with a third of the
+  memory. (0ddd4f7)
+- [x] Generated encoders: structs and sealed unions append their JSON to
+  one buffer (`AppendJSON`), with typed appends for known property types;
+  objects with inline unions decode token by token too, and discriminators
+  are read without collecting the object.
 
 v0.3.1:
 

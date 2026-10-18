@@ -16,6 +16,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"slices"
 	"strings"
 	"testing"
@@ -46,7 +47,8 @@ func (s *store) ListPets(ctx context.Context, req *api.ListPetsRequest) (api.Lis
 	if n, ok := req.Limit.Get(); ok && int(n) < len(pets) {
 		pets = pets[:n]
 	}
-	return api.ListPets200JSONResponse{Body: pets, XTotal: int64(len(s.pets)), XNext: oapi.Some("cursor-2")}, nil
+	return api.ListPets200JSONResponse{Body: pets, XTotal: int64(len(s.pets)), XNext: oapi.Some("cursor-2"),
+		XPage: oapi.Some(model.ListPets200XPage{Size: oapi.Some(int64(len(s.pets))), After: oapi.Some("cursor-2")})}, nil
 }
 
 func (s *store) CreatePet(_ context.Context, req *api.CreatePetRequest) (api.CreatePetResponse, error) {
@@ -137,6 +139,21 @@ func (s *store) Lookup(_ context.Context, req *api.LookupRequest) (api.LookupRes
 func (s *store) UploadPhoto(_ context.Context, req *api.UploadPhotoRequest) (api.UploadPhotoResponse, error) {
 	s.seen["UploadPhoto"] = req
 	return api.UploadPhoto204Response{}, nil
+}
+
+func (s *store) UploadRecords(_ context.Context, req *api.UploadRecordsRequest) (api.UploadRecordsResponse, error) {
+	s.seen["UploadRecords"] = req
+	return api.UploadRecords204Response{}, nil
+}
+
+func (s *store) ImportPet(_ context.Context, req *api.ImportPetRequest) (api.ImportPetResponse, error) {
+	s.seen["ImportPet"] = req
+	return api.ImportPet204Response{}, nil
+}
+
+func (s *store) Upload(_ context.Context, req *api.UploadRequest) (api.UploadResponse, error) {
+	s.seen["Upload"] = req
+	return api.Upload204Response{}, nil
 }
 
 func (s *store) GetPhoto(_ context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {
@@ -269,7 +286,7 @@ func newTestServer() (*store, http.Handler) {
 func TestListPets(t *testing.T) {
 	s, h := newTestServer()
 	r := do(t, h, "GET", "/pets?limit=1&tags=a,b", "", "", "X-Request-ID", "123e4567-e89b-12d3-a456-426614174000")
-	if r.status != 200 || r.header.Get("X-Total") != "2" || r.header.Get("X-Next") != "cursor-2" {
+	if r.status != 200 || r.header.Get("X-Total") != "2" || r.header.Get("X-Next") != "cursor-2" || r.header.Get("X-Page") != `{"size":2,"after":"cursor-2"}` {
 		t.Fatalf("%d %v %s", r.status, r.header, r.body)
 	}
 	if r.body != `[{"id":1,"name":"Rex"}]` {
@@ -577,6 +594,165 @@ func TestMultipartUpload(t *testing.T) {
 	}
 }
 
+// recordsBody builds a multipart body with one part per header and data.
+func recordsBody(t *testing.T, parts ...any) (string, string) {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	for i := 0; i < len(parts); i += 2 {
+		pw, err := mw.CreatePart(parts[i].(textproto.MIMEHeader))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pw.Write(parts[i+1].([]byte))
+	}
+	mw.Close()
+	return mw.FormDataContentType(), body.String()
+}
+
+func part(name, filename, contentType string, extra ...string) textproto.MIMEHeader {
+	h := textproto.MIMEHeader{}
+	disposition := fmt.Sprintf("form-data; name=%q", name)
+	if filename != "" {
+		disposition += fmt.Sprintf("; filename=%q", filename)
+	}
+	h.Set("Content-Disposition", disposition)
+	if contentType != "" {
+		h.Set("Content-Type", contentType)
+	}
+	for i := 0; i < len(extra); i += 2 {
+		h.Set(extra[i], extra[i+1])
+	}
+	return h
+}
+
+func TestMultipartFileParts(t *testing.T) {
+	s, h := newTestServer()
+	binary := []byte{0x89, 'P', 'N', 'G', 0xff, 0x00}
+	ct, body := recordsBody(t,
+		// contentMediaType parts are files with or without a file name.
+		part("report", "", "application/pdf", "X-Checksum", "abc"), []byte("%PDF"),
+		part("scans", "a.png", "image/png"), binary,
+		part("scans", "b.jpg", "image/jpeg; q=1"), []byte("JPEG"),
+		// An untyped part is a file and may have any content type.
+		part("attachment", "notes.txt", ""), []byte("hello"),
+	)
+	r := do(t, h, "POST", "/pets/1/records", ct, body)
+	if r.status != 204 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	got := s.seen["UploadRecords"].(*api.UploadRecordsRequest).Body
+	if string(got.Report.Data) != "%PDF" || got.Report.Name != "" || got.Report.Header.Get("X-Checksum") != "abc" {
+		t.Errorf("report = %+v", got.Report)
+	}
+	if len(got.Scans.Value) != 2 || !bytes.Equal(got.Scans.Value[0].Data, binary) || got.Scans.Value[1].ContentType != "image/jpeg; q=1" {
+		t.Errorf("scans = %+v", got.Scans)
+	}
+	if !got.Attachment.Set || got.Attachment.Value.Name != "notes.txt" || string(got.Attachment.Value.Data) != "hello" {
+		t.Errorf("attachment = %+v", got.Attachment)
+	}
+
+	// Parts that break their encoding are reported together.
+	ct, body = recordsBody(t,
+		part("report", "r.txt", "text/plain"), []byte("text"),
+		part("scans", "a.gif", "image/gif"), []byte("GIF"),
+	)
+	r = do(t, h, "POST", "/pets/1/records", ct, body)
+	want := []string{
+		`body /report: content type "text/plain" is not allowed; expected application/pdf`,
+		`body /scans: content type "image/gif" is not allowed; expected image/png, image/jpeg`,
+	}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+
+	ct, body = recordsBody(t, part("report", "r.pdf", "application/pdf"), []byte("%PDF"))
+	r = do(t, h, "POST", "/pets/1/records", ct, body)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{`body /report: part header "X-Checksum" is missing`}) {
+		t.Errorf("errors = %q", got)
+	}
+}
+
+func TestBodiesWithDifferentSchemas(t *testing.T) {
+	s, h := newTestServer()
+	importPet := func(contentType, body string) *api.ImportPetRequest {
+		t.Helper()
+		r := do(t, h, "POST", "/pets/import", contentType, body)
+		if r.status != 204 {
+			t.Fatalf("%s: %d %s", contentType, r.status, r.body)
+		}
+		return s.seen["ImportPet"].(*api.ImportPetRequest)
+	}
+	if got := importPet("application/json", `{"name": "Rex", "photoUrls": []}`); !got.Body.Set || got.Body.Value.Name != "Rex" || got.JSONBody.Set {
+		t.Errorf("json = %+v", got)
+	}
+	// Equal schemas share a field.
+	if got := importPet("application/merge-patch+json", `{"name": "Rex"}`); got.Body.Set || got.JSONBody.Value.Name.Value != "Rex" || got.ContentType != "application/merge-patch+json" {
+		t.Errorf("merge patch = %+v", got)
+	}
+	if got := importPet("application/x-www-form-urlencoded", "name=Rex"); got.JSONBody.Value.Name.Value != "Rex" || got.ContentType != "application/x-www-form-urlencoded" {
+		t.Errorf("form = %+v", got)
+	}
+	ct, body := recordsBody(t, part("photo", "rex.png", "image/png"), []byte("PNG"))
+	if got := importPet(ct, body); string(got.MultipartBody.Value.Photo.Data) != "PNG" {
+		t.Errorf("multipart = %+v", got)
+	}
+	if got := importPet("text/csv", "name\nRex\n"); got.TextBody.Value != "name\nRex\n" || got.Body.Set {
+		t.Errorf("csv = %+v", got)
+	}
+	if got := importPet("", ""); got.Body.Set || got.JSONBody.Set || got.MultipartBody.Set || got.TextBody.Set {
+		t.Errorf("no body = %+v", got)
+	}
+
+	// Each field validates against its own schema.
+	r := do(t, h, "POST", "/pets/import", "application/merge-patch+json", `{"name": ""}`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /name: length must be at least 1"}) {
+		t.Errorf("errors = %q", got)
+	}
+}
+
+func TestNestedFields(t *testing.T) {
+	s, h := newTestServer()
+	// A form body, a deepObject parameter and a form querystring write
+	// nested objects and maps with brackets.
+	if r := do(t, h, "POST", "/pets/form", "application/x-www-form-urlencoded", "role=admin&owner[name]=Ann&owner[age]=40&labels[a]=1&labels[b]=2"); r.status != 204 {
+		t.Fatalf("form: %d %s", r.status, r.body)
+	}
+	got := s.seen["SubmitForm"].(*api.SubmitFormRequest).Body
+	if got.Owner.Value.Name.Value != "Ann" || got.Owner.Value.Age.Value != 40 || got.Labels.Value["b"] != 2 {
+		t.Errorf("form = %+v", got)
+	}
+	if r := do(t, h, "GET", "/reports/;ids=1?filter[role]=admin&filter[owner][age]=7&filter[labels][x]=3", "", ""); r.status != 204 {
+		t.Fatalf("deepObject: %d %s", r.status, r.body)
+	}
+	f := s.seen["GetReports"].(*api.GetReportsRequest).Filter.Value
+	if f.Owner.Value.Age.Value != 7 || f.Labels.Value["x"] != 3 {
+		t.Errorf("deepObject filter = %+v", f)
+	}
+	if r := do(t, h, "GET", "/lookup?role=user&owner[name]=Bo", "", ""); r.status != 204 {
+		t.Fatalf("querystring: %d %s", r.status, r.body)
+	}
+	if c := s.seen["Lookup"].(*api.LookupRequest).Criteria.Value; c.Owner.Value.Name.Value != "Bo" {
+		t.Errorf("querystring = %+v", c)
+	}
+
+	// Errors point into the nested value.
+	r := do(t, h, "POST", "/pets/form", "application/x-www-form-urlencoded", "role=admin&owner[age]=old&labels[a]=x")
+	want := []string{"body /labels/a: expected integer, got string", "body /owner/age: expected integer, got string"}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+
+	// A free-form multipart body keeps every field.
+	ct, body := recordsBody(t, part("a", "", ""), []byte("1"), part("b", "", ""), []byte("x"))
+	if r := do(t, h, "POST", "/upload", ct, body); r.status != 204 {
+		t.Fatalf("upload: %d %s", r.status, r.body)
+	}
+	if got := s.seen["Upload"].(*api.UploadRequest).Body.Value; got["a"] != "1" || got["b"] != "x" {
+		t.Errorf("upload = %v", got)
+	}
+}
+
 func TestFormAndJSONBodies(t *testing.T) {
 	s, h := newTestServer()
 	if r := do(t, h, "POST", "/pets/form", "application/x-www-form-urlencoded", "role=admin&age=3&tags=a&tags=b"); r.status != 204 {
@@ -659,10 +835,6 @@ func TestQueryMethodWithOptionalBody(t *testing.T) {
 
 func TestUnsupportedAndMisbehavingOperations(t *testing.T) {
 	_, h := newTestServer()
-	r := do(t, h, "POST", "/upload", "multipart/form-data", "")
-	if r.status != 501 || !strings.Contains(r.body, "multipart/form-data") {
-		t.Errorf("upload: %d %s", r.status, r.body)
-	}
 	// Secure returns neither a response nor an error.
 	if r := do(t, h, "GET", "/secure", "", "", "X-API-Key", "good"); r.status != 500 {
 		t.Errorf("nil response: %d %s", r.status, r.body)

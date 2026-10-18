@@ -74,7 +74,7 @@ paths:
       operationId: replaceItem
       security: [{}]
       parameters:
-        - {name: filter, in: query, style: deepObject, schema: {type: object}}
+        - {name: filter, in: query, schema: {type: array, items: {type: object}}}
       responses:
         "204": {description: ok}
   /a/{x}/b:
@@ -121,7 +121,7 @@ components:
 	}
 
 	if put := operationNamed(t, m, "ReplaceItem"); !strings.Contains(put.Unsupported, "not a primitive value, an array of them, or an object of them") {
-		t.Errorf("deepObject with a free-form object: %q", put.Unsupported)
+		t.Errorf("array of objects: %q", put.Unsupported)
 	}
 	if second := operationNamed(t, m, "Second"); !strings.Contains(second.Unsupported, "conflicts") || second.Pattern != "" {
 		t.Errorf("conflicting route: %+v", second)
@@ -229,7 +229,7 @@ components:
 		t.Errorf("params:\n%s\nwant\n%s", strings.Join(got, " "), want)
 	}
 	filter := styles.Params[1]
-	if fmt.Sprint(filter.Properties) != "[{role string false} {age integer false} {tags string true}]" {
+	if fmt.Sprint(filter.Properties) != "[{role string false [] <nil> [] []} {age integer false [] <nil> [] []} {tags string true [] <nil> [] []}]" {
 		t.Errorf("properties = %v", filter.Properties)
 	}
 	if !styles.Params[3].AllowEmptyValue {
@@ -282,13 +282,20 @@ components:
 	for _, bm := range o.Body.Media {
 		media = append(media, bm.MediaType+"="+bm.Kind)
 	}
-	// A form cannot carry the binary photo; text/plain is a different kind
-	// than the first (structured) media type; request streams are not
-	// supported. All three are answered with 415.
-	if strings.Join(media, " ") != "application/json=json multipart/form-data=multipart" {
+	// A form cannot carry the binary photo and request streams are not
+	// supported: both are answered with 415. text/plain is a different
+	// kind than the first (structured) media type and gets its own field.
+	if strings.Join(media, " ") != "application/json=json multipart/form-data=multipart text/plain=text" {
 		t.Fatalf("body media = %v", media)
 	}
-	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false} {photo file false} {tags string true}]" {
+	var fields []string
+	for _, f := range o.Body.Fields {
+		fields = append(fields, fmt.Sprintf("%s:%d", f.Name, len(f.Media)))
+	}
+	if strings.Join(fields, " ") != "Body:2 TextBody:1" || o.Body.Fields[1].Type.Kind != Optional {
+		t.Errorf("body fields = %v", fields)
+	}
+	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] <nil> [] []} {photo file false [] <nil> [] []} {tags string true [] <nil> [] []}]" {
 		t.Errorf("multipart properties = %s", props)
 	}
 	var warnings []string
@@ -296,7 +303,7 @@ components:
 		warnings = append(warnings, w.Message)
 	}
 	all := strings.Join(warnings, "\n")
-	for _, want := range []string{"form bodies must be objects", "text/plain cannot share a Go type", "application/jsonl are not supported yet"} {
+	for _, want := range []string{"form bodies must be objects", "application/jsonl are not supported yet"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no warning mentioning %q in:\n%s", want, all)
 		}
@@ -353,5 +360,177 @@ components:
 	arr := tags.Type.Elem
 	if !tags.Array || arr.Kind != Slice || arr.Checks == nil || *arr.Checks.MaxItems != 3 || *tags.Elem.Checks.MinLength != 2 {
 		t.Errorf("tags = %+v, array = %+v", tags, arr)
+	}
+}
+
+func TestMultipartFileParts(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /docs:
+    post:
+      operationId: upload
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                pdf: {type: string, contentMediaType: application/pdf}
+                untyped: {}
+                anything: true
+                scans: {type: array, items: {contentMediaType: image/png}}
+                caption: {type: string}
+            encoding:
+              pdf: {contentType: "application/pdf; version=1.7", headers: {X-Sum: {required: true}, Content-Type: {required: true}}}
+      responses: {"204": {description: ok}}
+    put:
+      operationId: replace
+      requestBody:
+        content:
+          application/json: {schema: {$ref: "#/components/schemas/Doc"}}
+      responses: {"204": {description: ok}}
+components:
+  schemas:
+    Doc:
+      type: object
+      properties:
+        pdf: {type: string, contentMediaType: application/pdf}
+`, Options{Operations: true})
+	props := operationNamed(t, m, "Upload").Body.Media[0].Properties
+	if got := fmt.Sprint(props); got != "[{pdf file false [] <nil> [application/pdf] [X-Sum]} {untyped file false [] <nil> [] []} {anything file false [] <nil> [] []} {scans file true [] <nil> [] []} {caption string false [] <nil> [] []}]" {
+		t.Errorf("multipart properties = %s", got)
+	}
+	// Outside multipart, a contentMediaType string holds text.
+	pdf := typeNamed(t, m, "Doc").Fields[0].Type
+	for pdf.Kind == Optional {
+		pdf = pdf.Elem
+	}
+	if pdf.Kind != Builtin || pdf.Name != "string" {
+		t.Errorf("Doc.pdf = %+v", pdf)
+	}
+}
+
+func TestBodyFieldsPerSchema(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /pets:
+    post:
+      operationId: create
+      parameters:
+        - {name: jsonBody, in: query, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object, properties: {a: {type: string}}}}
+          application/merge-patch+json: {schema: {type: object, properties: {b: {type: string}}}}
+          application/vnd.pet+json: {schema: {type: object, properties: {c: {type: string}}}}
+          application/xml: {schema: {type: object, properties: {a: {type: string}}}}
+          application/octet-stream: {schema: {type: string, format: binary}}
+      responses: {"204": {description: ok}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Create")
+	var fields []string
+	for _, f := range o.Body.Fields {
+		fields = append(fields, f.Name+"="+f.Media[0].MediaType)
+	}
+	// The parameter claimed JSONBody, so the media type names the field; XML with an object schema is
+	// answered with 415, but bytes described as a string are passed on.
+	want := "Body=application/json ApplicationMergePatchJSONBody=application/merge-patch+json ApplicationVndPetJSONBody=application/vnd.pet+json BinaryBody=application/octet-stream"
+	if got := strings.Join(fields, " "); got != want {
+		t.Errorf("fields:\n%s\nwant\n%s", got, want)
+	}
+	if o.Body.Fields[0].Type.Kind == Optional || o.Body.Fields[1].Type.Kind != Optional {
+		t.Errorf("Body should be required and the others optional: %+v", o.Body.Fields)
+	}
+}
+
+func TestNestedObjectParameters(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /deep:
+    get:
+      operationId: deep
+      parameters:
+        - {name: f, in: query, style: deepObject, explode: true, schema: {$ref: "#/components/schemas/Filter"}}
+        - {name: m, in: query, style: deepObject, explode: true, schema: {type: object, additionalProperties: {type: integer}}}
+      responses: {"204": {description: ok}}
+  /exploded:
+    get:
+      operationId: exploded
+      parameters:
+        - {name: m, in: query, schema: {type: object, additionalProperties: {type: string}}}
+      responses: {"204": {description: ok}}
+  /recursive:
+    get:
+      operationId: recursive
+      parameters:
+        - {name: n, in: query, style: deepObject, explode: true, schema: {$ref: "#/components/schemas/Node"}}
+      responses: {"204": {description: ok}}
+components:
+  schemas:
+    Filter:
+      type: object
+      properties:
+        owner: {type: object, properties: {age: {type: integer}}}
+        any: {}
+    Node:
+      type: object
+      properties:
+        child: {$ref: "#/components/schemas/Node"}
+`, Options{Operations: true})
+	deep := operationNamed(t, m, "Deep")
+	if deep.Unsupported != "" {
+		t.Fatalf("deep: %s", deep.Unsupported)
+	}
+	if got := fmt.Sprint(deep.Params[0].Properties); got != "[{owner object false [{age integer false [] <nil> [] []}] <nil> [] []} {any any false [] <nil> [] []}]" {
+		t.Errorf("nested properties = %s", got)
+	}
+	if a := deep.Params[1].Additional; a == nil || a.Type != "integer" {
+		t.Errorf("map additional = %+v", a)
+	}
+	if o := operationNamed(t, m, "Exploded"); !strings.Contains(o.Unsupported, "cannot use the exploded form style") {
+		t.Errorf("exploded map: %q", o.Unsupported)
+	}
+	if o := operationNamed(t, m, "Recursive"); !strings.Contains(o.Unsupported, "not a primitive value") {
+		t.Errorf("recursive: %q", o.Unsupported)
+	}
+}
+
+func TestSecuritySchemeURIs(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+security:
+  - "#/components/securitySchemes/apiKey": []
+paths:
+  /a:
+    get:
+      operationId: a
+      responses: {"204": {description: ok}}
+  /b:
+    get:
+      operationId: b
+      security: [{apiKey: []}, {"#/$defs/token": []}]
+      responses: {"204": {description: ok}}
+components:
+  securitySchemes:
+    apiKey: {type: apiKey, in: header, name: X-Key}
+$defs:
+  token: {type: http, scheme: bearer}
+`, Options{Operations: true})
+	var schemes []string
+	for _, s := range m.SecuritySchemes {
+		schemes = append(schemes, s.Name+"="+s.Method)
+	}
+	// The URI of a component and its name are one scheme, named after the
+	// component; other URIs are named after their last segment.
+	if got := strings.Join(schemes, " "); got != "apiKey=APIKey #/$defs/token=Token" {
+		t.Errorf("schemes = %s", got)
+	}
+	a, b := operationNamed(t, m, "A"), operationNamed(t, m, "B")
+	if a.Unsupported != "" || b.Unsupported != "" || a.Security[0][0].Scheme != b.Security[0][0].Scheme {
+		t.Errorf("a = %q %+v, b = %q %+v", a.Unsupported, a.Security, b.Unsupported, b.Security)
 	}
 }

@@ -2,8 +2,11 @@ package oapi
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 type fuzzTarget struct {
@@ -97,6 +100,64 @@ func FuzzEnsureProperty(f *testing.F) {
 		var got map[string]any
 		if err := Decode(out, &got); err != nil {
 			t.Fatalf("output is not an object: %v\n%s", err, out)
+		}
+	})
+}
+
+// FuzzDecodeFrom checks that decoding token by token gives the same value
+// and the same problems as decoding the value's text.
+func FuzzDecodeFrom(f *testing.F) {
+	for _, seed := range []string{
+		`{"s": "a", "n": null, "l": [true, null], "m": {"b": [1], "a": ["x"]}, "a": {"k": 1}, "p": {"s": 1}, "d": "2024-02-29", "f": {"z": 1}}`,
+		`[1, "a", null]`, `{"a": 1, "a": 2}`, `"\u00e9"`, `{"x": [1, {"y": [2, "z"]}]}`, `null`, `[]`, `{}`, `1e400`, `{"m": null}`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if !json.Valid(data) {
+			return
+		}
+		same[fuzzTarget](t, data)
+		same[[]Optional[Nullable[int64]]](t, data)
+		same[map[string][]Optional[string]](t, data)
+		same[Optional[map[string]*fuzzTarget]](t, data)
+		same[Nullable[[]Date]](t, data)
+		same[*[]bool](t, data)
+		same[any](t, data)
+	})
+}
+
+func same[T any](t *testing.T, data []byte) {
+	t.Helper()
+	var byText, byTokens T
+	errText := DecodeField(data, &byText, false, Request)
+	errTokens := DecodeJSONWith(data, func(dec *jsontext.Decoder) error {
+		return DecodeFrom(dec, &byTokens, false, Request)
+	})
+	if fmt.Sprint(errText) != fmt.Sprint(errTokens) {
+		t.Fatalf("%T from %s:\nby text:   %v\nby tokens: %v", byText, data, errText, errTokens)
+	}
+	if errText == nil && !reflect.DeepEqual(byText, byTokens) {
+		t.Fatalf("%T from %s:\nby text:   %#v\nby tokens: %#v", byText, data, byText, byTokens)
+	}
+}
+
+// FuzzAppendValue checks the fast paths of AppendValue against
+// encoding/json, which they must match byte for byte.
+func FuzzAppendValue(f *testing.F) {
+	f.Add(1.5, "a<b>& \xff", int64(1e18), 2024, 2, 29)
+	f.Add(1e21, "", int64(-1), -1, 13, 0)
+	f.Add(1e-7, "\"\\", int64(0), 10000, 1, 1)
+	f.Add(123456789.0, "plain", int64(5), 1, 12, 31)
+	f.Fuzz(func(t *testing.T, x float64, s string, sec int64, year, month, day int) {
+		tm := time.Unix(sec, int64(year)).UTC()
+		date := Date{Year: year, Month: time.Month(month), Day: day}
+		for _, v := range []any{x, float32(x), s, []string{s, s}, tm, date, Optional[float64]{Value: x, Set: true}} {
+			want, wantErr := json.Marshal(v)
+			got, err := AppendValue([]byte("prefix"), v, Request)
+			if (err != nil) != (wantErr != nil) || err == nil && string(got) != "prefix"+string(want) {
+				t.Fatalf("%T %v: got %s (%v), want %s (%v)", v, v, got, err, want, wantErr)
+			}
 		}
 	})
 }

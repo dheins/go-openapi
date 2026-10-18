@@ -3,20 +3,24 @@ package oapi
 import (
 	"encoding/json"
 	"errors"
+	"net/textproto"
 	"unicode/utf8"
 )
 
 // File is binary content: a "format: binary" value, such as a file part
-// of a multipart request body.
+// of a multipart request body. In multipart bodies, strings with a
+// contentMediaType and properties without a type are files too. Header
+// holds the headers of the part it was read from.
 //
 // In JSON, which cannot hold bytes, a File is written as a string of its
-// data, and Name and ContentType are not kept. Data that is not valid
-// UTF-8 cannot be such a string without being changed, so encoding it is
-// an error; for binary data in JSON, use contentEncoding: base64, which is
-// generated as []byte.
+// data, and Name, ContentType and Header are not kept. Data that is not
+// valid UTF-8 cannot be such a string without being changed, so encoding
+// it is an error; for binary data in JSON, use contentEncoding: base64,
+// which is generated as []byte.
 type File struct {
 	Name        string
 	ContentType string
+	Header      textproto.MIMEHeader
 	Data        []byte
 }
 

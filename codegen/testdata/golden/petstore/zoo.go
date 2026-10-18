@@ -3,6 +3,9 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+	"fmt"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -24,17 +27,44 @@ func (m *Zoo) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Zoo) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Zoo) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Zoo) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Zoo
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "animals":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Animals, false, dir)
+		case "choice":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Choice, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Zoo
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["animals"]; ok {
-		errs.Nested("/animals", oapi.DecodeField(raw, &v.Animals, false, dir))
+	if seen[0] {
+		errs.Nested("/animals", problems[0])
 	}
-	if raw, ok := fields["choice"]; ok {
-		errs.Nested("/choice", oapi.DecodeField(raw, &v.Choice, false, dir))
+	if seen[1] {
+		errs.Nested("/choice", problems[1])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -51,14 +81,33 @@ func (m Zoo) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Zoo) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Zoo) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	if m.Animals.Set {
-		enc.Field("animals", m.Animals)
+		dst = append(dst, "\"animals\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Animals.Value, dir); err != nil {
+			return nil, fmt.Errorf("animals: %w", err)
+		}
+		dst = append(dst, ',')
 	}
 	if m.Choice.Set {
-		enc.Field("choice", m.Choice)
+		dst = append(dst, "\"choice\":"...)
+		if !m.Choice.Value.Valid {
+			dst = append(dst, "null"...)
+		} else {
+			if dst, err = oapi.AppendValue(dst, m.Choice.Value.Value, dir); err != nil {
+				return nil, fmt.Errorf("choice: %w", err)
+			}
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

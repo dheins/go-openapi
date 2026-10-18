@@ -143,8 +143,11 @@ func (p Param) QueryValues(q url.Values) (Values, bool, error) {
 		fields := map[string][]string{}
 		prefix := p.Name + "["
 		for key, vals := range q {
-			if prop, ok := strings.CutPrefix(key, prefix); ok && strings.HasSuffix(prop, "]") {
-				fields[strings.TrimSuffix(prop, "]")] = vals
+			// filter[author][name] is the field author[name].
+			if rest, ok := strings.CutPrefix(key, prefix); ok {
+				if prop, nested, ok := strings.Cut(rest, "]"); ok && prop != "" {
+					fields[prop+nested] = vals
+				}
 			}
 		}
 		return Values{Fields: fields}, len(fields) > 0, nil
@@ -249,9 +252,9 @@ func split(s, sep string) []string {
 
 // DecodeFields decodes the fields of an object parameter (or the whole
 // query string) into T, as a request: see ObjectJSON.
-func DecodeFields[T any](fields map[string][]string, props map[string]Property) (T, error) {
+func DecodeFields[T any](fields map[string][]string, obj Property) (T, error) {
 	var v T
-	data, err := ObjectJSON(fields, props)
+	data, err := ObjectJSON(fields, obj)
 	if err != nil {
 		return v, err
 	}
@@ -306,48 +309,166 @@ func QueryString(r *http.Request) (string, bool, error) {
 }
 
 // Property describes the type of an object property for ObjectJSON: a
-// JSON Schema type name, and whether the value is an array of it.
+// JSON Schema type name ("string", "integer", "number", "boolean",
+// "object", "file", or "any" for a value of any type), and whether the
+// value is an array of it. An object lists its Properties and the type
+// of any others (Additional; strings if nil). For a multipart part, it
+// also says which content types the part may declare (any if empty) and
+// which headers it must carry, from its encoding.
 type Property struct {
-	Type  string
-	Array bool
+	Type         string
+	Array        bool
+	Properties   map[string]Property
+	Additional   *Property
+	ContentTypes []string
+	Headers      []string
 }
 
 // ObjectJSON converts the fields of an object parameter or form body to a
-// JSON object, using the property types to decide which values are
+// JSON object, using the property types of obj to decide which values are
 // numbers and booleans. A value that does not parse as its type is kept
-// as a string, so decoding reports it as the wrong type. Properties not
-// in props are strings.
-func ObjectJSON(fields map[string][]string, props map[string]Property) ([]byte, error) {
-	names := make([]string, 0, len(fields))
-	for name := range fields {
+// as a string, so decoding reports it as the wrong type.
+//
+// Nested objects are written with brackets, as in deepObject parameters:
+// "a[b][c]=v". An array may be written "a=1&a=2", "a[]=1&a[]=2" or
+// "a[0]=1&a[1]=2". An object given as a single value is read as JSON,
+// the default content type of objects in form and multipart bodies. A
+// field named exactly like a declared property is that property, even if
+// it contains brackets.
+func ObjectJSON(fields map[string][]string, obj Property) ([]byte, error) {
+	root := &fieldNode{}
+	for key, vals := range fields {
+		path := []string{key}
+		if _, declared := obj.Properties[key]; !declared {
+			path = splitKey(key)
+		}
+		root.insert(path, vals)
+	}
+	return root.json("", obj)
+}
+
+// fieldNode is a field value, or the fields below a bracketed key.
+type fieldNode struct {
+	values   []string
+	children map[string]*fieldNode
+}
+
+func (n *fieldNode) insert(path []string, vals []string) {
+	for _, name := range path {
+		if n.children == nil {
+			n.children = map[string]*fieldNode{}
+		}
+		child, ok := n.children[name]
+		if !ok {
+			child = &fieldNode{}
+			n.children[name] = child
+		}
+		n = child
+	}
+	n.values = append(n.values, vals...)
+}
+
+// splitKey splits "a[b][c]" into a, b and c; a trailing "[]" only marks
+// an array. A key that is not of this form is a name of its own.
+func splitKey(key string) []string {
+	name, rest, ok := strings.Cut(key, "[")
+	if !ok || name == "" || rest == "" {
+		return []string{key}
+	}
+	path := []string{name}
+	for rest != "" {
+		seg, after, ok := strings.Cut(rest, "]")
+		if !ok || (after != "" && !strings.HasPrefix(after, "[")) || strings.Contains(seg, "[") {
+			return []string{key}
+		}
+		if seg == "" && after != "" {
+			// "a[][b]": arrays of objects are not written this way here.
+			return []string{key}
+		}
+		if seg != "" {
+			path = append(path, seg)
+		}
+		rest = strings.TrimPrefix(after, "[")
+	}
+	return path
+}
+
+// json renders n, found at the JSON pointer path, as a value of prop.
+func (n *fieldNode) json(path string, prop Property) (json.RawMessage, error) {
+	if len(n.children) > 0 && len(n.values) > 0 {
+		return nil, &oapi.ValidationError{Path: path, Message: "both a value and nested properties"}
+	}
+	if len(n.children) > 0 {
+		if prop.Array {
+			return n.indexedJSON(path, prop)
+		}
+		if prop.Type != "object" && prop.Type != "any" {
+			return nil, &oapi.ValidationError{Path: path, Message: "expected a value, got nested properties"}
+		}
+		return n.objectJSON(path, prop)
+	}
+	vals := n.values
+	if prop.Array {
+		items := make([]json.RawMessage, len(vals))
+		for i, v := range vals {
+			items[i] = scalarJSON(v, prop.Type)
+		}
+		return json.Marshal(items)
+	}
+	if len(vals) != 1 {
+		return nil, &oapi.ValidationError{Path: path, Message: fmt.Sprintf("expected a single value, got %d", len(vals))}
+	}
+	return scalarJSON(vals[0], prop.Type), nil
+}
+
+func (n *fieldNode) objectJSON(path string, prop Property) (json.RawMessage, error) {
+	names := make([]string, 0, len(n.children))
+	for name := range n.children {
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	obj := make(map[string]json.RawMessage, len(fields))
+	obj := make(map[string]json.RawMessage, len(names))
 	for _, name := range names {
-		vals := fields[name]
-		prop, ok := props[name]
-		if !ok {
-			prop = Property{Type: "string", Array: len(vals) > 1}
+		child := n.children[name]
+		cp, ok := prop.Properties[name]
+		switch {
+		case ok:
+		case prop.Additional != nil:
+			cp = *prop.Additional
+		case len(child.children) > 0:
+			cp = Property{Type: "any"}
+		default:
+			cp = Property{Type: "string", Array: len(child.values) > 1}
 		}
-		if prop.Array {
-			items := make([]json.RawMessage, len(vals))
-			for i, v := range vals {
-				items[i] = scalarJSON(v, prop.Type)
-			}
-			data, err := json.Marshal(items)
-			if err != nil {
-				return nil, err
-			}
-			obj[name] = data
-			continue
+		data, err := child.json(oapi.Field(path, name), cp)
+		if err != nil {
+			return nil, err
 		}
-		if len(vals) != 1 {
-			return nil, &oapi.ValidationError{Path: oapi.Field("", name), Message: fmt.Sprintf("expected a single value, got %d", len(vals))}
-		}
-		obj[name] = scalarJSON(vals[0], prop.Type)
+		obj[name] = data
 	}
 	return json.Marshal(obj)
+}
+
+// indexedJSON renders "a[0]=x&a[1]=y" as an array, in index order.
+func (n *fieldNode) indexedJSON(path string, prop Property) (json.RawMessage, error) {
+	type item struct {
+		index int
+		value string
+	}
+	var items []item
+	for key, child := range n.children {
+		i, err := strconv.Atoi(key)
+		if err != nil || i < 0 || len(child.children) > 0 || len(child.values) != 1 {
+			return nil, &oapi.ValidationError{Path: oapi.Field(path, key), Message: "expected an array item with an index"}
+		}
+		items = append(items, item{i, child.values[0]})
+	}
+	slices.SortFunc(items, func(a, b item) int { return a.index - b.index })
+	out := make([]json.RawMessage, len(items))
+	for i, it := range items {
+		out[i] = scalarJSON(it.value, prop.Type)
+	}
+	return json.Marshal(out)
 }
 
 // scalarJSON renders a text value as JSON of the given type, or as a
@@ -364,6 +485,10 @@ func scalarJSON(v, typ string) json.RawMessage {
 		}
 	case "boolean":
 		if v == "true" || v == "false" {
+			return json.RawMessage(v)
+		}
+	case "object":
+		if strings.HasPrefix(strings.TrimSpace(v), "{") && json.Valid([]byte(v)) {
 			return json.RawMessage(v)
 		}
 	}

@@ -3,6 +3,8 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -27,22 +29,52 @@ func (m *Contact) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Contact) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Contact) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Contact) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Contact
+	var seen [3]bool
+	var problems [3]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "name":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Name, false, dir)
+		case "email":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Email, false, dir)
+		case "phone":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Phone, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Contact
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["name"]; ok {
-		errs.Nested("/name", oapi.DecodeField(raw, &v.Name, false, dir))
+	if seen[0] {
+		errs.Nested("/name", problems[0])
 	} else {
 		errs.Add("/name", "required property is missing")
 	}
-	if raw, ok := fields["email"]; ok {
-		errs.Nested("/email", oapi.DecodeField(raw, &v.Email, false, dir))
+	if seen[1] {
+		errs.Nested("/email", problems[1])
 	}
-	if raw, ok := fields["phone"]; ok {
-		errs.Nested("/phone", oapi.DecodeField(raw, &v.Phone, false, dir))
+	if seen[2] {
+		errs.Nested("/phone", problems[2])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -59,15 +91,27 @@ func (m Contact) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Contact) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("name", m.Name)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Contact) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"name\":"...)
+	dst = oapi.AppendString(dst, m.Name)
+	dst = append(dst, ',')
 	if m.Email.Set {
-		enc.Field("email", m.Email)
+		dst = append(dst, "\"email\":"...)
+		dst = oapi.AppendString(dst, m.Email.Value)
+		dst = append(dst, ',')
 	}
 	if m.Phone.Set {
-		enc.Field("phone", m.Phone)
+		dst = append(dst, "\"phone\":"...)
+		dst = oapi.AppendString(dst, m.Phone.Value)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

@@ -14,9 +14,9 @@ import (
 
 var getReportsIDsParam = server.Param{Name: "ids", Style: "matrix", Explode: true, Shape: server.Array}
 
-var getReportsFilterProperties = map[string]server.Property{"role": {Type: "string", Array: false}, "age": {Type: "integer", Array: false}, "tags": {Type: "string", Array: true}}
+var getReportsFilterProperties = server.Property{Type: "object", Properties: map[string]server.Property{"role": {Type: "string"}, "age": {Type: "integer"}, "tags": {Type: "string", Array: true}, "owner": {Type: "object", Properties: map[string]server.Property{"name": {Type: "string"}, "age": {Type: "integer"}}}, "labels": {Type: "object", Additional: &server.Property{Type: "integer"}}}}
 
-var getReportsFilterParam = server.Param{Name: "filter", Style: "deepObject", Explode: true, Shape: server.Object, Properties: []string{"role", "age", "tags"}}
+var getReportsFilterParam = server.Param{Name: "filter", Style: "deepObject", Explode: true, Shape: server.Object, Properties: []string{"role", "age", "tags", "owner", "labels"}}
 
 var getReportsFieldsParam = server.Param{Name: "fields", Style: "pipeDelimited", Explode: false, Shape: server.Array}
 
@@ -24,7 +24,7 @@ var getReportsQParam = server.Param{Name: "q", Style: "form", Explode: true, Sha
 
 var getReportsLimitParam = server.Param{Name: "limit", Style: "form", Explode: true, Shape: server.Scalar, EmptyIsAbsent: true}
 
-var getReportsPrefsProperties = map[string]server.Property{"theme": {Type: "string", Array: false}, "compact": {Type: "boolean", Array: false}}
+var getReportsPrefsProperties = server.Property{Type: "object", Properties: map[string]server.Property{"theme": {Type: "string"}, "compact": {Type: "boolean"}}}
 
 var getReportsPrefsParam = server.Param{Name: "prefs", Style: "form", Explode: true, Shape: server.Object, Properties: []string{"theme", "compact"}}
 

@@ -39,6 +39,8 @@ type ListPets200JSONResponse struct {
 	XNext oapi.Optional[string]
 	// XTotal is sent as the header "X-Total".
 	XTotal int64
+	// XPage is sent as the header "X-Page".
+	XPage oapi.Optional[model.ListPets200XPage]
 }
 
 func (r ListPets200JSONResponse) writeListPetsResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
@@ -64,6 +66,13 @@ func (r ListPets200JSONResponse) writeListPetsResponse(w http.ResponseWriter, re
 		return err
 	}
 	header.Set("X-Total", h1)
+	if r.XPage.Set {
+		h2, err := server.FormatJSON(r.XPage.Value)
+		if err != nil {
+			return err
+		}
+		header.Set("X-Page", h2)
+	}
 	return c.WriteJSON(w, 200, "application/json", r.Body, header)
 }
 

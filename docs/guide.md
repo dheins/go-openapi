@@ -333,14 +333,41 @@ location (form-encoded or JSON); `allowEmptyValue` (`?q=` is the empty
 string, or no items for an array; for numbers and booleans it means the
 parameter is not given); defaults.
 
+Objects in parameters, form bodies and multipart bodies may nest objects
+and maps (`additionalProperties`), written with brackets as `deepObject`
+does: `?filter[owner][name]=Ann`, `owner[age]=40&labels[a]=1` in a form.
+Arrays may repeat the key (`tags=a&tags=b`), or use `tags[]` or
+`tags[0]`. An object sent as one value (`owner={"age":40}`, or a multipart
+part) is read as JSON, the default content type of objects in form and
+multipart bodies. Recursive types and arrays of objects cannot be written
+this way and are not supported; nor are objects with additional properties
+in the exploded `form` style, which sends each property as a parameter of
+its own (use `deepObject` or `explode: false`).
+
 Supported request bodies: JSON (`application/json`, `*+json`),
-`application/x-www-form-urlencoded`, `multipart/form-data` (files become
-`oapi.File`), `text/*` (a string) and anything else as bytes. In a JSON
+`application/x-www-form-urlencoded`, `multipart/form-data`, `text/*` (a
+string) and anything else as bytes. In a multipart body, a part is a file,
+an `oapi.File` with the part's name, content type, headers and data, when
+its schema is `format: binary` (3.0) or, the 3.1 way, a string with a
+`contentMediaType` or a schema without a type; a part need not have a file
+name. The `encoding` object is applied to multipart parts: a part that
+declares a content type must match `contentType` (a list of media types or
+ranges), and the `required` part headers must be present (their values are
+not checked yet). In a JSON
 body, an `oapi.File` is a string: its data must be UTF-8, or encoding fails
 (use `contentEncoding: base64` for binary data in JSON, generated as
 `[]byte`). When an
-operation accepts several media types with the same schema, `req.Body` holds
-the decoded value and `req.ContentType` says which one arrived.
+operation accepts several media types, `req.ContentType` says which one
+arrived. Media types that decode to the first one's Go type (the same
+schema, or one written the same way) are decoded into `req.Body`; each
+other Go type gets an optional field of its own, named after its kind
+(`JSONBody`, `FormBody`, `MultipartBody`, `TextBody`, `BinaryBody`) or,
+if that is taken, after its media type. Only the field for the media type
+that arrived is set, so a handler for such an operation must look at
+`req.ContentType` (or the fields' `Set`) rather than assume `req.Body`. A
+media type other than the first that is neither JSON, form, multipart nor
+text and has a schema describing structured data, such as XML, is
+answered with 415, since nothing would check its bytes.
 
 ## Responses
 
@@ -352,7 +379,9 @@ return api.GetPet404Response{}, nil
 return api.CreatePet4XXJSONResponse{StatusCode: 409, Body: problem}, nil // ranges and default carry a StatusCode
 ```
 
-Response headers are fields of the response type. Media types become
+Response headers are fields of the response type; a header with JSON
+`content` holds its schema's type and is sent as compact JSON. Media types
+become
 separate types: `...JSONResponse`, `...TextResponse`, binary ones named
 after the subtype (`...PNGResponse`; `image/*` adds a `ContentType` field),
 and streams:
@@ -396,7 +425,10 @@ Replace how errors are written with `server.WithErrorHandler`.
 ## Security
 
 When operations declare security, the generated `SecurityHandler` has one
-method per scheme, receiving the credentials and the required scopes:
+method per scheme, receiving the credentials and the required scopes.
+Requirements may name a scheme by component name or, as 3.2 allows, by
+URI reference (`"#/components/securitySchemes/key"`, `common.yaml#/key`);
+names leading to the same scheme share a method.
 
 | Scheme | Method parameters |
 |---|---|
@@ -431,7 +463,7 @@ credentials that are present and wrong are still rejected.
 |---|---|
 | `server.WithBasePath("/v1")` | serve below a prefix; the default is the path of the first `servers` URL (`gen.BasePath`) |
 | `server.WithMiddleware(mw...)` | wrap every operation; middleware gets a `server.Operation` (ID, method, path) |
-| `server.WithDocument("/openapi.json")` | serve the document the server was generated from |
+| `server.WithDocument("/openapi.json")` | serve the document the server was generated from, as JSON; a document split over several files is served as one, with the objects it refers to in other files copied under `components` (`loader.Spec.Bundle`) |
 | `server.WithResponseValidation()` | check response bodies against the document; invalid ones become a logged 500 |
 | `server.WithMaxBodyBytes(n)` | request body limit (default 10 MiB) |
 | `server.WithErrorHandler(f)` | write errors yourself |

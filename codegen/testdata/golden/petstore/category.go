@@ -3,6 +3,10 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+	"fmt"
+	"strconv"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -26,27 +30,60 @@ func (m *Category) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Category) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Category) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Category) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Category
+	var seen [4]bool
+	var problems [4]error
+	var unknown []oapi.NamedError
+	for obj.Next() {
+		switch obj.Name() {
+		case "id":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.ID, false, dir)
+		case "name":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Name, false, dir)
+		case "parent":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Parent, false, dir)
+		case "children":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Children, false, dir)
+		default:
+			obj.Skip()
+			unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: &oapi.ValidationError{Message: "property is not allowed"}})
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Category
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["id"]; ok {
-		errs.Nested("/id", oapi.DecodeField(raw, &v.ID, false, dir))
+	if seen[0] {
+		errs.Nested("/id", problems[0])
 	}
-	if raw, ok := fields["name"]; ok {
-		errs.Nested("/name", oapi.DecodeField(raw, &v.Name, false, dir))
+	if seen[1] {
+		errs.Nested("/name", problems[1])
 	}
-	if raw, ok := fields["parent"]; ok {
-		errs.Nested("/parent", oapi.DecodeField(raw, &v.Parent, false, dir))
+	if seen[2] {
+		errs.Nested("/parent", problems[2])
 	}
-	if raw, ok := fields["children"]; ok {
-		errs.Nested("/children", oapi.DecodeField(raw, &v.Children, false, dir))
+	if seen[3] {
+		errs.Nested("/children", problems[3])
 	}
-	for _, name := range oapi.UnknownFields(fields, "id", "name", "parent", "children") {
-		errs.Add(oapi.Field("", name), "property is not allowed")
-	}
+	oapi.AddNamed(&errs, unknown)
 	if err := errs.Err(); err != nil {
 		return err
 	}
@@ -62,20 +99,43 @@ func (m Category) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Category) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Category) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
 	if m.ID.Set {
-		enc.Field("id", m.ID)
+		dst = append(dst, "\"id\":"...)
+		dst = strconv.AppendInt(dst, int64(m.ID.Value), 10)
+		dst = append(dst, ',')
 	}
 	if m.Name.Set {
-		enc.Field("name", m.Name)
+		dst = append(dst, "\"name\":"...)
+		dst = oapi.AppendString(dst, m.Name.Value)
+		dst = append(dst, ',')
 	}
 	if m.Parent != nil {
-		enc.Field("parent", m.Parent)
+		dst = append(dst, "\"parent\":"...)
+		if m.Parent == nil {
+			dst = append(dst, "null"...)
+		} else {
+			if dst, err = (*m.Parent).AppendJSON(dst, dir); err != nil {
+				return nil, fmt.Errorf("parent: %w", err)
+			}
+		}
+		dst = append(dst, ',')
 	}
 	if m.Children.Set {
-		enc.Field("children", m.Children)
+		dst = append(dst, "\"children\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Children.Value, dir); err != nil {
+			return nil, fmt.Errorf("children: %w", err)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

@@ -3,8 +3,10 @@ package oapi
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -90,19 +92,32 @@ func firstProblem(err error) string {
 // DiscriminatorValue returns the string value of property in the JSON
 // object raw and whether the property is present.
 func DiscriminatorValue(raw json.RawMessage, property string) (string, bool, error) {
-	fields, err := DecodeObject(raw)
+	var value string
+	var found bool
+	var valueErr error
+	err := DecodeObjectWith(raw, func(dec *jsontext.Decoder) error {
+		obj := BeginObject(dec)
+		for obj.Next() {
+			if obj.Name() != property {
+				obj.Skip()
+				continue
+			}
+			// A repeated property counts with its last value.
+			v, err := dec.ReadValue()
+			if err != nil {
+				return err
+			}
+			found, value, valueErr = true, "", nil
+			if err := json.Unmarshal(v, &value); err != nil {
+				valueErr = &ValidationError{Path: Field("", property), Message: "expected string, got " + valueType(v)}
+			}
+		}
+		return obj.Err()
+	})
 	if err != nil {
 		return "", false, err
 	}
-	v, ok := fields[property]
-	if !ok {
-		return "", false, nil
-	}
-	var s string
-	if err := json.Unmarshal(v, &s); err != nil {
-		return "", true, &ValidationError{Path: Field("", property), Message: "expected string, got " + valueType(v)}
-	}
-	return s, true, nil
+	return value, found, valueErr
 }
 
 // EnsureProperty sets property to the string value in data, a marshalled
@@ -143,6 +158,9 @@ func EnsureProperty(data []byte, property, value string) ([]byte, error) {
 	// Read the closing brace, so a truncated object is an error.
 	if _, err := dec.Token(); err != nil {
 		return nil, &ValidationError{Message: "invalid JSON object: " + err.Error()}
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, &ValidationError{Message: "invalid JSON object: unexpected data after it"}
 	}
 	if keep {
 		return data, nil

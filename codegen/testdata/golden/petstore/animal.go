@@ -122,25 +122,35 @@ func (u Animal) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Animal) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Animal) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case Cat:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "kitty"
 		}
-		return oapi.EnsureProperty(data, "kind", "kitty")
+		return x.AppendJSON(dst, dir)
 	case Doggo:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Kind == "" {
+			x.Kind = "Doggo"
 		}
-		return oapi.EnsureProperty(data, "kind", "Doggo")
+		return x.AppendJSON(dst, dir)
 	case Unknown:
-		data, err := oapi.EncodeValue(val, dir)
+		start := len(dst)
+		out, err := oapi.AppendValue(dst, val, dir)
 		if err != nil {
 			return nil, err
 		}
-		return oapi.EnsureProperty(data, "kind", "Unknown")
+		data, err := oapi.EnsureProperty(out[start:], "kind", "Unknown")
+		if err != nil {
+			return nil, err
+		}
+		return append(out[:start], data...), nil
 	}
 	return nil, errors.New("Animal: no variant is set")
 }

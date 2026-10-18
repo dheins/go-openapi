@@ -47,7 +47,33 @@ func (m *{{.Name}}) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *{{.Name}}) DecodeJSON(data []byte, dir oapi.Direction) error {
-{{decodeStmts .}}
+	return oapi.DecodeObjectWith(data, func(dec *{{imp "encoding/json/jsontext" "jsontext"}}.Decoder) error {
+{{- if .InlineUnions}}
+{{streamDecodeStmts .}}
+{{- else}}
+		return m.DecodeJSONFrom(dec, dir)
+{{- end}}
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *{{.Name}}) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *{{.Name}}) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+{{- if .InlineUnions}}
+	// The inline unions decode from the object's text.
+	data, err := dec.ReadValue()
+	if err != nil {
+		return err
+	}
+	return m.DecodeJSON(data, dir)
+{{- else}}
+{{streamDecodeStmts .}}
+{{- end}}
 }
 
 
@@ -59,7 +85,12 @@ func (m {{.Name}}) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m {{.Name}}) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-{{encodeStmts .}}
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m {{.Name}}) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+{{appendStmts .}}
 }
 
 // Validate checks the values against the constraints of the schema.
@@ -116,8 +147,19 @@ func (u {{.Name}}) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u {{.Name}}) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+{{- if .Sealed}}
+	return u.AppendJSON(nil, dir)
+{{- else}}
 {{unionMarshalStmts .}}
+{{- end}}
 }
+{{- if .Sealed}}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u {{.Name}}) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+{{unionAppendStmts .}}
+}
+{{- end}}
 
 // Validate checks that {{if .Sealed}}a{{else if .OneOf}}exactly one{{else}}at least one{{end}} variant is set, and validates it.
 func (u {{.Name}}) Validate() error {

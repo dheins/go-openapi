@@ -3,7 +3,9 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
 	"errors"
+	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -115,25 +117,30 @@ func (u Hound) MarshalJSON() ([]byte, error) {
 
 // EncodeJSON encodes the variant like MarshalJSON, passing dir on to it.
 func (u Hound) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return u.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the variant to dst as EncodeJSON encodes it.
+func (u Hound) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	switch val := u.value.(type) {
 	case HoundBase:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Species == "" {
+			x.Species = "Hound"
 		}
-		return oapi.EnsureProperty(data, "species", "Hound")
+		return x.AppendJSON(dst, dir)
 	case Puppy:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Species == "" {
+			x.Species = "pup"
 		}
-		return oapi.EnsureProperty(data, "species", "pup")
+		return x.AppendJSON(dst, dir)
 	case Mutt:
-		data, err := oapi.EncodeValue(val, dir)
-		if err != nil {
-			return nil, err
+		x := val
+		if x.Species == "" {
+			x.Species = "Mutt"
 		}
-		return oapi.EnsureProperty(data, "species", "Mutt")
+		return x.AppendJSON(dst, dir)
 	}
 	return nil, errors.New("Hound: no variant is set")
 }
@@ -173,22 +180,52 @@ func (m *HoundBase) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *HoundBase) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *HoundBase) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *HoundBase) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v HoundBase
+	var seen [3]bool
+	var problems [3]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "species":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Species, false, dir)
+		case "name":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Name, false, dir)
+		case "bark":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Bark, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v HoundBase
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["species"]; ok {
-		errs.Nested("/species", oapi.DecodeField(raw, &v.Species, false, dir))
+	if seen[0] {
+		errs.Nested("/species", problems[0])
 	} else {
 		errs.Add("/species", "required property is missing")
 	}
-	if raw, ok := fields["name"]; ok {
-		errs.Nested("/name", oapi.DecodeField(raw, &v.Name, false, dir))
+	if seen[1] {
+		errs.Nested("/name", problems[1])
 	}
-	if raw, ok := fields["bark"]; ok {
-		errs.Nested("/bark", oapi.DecodeField(raw, &v.Bark, false, dir))
+	if seen[2] {
+		errs.Nested("/bark", problems[2])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -205,15 +242,27 @@ func (m HoundBase) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m HoundBase) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("species", m.Species)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m HoundBase) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"species\":"...)
+	dst = oapi.AppendString(dst, m.Species)
+	dst = append(dst, ',')
 	if m.Name.Set {
-		enc.Field("name", m.Name)
+		dst = append(dst, "\"name\":"...)
+		dst = oapi.AppendString(dst, m.Name.Value)
+		dst = append(dst, ',')
 	}
 	if m.Bark.Set {
-		enc.Field("bark", m.Bark)
+		dst = append(dst, "\"bark\":"...)
+		dst = strconv.AppendBool(dst, m.Bark.Value)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

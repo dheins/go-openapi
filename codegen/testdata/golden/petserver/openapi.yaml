@@ -50,6 +50,16 @@ paths:
               required: true
               schema:
                 type: integer
+            X-Page:
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      size:
+                        type: integer
+                      after:
+                        type: string
           content:
             application/json:
               schema:
@@ -270,6 +280,83 @@ paths:
           description: The photo.
           content:
             image/*: {}
+  /pets/{petId}/records:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: uploadRecords
+      description: File parts written the OpenAPI 3.1 way, with an encoding.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [report]
+              properties:
+                report:
+                  type: string
+                  contentMediaType: application/pdf
+                scans:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Scan"
+                attachment: {}
+            encoding:
+              report:
+                contentType: application/pdf
+                headers:
+                  X-Checksum:
+                    required: true
+                    schema:
+                      type: string
+              scans:
+                contentType: "image/png, image/jpeg; q=1"
+      responses:
+        "204":
+          description: Stored.
+  /pets/import:
+    post:
+      operationId: importPet
+      description: Media types with different schemas.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+          text/csv:
+            schema:
+              type: string
+      responses:
+        "204":
+          description: Imported.
   /pets/form:
     post:
       operationId: submitForm
@@ -356,6 +443,9 @@ paths:
           description: Allowed.
 components:
   schemas:
+    Scan:
+      type: string
+      contentMediaType: image/png
     Pet:
       type: object
       required: [id, name]
@@ -385,6 +475,17 @@ components:
           type: array
           items:
             type: string
+        owner:
+          type: object
+          properties:
+            name:
+              type: string
+            age:
+              type: integer
+        labels:
+          type: object
+          additionalProperties:
+            type: integer
     Prefs:
       type: object
       properties:

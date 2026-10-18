@@ -36,6 +36,9 @@ type builder struct {
 	// bases are the structs of the own properties of polymorphic schemas,
 	// the variants for values the discriminator maps to the schema itself.
 	bases map[*oas.Schema]*Type
+	// fileParts are the schemas of multipart properties that hold files
+	// without saying format: binary; see markFileParts.
+	fileParts map[*oas.Schema]bool
 }
 
 // Build maps the schemas of a loaded document to Go types: every
@@ -56,6 +59,10 @@ func Build(spec *loader.Spec, opts Options) *Model {
 		for _, n := range reservedServerNames {
 			b.names.claim(n)
 		}
+	}
+	if opts.Operations {
+		// Before any type is built: file parts may be component schemas.
+		b.markFileParts()
 	}
 	var components []*Type
 	if c := spec.Document.Components; c != nil {
@@ -154,6 +161,9 @@ func (b *builder) fill(t *Type) {
 // named types for objects and enums as needed. hint names such types;
 // root is the type they are derived from.
 func (b *builder) use(s *oas.Schema, hint string, root *Type) *Ref {
+	if b.fileParts[s] && b.named[s] == nil && refTarget(s) == nil {
+		return fileRef()
+	}
 	if s == nil || s.Bool != nil {
 		return anyRef(nil)
 	}
@@ -285,7 +295,7 @@ func (b *builder) fillEnum(t *Type, types []string) {
 }
 
 // reservedFieldNames are the methods of generated structs.
-var reservedFieldNames = []string{"Validate", "MarshalJSON", "UnmarshalJSON"}
+var reservedFieldNames = []string{"Validate", "MarshalJSON", "UnmarshalJSON", "UnmarshalJSONFrom", "DecodeJSON", "DecodeJSONFrom", "EncodeJSON"}
 
 func (b *builder) fillStruct(t *Type) {
 	t.Kind = Struct
@@ -792,6 +802,9 @@ func (b *builder) optional(r *Ref) *Ref {
 // inline returns the type expression for a schema that does not get a
 // named type: a primitive, array, map or any.
 func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type) *Ref {
+	if b.fileParts[s] {
+		return fileRef()
+	}
 	var typ string
 	switch len(types) {
 	case 0:
@@ -825,6 +838,10 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 	return r
 }
 
+func fileRef() *Ref {
+	return &Ref{Kind: Builtin, Name: "oapi.File", Import: oapiImport}
+}
+
 func (b *builder) stringRef(s *oas.Schema) *Ref {
 	switch {
 	case s.Format == "date-time":
@@ -834,7 +851,7 @@ func (b *builder) stringRef(s *oas.Schema) *Ref {
 	case s.Format == "byte" || s.ContentEncoding == "base64":
 		return &Ref{Kind: Builtin, Name: "[]byte", Checks: valueChecks(s)}
 	case s.Format == "binary":
-		return &Ref{Kind: Builtin, Name: "oapi.File", Import: oapiImport}
+		return fileRef()
 	}
 	c := valueChecks(s)
 	if c == nil {

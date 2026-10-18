@@ -3,6 +3,8 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+	"fmt"
 	"maps"
 	"slices"
 
@@ -28,25 +30,48 @@ func (m *Extensible) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Extensible) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Extensible) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Extensible) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Extensible
+	var seen [1]bool
+	var problems [1]error
+	var unknown []oapi.NamedError
+	for obj.Next() {
+		switch obj.Name() {
+		case "kind":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Kind, false, dir)
+		default:
+			var value int64
+			unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: obj.Decode(&value, false, dir)})
+			if v.AdditionalProperties == nil {
+				v.AdditionalProperties = make(map[string]int64)
+			}
+			v.AdditionalProperties[obj.Name()] = value
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Extensible
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["kind"]; ok {
-		errs.Nested("/kind", oapi.DecodeField(raw, &v.Kind, false, dir))
+	if seen[0] {
+		errs.Nested("/kind", problems[0])
 	} else {
 		errs.Add("/kind", "required property is missing")
 	}
-	for _, name := range oapi.UnknownFields(fields, "kind") {
-		var value int64
-		errs.Nested(oapi.Field("", name), oapi.DecodeField(fields[name], &value, false, dir))
-		if v.AdditionalProperties == nil {
-			v.AdditionalProperties = make(map[string]int64)
-		}
-		v.AdditionalProperties[name] = value
-	}
+	oapi.AddNamed(&errs, unknown)
 	if err := errs.Err(); err != nil {
 		return err
 	}
@@ -62,12 +87,25 @@ func (m Extensible) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Extensible) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("kind", m.Kind)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Extensible) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
+	dst = append(dst, "\"kind\":"...)
+	dst = oapi.AppendString(dst, m.Kind)
+	dst = append(dst, ',')
 	for _, name := range slices.Sorted(maps.Keys(m.AdditionalProperties)) {
-		enc.Field(name, m.AdditionalProperties[name])
+		dst = append(oapi.AppendString(dst, name), ':')
+		if dst, err = oapi.AppendValue(dst, m.AdditionalProperties[name], dir); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

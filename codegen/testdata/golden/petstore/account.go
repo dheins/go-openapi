@@ -3,6 +3,9 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+	"strconv"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -29,34 +32,74 @@ func (m *Account) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Account) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Account) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Account) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Account
+	var seen [5]bool
+	var problems [5]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "id":
+			if dir == oapi.Request {
+				obj.Skip()
+				continue
+			}
+			seen[0] = true
+			problems[0] = obj.Decode(&v.ID, false, dir)
+		case "username":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Username, false, dir)
+		case "password":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Password, false, dir)
+		case "role":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Role, false, dir)
+		case "limit":
+			seen[4] = true
+			problems[4] = obj.Decode(&v.Limit, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Account
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["id"]; ok && dir != oapi.Request {
-		errs.Nested("/id", oapi.DecodeField(raw, &v.ID, false, dir))
+	if seen[0] {
+		errs.Nested("/id", problems[0])
 	} else if dir == oapi.Response {
 		errs.Add("/id", "required property is missing")
 	}
-	if raw, ok := fields["username"]; ok {
-		errs.Nested("/username", oapi.DecodeField(raw, &v.Username, false, dir))
+	if seen[1] {
+		errs.Nested("/username", problems[1])
 	} else {
 		errs.Add("/username", "required property is missing")
 	}
-	if raw, ok := fields["password"]; ok {
-		errs.Nested("/password", oapi.DecodeField(raw, &v.Password, false, dir))
+	if seen[2] {
+		errs.Nested("/password", problems[2])
 	} else if dir == oapi.Request {
 		errs.Add("/password", "required property is missing")
 	}
-	if raw, ok := fields["role"]; ok {
-		errs.Nested("/role", oapi.DecodeField(raw, &v.Role, false, dir))
+	if seen[3] {
+		errs.Nested("/role", problems[3])
 	} else if dir == oapi.Request {
 		errs.Nested("/role", oapi.DecodeField([]byte("\"user\""), &v.Role, false, dir))
 	}
-	if raw, ok := fields["limit"]; ok {
-		errs.Nested("/limit", oapi.DecodeField(raw, &v.Limit, false, dir))
+	if seen[4] {
+		errs.Nested("/limit", problems[4])
 	} else if dir == oapi.Request {
 		errs.Nested("/limit", oapi.DecodeField([]byte("10"), &v.Limit, false, dir))
 	}
@@ -75,21 +118,37 @@ func (m Account) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Account) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Account) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
 	if dir != oapi.Request {
-		enc.Field("id", m.ID)
+		dst = append(dst, "\"id\":"...)
+		dst = strconv.AppendInt(dst, m.ID, 10)
+		dst = append(dst, ',')
 	}
-	enc.Field("username", m.Username)
+	dst = append(dst, "\"username\":"...)
+	dst = oapi.AppendString(dst, m.Username)
+	dst = append(dst, ',')
 	if dir != oapi.Response {
-		enc.Field("password", m.Password)
+		dst = append(dst, "\"password\":"...)
+		dst = oapi.AppendString(dst, m.Password)
+		dst = append(dst, ',')
 	}
 	if m.Role.Set {
-		enc.Field("role", m.Role)
+		dst = append(dst, "\"role\":"...)
+		dst = oapi.AppendString(dst, m.Role.Value)
+		dst = append(dst, ',')
 	}
 	if m.Limit.Set {
-		enc.Field("limit", m.Limit)
+		dst = append(dst, "\"limit\":"...)
+		dst = strconv.AppendInt(dst, m.Limit.Value, 10)
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

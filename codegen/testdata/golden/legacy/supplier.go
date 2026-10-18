@@ -3,6 +3,9 @@
 package legacy
 
 import (
+	"encoding/json/jsontext"
+	"strconv"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -24,19 +27,46 @@ func (m *Supplier) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Supplier) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Supplier) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Supplier) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Supplier
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "name":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Name, false, dir)
+		case "rating":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Rating, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Supplier
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["name"]; ok {
-		errs.Nested("/name", oapi.DecodeField(raw, &v.Name, false, dir))
+	if seen[0] {
+		errs.Nested("/name", problems[0])
 	} else {
 		errs.Add("/name", "required property is missing")
 	}
-	if raw, ok := fields["rating"]; ok {
-		errs.Nested("/rating", oapi.DecodeField(raw, &v.Rating, false, dir))
+	if seen[1] {
+		errs.Nested("/rating", problems[1])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -53,12 +83,26 @@ func (m Supplier) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Supplier) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("name", m.Name)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Supplier) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"name\":"...)
+	dst = oapi.AppendString(dst, m.Name)
+	dst = append(dst, ',')
 	if m.Rating != nil {
-		enc.Field("rating", m.Rating)
+		dst = append(dst, "\"rating\":"...)
+		if m.Rating == nil {
+			dst = append(dst, "null"...)
+		} else {
+			dst = strconv.AppendInt(dst, (*m.Rating), 10)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

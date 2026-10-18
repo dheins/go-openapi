@@ -35,6 +35,20 @@ type Spec struct {
 	sources   map[string]*Source
 	locations map[any]Location
 	fragments []Fragment
+	// schemes are the security schemes that requirements name with a URI
+	// reference.
+	schemes map[schemeKey]*oas.SecurityScheme
+	// written is the root document as JSON before the 3.0 upgrade, for
+	// 3.0 documents only; root is still as written otherwise.
+	written []byte
+}
+
+// schemeKey is a scheme name in the security requirements of owner, the
+// *oas.Document or an *oas.Operation; a relative URI reference depends on
+// the file the requirement is in.
+type schemeKey struct {
+	owner any
+	name  string
 }
 
 // Fragment is an object decoded from a file other than the root document
@@ -62,6 +76,26 @@ func (f Fragment) Position(ptr string) Position {
 func (s *Spec) Location(obj any) (Location, bool) {
 	loc, ok := s.locations[obj]
 	return loc, ok
+}
+
+// SecurityScheme returns the security scheme that name, a key of a
+// security requirement of owner (the *oas.Document or an *oas.Operation),
+// stands for: the component of that name or, as 3.2 allows, the scheme a
+// URI reference points to. It returns nil if there is none.
+func (s *Spec) SecurityScheme(owner any, name string) *oas.SecurityScheme {
+	if def := s.componentScheme(name); def != nil {
+		return def
+	}
+	return s.schemes[schemeKey{owner, name}].Deref()
+}
+
+// componentScheme returns the component scheme called name, or nil.
+func (s *Spec) componentScheme(name string) *oas.SecurityScheme {
+	if c := s.Document.Components; c != nil {
+		def, _ := c.SecuritySchemes.Get(name)
+		return def.Deref()
+	}
+	return nil
 }
 
 // Position returns the source position of loc, or the zero Position if the
@@ -197,11 +231,17 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 		root:          src,
 		sources:       map[string]*Source{src.URI(): src},
 		locations:     make(map[any]Location),
+		schemes:       make(map[schemeKey]*oas.SecurityScheme),
 	}
 	r := newResolver(spec, newConfig(opts))
 	r.addSource(src)
 
 	if is30(version) {
+		written, err := nodeJSON(src.root)
+		if err != nil {
+			return nil, &Error{Location: Location{URI: src.URI()}, Err: err}
+		}
+		spec.written = written
 		upgrade30(src.root, (*oas.Document)(nil))
 	}
 	var doc oas.Document

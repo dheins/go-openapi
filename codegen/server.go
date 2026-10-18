@@ -232,9 +232,16 @@ func paramDoc(p *ir.Param) string {
 	return comment("\t", lines)
 }
 
-func bodyDoc(b *ir.Body) string {
-	lines := []string{"Body is the request body."}
-	if b.Doc != "" {
+func bodyDoc(b *ir.Body, f *ir.BodyField) string {
+	lines := []string{fmt.Sprintf("%s is the request body.", f.Name)}
+	if len(b.Fields) > 1 {
+		var media []string
+		for _, m := range f.Media {
+			media = append(media, strconv.Quote(m.MediaType))
+		}
+		lines[0] = fmt.Sprintf("%s is the request body when it is sent as %s.", f.Name, strings.Join(media, ", "))
+	}
+	if b.Doc != "" && f == b.Fields[0] {
 		lines = append(lines, b.Doc)
 	}
 	return comment("\t", lines)
@@ -420,32 +427,33 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 	for _, m := range body.Media {
 		mediaTypes = append(mediaTypes, m.MediaType)
 	}
-	// Only form and multipart bodies name the value type; computing it
-	// records its import.
-	elem := func() string { return f.goType(body.Value) }
 	w(1, "if body, mediaType, ok := %s.ReadBody(w, r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
 	if len(body.Media) > 1 {
 		w(2, "req.ContentType = mediaType")
 	}
-	validate := func(depth int) {
-		if stmts := f.validation("req.Body", body.Type, depth); stmts != "" {
-			w(depth, "var errs oapi.ValidationErrors")
-			w(0, "%s", strings.TrimSuffix(stmts, "\n"))
-			w(depth, "b.Body(errs.Err())")
-		}
-	}
 	w(2, "switch mediaType {")
 	for _, m := range body.Media {
+		field := "req." + m.Field.Name
+		// Only form and multipart bodies name the value type; computing it
+		// records its import.
+		elem := func() string { return f.goType(m.Field.Value) }
+		validate := func(depth int) {
+			if stmts := f.validation(field, m.Field.Type, depth); stmts != "" {
+				w(depth, "var errs oapi.ValidationErrors")
+				w(0, "%s", strings.TrimSuffix(stmts, "\n"))
+				w(depth, "b.Body(errs.Err())")
+			}
+		}
 		w(2, "case %q:", m.MediaType)
 		switch m.Kind {
 		case "json":
-			w(3, "if err := %s.DecodeRequest(body, &req.Body); err != nil {", f.imp(oapiImport, "oapi"))
+			w(3, "if err := %s.DecodeRequest(body, &%s); err != nil {", f.imp(oapiImport, "oapi"), field)
 			w(4, "b.Body(err)")
 			w(3, "} else {")
 			validate(4)
 			w(3, "}")
 		case "form", "multipart":
-			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", propertyMap(m.Properties))
+			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional))
 			if m.Kind == "form" {
 				w(3, "if fields, err := server.FormFields(body); err != nil {")
 				w(4, "b.Body(err)")
@@ -455,29 +463,51 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			}
 			w(4, "b.Body(err)")
 			w(3, "} else {")
-			w(4, "req.Body = %s", wrapValue(f, body.Type, "v"))
+			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
 			validate(4)
 			w(3, "}")
 		case "text":
-			w(3, "req.Body = %s", wrapValue(f, body.Type, "string(body)"))
+			w(3, "%s = %s", field, wrapValue(f, m.Field.Type, "string(body)"))
 			validate(3)
 		case "binary":
-			w(3, "req.Body = %s", wrapValue(f, body.Type, "body"))
+			w(3, "%s = %s", field, wrapValue(f, m.Field.Type, "body"))
 		}
 	}
 	w(2, "}")
 	w(1, "}")
 }
 
-// propertyMap renders the property types of an object for server.Property.
-func propertyMap(props []ir.ParamProperty) string {
+// objectProperty renders an object with the given properties, and type
+// of additional ones, as a server.Property.
+func objectProperty(props []ir.ParamProperty, additional *ir.ParamProperty) string {
+	return "server.Property" + propertyFields(ir.ParamProperty{Type: "object", Properties: props, Additional: additional})
+}
+
+// propertyFields renders the braced fields of a server.Property literal.
+func propertyFields(prop ir.ParamProperty) string {
 	var b strings.Builder
-	b.WriteString("map[string]server.Property{")
-	for i, prop := range props {
-		if i > 0 {
-			b.WriteString(", ")
+	fmt.Fprintf(&b, "{Type: %q", prop.Type)
+	if prop.Array {
+		b.WriteString(", Array: true")
+	}
+	if prop.Type == "object" && len(prop.Properties) > 0 {
+		b.WriteString(", Properties: map[string]server.Property{")
+		for i, p := range prop.Properties {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q: %s", p.Name, propertyFields(p))
 		}
-		fmt.Fprintf(&b, "%q: {Type: %q, Array: %t}", prop.Name, prop.Type, prop.Array)
+		b.WriteString("}")
+	}
+	if prop.Additional != nil {
+		fmt.Fprintf(&b, ", Additional: &server.Property%s", propertyFields(*prop.Additional))
+	}
+	if len(prop.ContentTypes) > 0 {
+		fmt.Fprintf(&b, ", ContentTypes: %s", stringSlice(prop.ContentTypes))
+	}
+	if len(prop.Headers) > 0 {
+		fmt.Fprintf(&b, ", Headers: %s", stringSlice(prop.Headers))
 	}
 	b.WriteString("}")
 	return b.String()
@@ -585,7 +615,7 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 
 // propertiesVar declares the property types of an object parameter.
 func (f *fileGen) propertiesVar(o *ir.Operation, p *ir.Param) string {
-	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", propertyMap(p.Properties))
+	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", objectProperty(p.Properties, p.Additional))
 }
 
 // bindValue writes the branches that record a parse error or store and
@@ -666,7 +696,10 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	}
 	for i, h := range r.Headers {
 		format := "server.FormatScalar"
-		if h.Array {
+		switch {
+		case h.Content != "":
+			format = "server.FormatJSON"
+		case h.Array:
 			format = "server.FormatArray"
 		}
 		value, depth := "r."+h.Field, 1

@@ -40,6 +40,14 @@ type Handler interface {
 	GetPhoto(ctx context.Context, req *GetPhotoRequest) (GetPhotoResponse, error)
 	// UploadPhoto handles PUT /pets/{petId}/photo.
 	UploadPhoto(ctx context.Context, req *UploadPhotoRequest) (UploadPhotoResponse, error)
+	// UploadRecords handles POST /pets/{petId}/records.
+	//
+	// File parts written the OpenAPI 3.1 way, with an encoding.
+	UploadRecords(ctx context.Context, req *UploadRecordsRequest) (UploadRecordsResponse, error)
+	// ImportPet handles POST /pets/import.
+	//
+	// Media types with different schemas.
+	ImportPet(ctx context.Context, req *ImportPetRequest) (ImportPetResponse, error)
 	// SubmitForm handles POST /pets/form.
 	SubmitForm(ctx context.Context, req *SubmitFormRequest) (SubmitFormResponse, error)
 	// Shout handles POST /notes.
@@ -48,6 +56,8 @@ type Handler interface {
 	ExportPets(ctx context.Context, req *ExportPetsRequest) (ExportPetsResponse, error)
 	// Watch handles GET /events.
 	Watch(ctx context.Context, req *WatchRequest) (WatchResponse, error)
+	// Upload handles POST /upload.
+	Upload(ctx context.Context, req *UploadRequest) (UploadResponse, error)
 	// Admin handles GET /admin.
 	Admin(ctx context.Context, req *AdminRequest) (AdminResponse, error)
 	// Secure handles GET /secure.

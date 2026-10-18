@@ -3,14 +3,20 @@
 package model
 
 import (
+	"encoding/json/jsontext"
+	"fmt"
+	"strconv"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
 // Filter is generated from the schema at /components/schemas/Filter.
 type Filter struct {
-	Role string                  `json:"role"`
-	Age  oapi.Optional[int64]    `json:"age,omitzero"`
-	Tags oapi.Optional[[]string] `json:"tags,omitzero"`
+	Role   string                          `json:"role"`
+	Age    oapi.Optional[int64]            `json:"age,omitzero"`
+	Tags   oapi.Optional[[]string]         `json:"tags,omitzero"`
+	Owner  oapi.Optional[FilterOwner]      `json:"owner,omitzero"`
+	Labels oapi.Optional[map[string]int64] `json:"labels,omitzero"`
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -25,22 +31,64 @@ func (m *Filter) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *Filter) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *Filter) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *Filter) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v Filter
+	var seen [5]bool
+	var problems [5]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "role":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Role, false, dir)
+		case "age":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Age, false, dir)
+		case "tags":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.Tags, false, dir)
+		case "owner":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Owner, false, dir)
+		case "labels":
+			seen[4] = true
+			problems[4] = obj.Decode(&v.Labels, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v Filter
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["role"]; ok {
-		errs.Nested("/role", oapi.DecodeField(raw, &v.Role, false, dir))
+	if seen[0] {
+		errs.Nested("/role", problems[0])
 	} else {
 		errs.Add("/role", "required property is missing")
 	}
-	if raw, ok := fields["age"]; ok {
-		errs.Nested("/age", oapi.DecodeField(raw, &v.Age, false, dir))
+	if seen[1] {
+		errs.Nested("/age", problems[1])
 	}
-	if raw, ok := fields["tags"]; ok {
-		errs.Nested("/tags", oapi.DecodeField(raw, &v.Tags, false, dir))
+	if seen[2] {
+		errs.Nested("/tags", problems[2])
+	}
+	if seen[3] {
+		errs.Nested("/owner", problems[3])
+	}
+	if seen[4] {
+		errs.Nested("/labels", problems[4])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -57,15 +105,44 @@ func (m Filter) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m Filter) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("role", m.Role)
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m Filter) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	var err error
+	dst = append(dst, "\"role\":"...)
+	dst = oapi.AppendString(dst, m.Role)
+	dst = append(dst, ',')
 	if m.Age.Set {
-		enc.Field("age", m.Age)
+		dst = append(dst, "\"age\":"...)
+		dst = strconv.AppendInt(dst, m.Age.Value, 10)
+		dst = append(dst, ',')
 	}
 	if m.Tags.Set {
-		enc.Field("tags", m.Tags)
+		dst = append(dst, "\"tags\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Tags.Value, dir); err != nil {
+			return nil, fmt.Errorf("tags: %w", err)
+		}
+		dst = append(dst, ',')
 	}
-	return enc.Bytes()
+	if m.Owner.Set {
+		dst = append(dst, "\"owner\":"...)
+		if dst, err = m.Owner.Value.AppendJSON(dst, dir); err != nil {
+			return nil, fmt.Errorf("owner: %w", err)
+		}
+		dst = append(dst, ',')
+	}
+	if m.Labels.Set {
+		dst = append(dst, "\"labels\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Labels.Value, dir); err != nil {
+			return nil, fmt.Errorf("labels: %w", err)
+		}
+		dst = append(dst, ',')
+	}
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.
@@ -76,5 +153,107 @@ func (m Filter) Validate() error {
 			errs.Add("/age", "must be at least 0")
 		}
 	}
+	if m.Owner.Set {
+		errs.Nested("/owner", m.Owner.Value.Validate())
+	}
+	return errs.Err()
+}
+
+// FilterOwner is generated from the schema at /components/schemas/Filter/properties/owner.
+type FilterOwner struct {
+	Name oapi.Optional[string] `json:"name,omitzero"`
+	Age  oapi.Optional[int64]  `json:"age,omitzero"`
+}
+
+// UnmarshalJSON decodes a JSON object, reporting missing required
+// properties and values of the wrong type with their JSON paths.
+// Required read-only and write-only properties may be absent; use
+// DecodeJSON to decode a request or response.
+func (m *FilterOwner) UnmarshalJSON(data []byte) error {
+	return m.DecodeJSON(data, oapi.AnyDirection)
+}
+
+// DecodeJSON decodes a JSON object like UnmarshalJSON. dir decides whether
+// required read-only properties (responses) and required write-only
+// properties (requests) must be present.
+func (m *FilterOwner) DecodeJSON(data []byte, dir oapi.Direction) error {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *FilterOwner) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *FilterOwner) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v FilterOwner
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "name":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Name, false, dir)
+		case "age":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Age, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	if seen[0] {
+		errs.Nested("/name", problems[0])
+	}
+	if seen[1] {
+		errs.Nested("/age", problems[1])
+	}
+	if err := errs.Err(); err != nil {
+		return err
+	}
+	*m = v
+	return nil
+}
+
+// MarshalJSON encodes every property that is present.
+func (m FilterOwner) MarshalJSON() ([]byte, error) {
+	return m.EncodeJSON(oapi.AnyDirection)
+}
+
+// EncodeJSON encodes the value for dir: read-only properties are left out
+// of requests and write-only properties out of responses.
+func (m FilterOwner) EncodeJSON(dir oapi.Direction) ([]byte, error) {
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m FilterOwner) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	if m.Name.Set {
+		dst = append(dst, "\"name\":"...)
+		dst = oapi.AppendString(dst, m.Name.Value)
+		dst = append(dst, ',')
+	}
+	if m.Age.Set {
+		dst = append(dst, "\"age\":"...)
+		dst = strconv.AppendInt(dst, m.Age.Value, 10)
+		dst = append(dst, ',')
+	}
+	return oapi.EndObject(dst, start), nil
+}
+
+// Validate checks the values against the constraints of the schema.
+func (m FilterOwner) Validate() error {
+	var errs oapi.ValidationErrors
+
 	return errs.Err()
 }

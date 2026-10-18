@@ -3,6 +3,9 @@
 package petstore
 
 import (
+	"encoding/json/jsontext"
+	"strconv"
+
 	"github.com/dheins/go-openapi/oapi"
 )
 
@@ -24,19 +27,46 @@ func (m *House) UnmarshalJSON(data []byte) error {
 // required read-only properties (responses) and required write-only
 // properties (requests) must be present.
 func (m *House) DecodeJSON(data []byte, dir oapi.Direction) error {
-	fields, err := oapi.DecodeObject(data)
-	if err != nil {
+	return oapi.DecodeObjectWith(data, func(dec *jsontext.Decoder) error {
+		return m.DecodeJSONFrom(dec, dir)
+	})
+}
+
+// UnmarshalJSONFrom decodes a JSON object from dec like UnmarshalJSON,
+// token by token.
+func (m *House) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return m.DecodeJSONFrom(dec, oapi.AnyDirection)
+}
+
+// DecodeJSONFrom decodes a JSON object from dec like DecodeJSON.
+func (m *House) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
+	obj := oapi.BeginObject(dec)
+	var v House
+	var seen [2]bool
+	var problems [2]error
+	for obj.Next() {
+		switch obj.Name() {
+		case "kind":
+			seen[0] = true
+			problems[0] = obj.Decode(&v.Kind, false, dir)
+		case "rooms":
+			seen[1] = true
+			problems[1] = obj.Decode(&v.Rooms, false, dir)
+		default:
+			obj.Skip()
+		}
+	}
+	if err := obj.Err(); err != nil {
 		return err
 	}
-	var v House
 	var errs oapi.ValidationErrors
-	if raw, ok := fields["kind"]; ok {
-		errs.Nested("/kind", oapi.DecodeField(raw, &v.Kind, false, dir))
+	if seen[0] {
+		errs.Nested("/kind", problems[0])
 	} else {
 		errs.Add("/kind", "required property is missing")
 	}
-	if raw, ok := fields["rooms"]; ok {
-		errs.Nested("/rooms", oapi.DecodeField(raw, &v.Rooms, false, dir))
+	if seen[1] {
+		errs.Nested("/rooms", problems[1])
 	} else {
 		errs.Add("/rooms", "required property is missing")
 	}
@@ -55,10 +85,20 @@ func (m House) MarshalJSON() ([]byte, error) {
 // EncodeJSON encodes the value for dir: read-only properties are left out
 // of requests and write-only properties out of responses.
 func (m House) EncodeJSON(dir oapi.Direction) ([]byte, error) {
-	enc := oapi.NewObjectEncoder(dir)
-	enc.Field("kind", m.Kind)
-	enc.Field("rooms", m.Rooms)
-	return enc.Bytes()
+	return m.AppendJSON(nil, dir)
+}
+
+// AppendJSON appends the value to dst as EncodeJSON encodes it.
+func (m House) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
+	start := len(dst)
+	dst = append(dst, '{')
+	dst = append(dst, "\"kind\":"...)
+	dst = oapi.AppendString(dst, m.Kind)
+	dst = append(dst, ',')
+	dst = append(dst, "\"rooms\":"...)
+	dst = strconv.AppendInt(dst, m.Rooms, 10)
+	dst = append(dst, ',')
+	return oapi.EndObject(dst, start), nil
 }
 
 // Validate checks the values against the constraints of the schema.

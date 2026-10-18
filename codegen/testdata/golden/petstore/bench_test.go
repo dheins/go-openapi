@@ -88,3 +88,15 @@ func BenchmarkDecodeDiscriminatedUnion(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkEncodeDiscriminatedUnion(b *testing.B) {
+	var a Animal
+	if err := json.Unmarshal([]byte(`{"kind": "kitty", "lives": 3}`), &a); err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		if _, err := json.Marshal(a); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

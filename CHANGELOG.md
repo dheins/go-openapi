@@ -1,5 +1,84 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Multipart file parts written the OpenAPI 3.1 way: a string with a
+  `contentMediaType`, or a property without a type, is an `oapi.File`
+  (only in `multipart/form-data` bodies; elsewhere such a string stays a
+  string). File parts need not have a file name.
+- The `encoding` object of `multipart/form-data` bodies: a part declaring a
+  content type outside `contentType` is a 400, as is a missing `required`
+  part header. `oapi.File.Header` holds the part's headers.
+- Request bodies whose media types need different Go types: media types
+  that used to be answered with 415 because their schema differed from
+  the first one's are decoded into a field of their own (`FormBody`,
+  `MultipartBody`, `TextBody`, ...); `req.ContentType` says which arrived.
+  Media types with schemas written the same way share a type.
+- Nested objects and maps (`additionalProperties`) in form and multipart
+  bodies, object parameters and form `querystring` parameters, written
+  with brackets (`?filter[owner][name]=Ann`) or, for an object sent as one
+  value, as JSON. Arrays may also be written `a[]=1` or `a[0]=1`.
+  Operations with such bodies or parameters used to be answered with 501
+  or 415.
+- Response headers with JSON `content`: a field of the schema's type, sent
+  as compact JSON (`server.FormatJSON`). They used to be left out.
+- Security scheme names written as URI references (3.2), local or in
+  other files: the loader resolves them (`loader.Spec.SecurityScheme`),
+  and a name and a URI leading to the same scheme share one
+  `SecurityHandler` method. Operations using them used to be answered
+  with 501.
+- `loader.Spec.Bundle`: the document as written as one JSON document, with
+  the objects it refers to in other files copied under `components` (path
+  items in place of their reference) and every reference to them
+  rewritten as a pointer. `goapi generate server` embeds it, so
+  `server.WithDocument` serves a split document whole; a single-file
+  document is embedded unchanged.
+- Generated structs decode token by token: `DecodeJSONFrom` (with a
+  direction) and `UnmarshalJSONFrom`, which `encoding/json` uses, read the
+  object's members from a `jsontext.Decoder` instead of collecting them
+  into a map first. Decoding the fixture's `Pet` is about twice as fast
+  with a third of the memory; the problems reported are unchanged. The
+  runtime gains `oapi.DecodeFrom`, `oapi.DecodeJSONWith`,
+  `oapi.DecodeObjectWith`, `oapi.BeginObject` and `oapi.StreamDecoder`.
+  Objects with inline unions decode token by token too.
+- Generated structs and sealed unions append their JSON to one buffer
+  (`AppendJSON`), writing strings, numbers, booleans, enums and nested
+  generated types directly; output is unchanged. Encoding the fixture's
+  `Pet` is about twice as fast with a third of the allocations, and a
+  discriminated union about five times as fast. The runtime gains
+  `oapi.AppendValue`, `oapi.Appender`, `oapi.AppendString`,
+  `oapi.AppendFloat`, `oapi.AppendInline`, `oapi.EndObject` and
+  `oapi.Date.AppendText`.
+- `oapi.DiscriminatorValue` reads the discriminator token by token
+  instead of collecting the object.
+
+### Fixed
+
+- `oapi.EnsureProperty` accepted data after the object, and returned it
+  unchanged when the property was set. Found by `FuzzEnsureProperty`.
+
+### Changed
+
+- Regenerate servers: multipart properties typed `string` or `any` because
+  of a `contentMediaType` or a missing type become `oapi.File`.
+- Operations accepting media types with different schemas now accept all
+  of them instead of answering 415 for the later ones. Their handlers are
+  called with `req.Body` unset for those media types: check
+  `req.ContentType`. Structured media types the server cannot decode, such
+  as XML with an object schema, are still answered with 415.
+- `server.ObjectJSON`, `server.DecodeFields` and `server.DecodeMultipart`
+  take the object's `server.Property` (with `Properties` and `Additional`)
+  instead of a map of properties; regenerated servers pass it. In form
+  fields, an undeclared key with brackets such as `a[b]` is now the
+  nested property `b` of `a`.
+- A security requirement naming a scheme by a URI reference that does not
+  resolve is a loading error, like an unresolvable `$ref`.
+- Properties named like the methods of generated structs (`DecodeJSON`,
+  `EncodeJSON`, `DecodeJSONFrom`, `UnmarshalJSONFrom`) get a numbered field
+  name, as `Validate` already did.
+
 ## v0.3.1
 
 Logging for generated servers: every way a request ends is logged with its

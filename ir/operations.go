@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -59,6 +60,8 @@ type SecurityScheme struct {
 	// In and ParamName locate an API key.
 	In, ParamName string
 	Doc           string
+
+	def *oas.SecurityScheme
 }
 
 // SecurityUse is a scheme in a security requirement, with the scopes (or
@@ -92,10 +95,11 @@ type Param struct {
 	Style   string
 	Explode bool
 	Content string
-	// Array and Object give the shape of the value; an object's
-	// Properties are primitive values or arrays of them.
+	// Array and Object give the shape of the value; an object has
+	// Properties, and Additional gives the type of any others.
 	Array, Object   bool
 	Properties      []ParamProperty
+	Additional      *ParamProperty
 	AllowEmptyValue bool
 	// Elem is the type of the value, or of each item for an array.
 	Elem *Ref
@@ -107,23 +111,45 @@ type Param struct {
 	Default string
 }
 
-// ParamProperty is a property of an object parameter: its JSON Schema
-// type, and whether it is an array of that type.
+// ParamProperty is a property of an object parameter or form body: its
+// JSON Schema type ("any" for a value of any type), and whether it is an
+// array of that type. An object (type "object") has Properties, and
+// Additional gives the type of any others.
 type ParamProperty struct {
-	Name  string
-	Type  string
-	Array bool
+	Name       string
+	Type       string
+	Array      bool
+	Properties []ParamProperty
+	Additional *ParamProperty
+	// ContentTypes are the media types (or ranges) a multipart part may
+	// declare, from its encoding; empty allows any.
+	ContentTypes []string
+	// Headers are the headers a multipart part must carry.
+	Headers []string
 }
 
-// Body is the JSON request body of an operation.
+// Body is the request body of an operation.
 type Body struct {
 	Required bool
-	// Media are the accepted media types, which share one Go type.
+	// Media are the accepted media types.
 	Media []*BodyMedia
 	Doc   string
-	// Value is the body's type, and Type the field type: Value, made
-	// optional if the body is not required.
+	// Value is the type of the first media type's body, and Type the type
+	// of the Body field: Value, made optional if the body is not required.
 	Value, Type *Ref
+	// Fields are the request fields bodies are decoded into: Body, then
+	// one per Go type other media types need, in document order.
+	Fields []*BodyField
+}
+
+// BodyField is a request field holding the body when it arrives as one
+// of the media types decoded into it.
+type BodyField struct {
+	Name string
+	// Value is the body's type, and Type the field type. Fields other
+	// than Body are always optional: only one of them is set.
+	Value, Type *Ref
+	Media       []*BodyMedia
 }
 
 // BodyMedia is one media type a request body accepts.
@@ -131,8 +157,12 @@ type BodyMedia struct {
 	MediaType string
 	// Kind is json, form, multipart, text or binary.
 	Kind string
-	// Properties are the object properties, for form and multipart.
+	// Properties are the object properties, for form and multipart, and
+	// Additional the type of any others.
 	Properties []ParamProperty
+	Additional *ParamProperty
+	// Field is the request field the body is decoded into.
+	Field *BodyField
 }
 
 // Response is one declared response, a variant the handler can return.
@@ -164,8 +194,11 @@ type Header struct {
 	Doc      string
 	Required bool
 	Array    bool
-	Elem     *Ref
-	Type     *Ref
+	// Content is the media type a header with content is serialized
+	// with (JSON), or "" for a header in the simple style.
+	Content string
+	Elem    *Ref
+	Type    *Ref
 }
 
 // reservedServerNames are exported identifiers the generated server
@@ -280,7 +313,7 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 	}
 
 	if rb := op.RequestBody.Deref(); rb != nil {
-		o.Body = b.body(o, op, rb)
+		o.Body = b.body(o, op, rb, fields)
 	}
 	var responses *oas.OrderedMap[*oas.Response]
 	if op.Responses != nil {
@@ -351,7 +384,7 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 		param.Elem = ref
 		if formQuery {
 			if !b.objectParam(param, ref) {
-				return nil, fmt.Sprintf("querystring parameter %q must be an object of primitive values or arrays of them", p.Name)
+				return nil, fmt.Sprintf("querystring parameter %q must be an object of primitive values, arrays of them or objects of them", p.Name)
 			}
 		}
 	} else {
@@ -382,6 +415,11 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 		}
 		if why := checkStyle(param); why != "" {
 			return nil, why
+		}
+		if param.Additional != nil && param.Explode && param.Style == "form" {
+			// Each property is a parameter of its own, so the names of
+			// others are not known.
+			return nil, fmt.Sprintf("parameter %q: an object with additional properties cannot use the exploded form style; use deepObject or explode: false", p.Name)
 		}
 	}
 
@@ -429,45 +467,95 @@ func checkStyle(p *Param) string {
 	return ""
 }
 
-// objectParam reports whether ref is an object whose properties are
-// primitive values or arrays of them, and if so records them on p.
+// objectParam reports whether ref is an object an object parameter can
+// carry (see objectProperties), and if so records its properties on p.
 func (b *builder) objectParam(p *Param, ref *Ref) bool {
-	props, ok := objectProperties(ref, false)
+	props, additional, ok := objectProperties(ref, false)
 	if ok {
-		p.Object, p.Properties = true, props
+		p.Object, p.Properties, p.Additional = true, props, additional
 	}
 	return ok
 }
 
-// objectProperties returns the properties of an object whose properties
-// are primitive values or arrays of them; with files, oapi.File values
-// (type "file") are allowed too.
-func objectProperties(ref *Ref, files bool) ([]ParamProperty, bool) {
+// objectProperties returns the properties of an object whose values are
+// primitive values, arrays of them, or such objects in turn, and the type
+// of its additional properties if it allows typed ones. With files,
+// oapi.File values (type "file") are allowed at the top level too.
+// Recursive types and arrays of objects cannot be written as fields.
+func objectProperties(ref *Ref, files bool) ([]ParamProperty, *ParamProperty, bool) {
+	return objectShape(ref, files, map[*Type]bool{})
+}
+
+func objectShape(ref *Ref, files bool, seen map[*Type]bool) ([]ParamProperty, *ParamProperty, bool) {
 	for ref.Kind == Named && ref.Type.Kind == Alias {
 		ref = ref.Type.Underlying
 	}
-	if ref.Kind != Named || ref.Type.Kind != Struct {
-		return nil, false
+	switch {
+	case ref.Kind == Map:
+		additional, ok := valueShape(ref.Elem, false, seen)
+		return nil, &additional, ok
+	case ref.Kind != Named || ref.Type.Kind != Struct || seen[ref.Type]:
+		return nil, nil, false
 	}
+	t := ref.Type
+	seen[t] = true
+	defer delete(seen, t)
 	var props []ParamProperty
-	for _, f := range ref.Type.Fields {
-		r := f.Type
-		for r.Kind == Optional || r.Kind == Nullable || r.Kind == Pointer {
-			r = r.Elem
+	for _, f := range t.Fields {
+		prop, ok := valueShape(f.Type, files, seen)
+		if !ok {
+			return nil, nil, false
 		}
-		prop := ParamProperty{Name: f.JSONName}
-		if r.Kind == Slice {
-			prop.Array = true
-			r = stripNullable(r.Elem)
-		}
-		if files && r.Kind == Builtin && r.Name == "oapi.File" {
-			prop.Type = "file"
-		} else if prop.Type = jsonType(r); prop.Type == "" {
-			return nil, false
-		}
+		prop.Name = f.JSONName
 		props = append(props, prop)
 	}
-	return props, true
+	var additional *ParamProperty
+	if a := t.Additional; a != nil && !a.Forbidden && a.Value != nil {
+		shape, ok := valueShape(a.Value, false, seen)
+		if !ok {
+			return nil, nil, false
+		}
+		additional = &shape
+	}
+	return props, additional, true
+}
+
+// valueShape describes a property value of type r, or reports that it
+// cannot be written as fields.
+func valueShape(r *Ref, files bool, seen map[*Type]bool) (ParamProperty, bool) {
+	for r.Kind == Optional || r.Kind == Nullable || r.Kind == Pointer {
+		r = r.Elem
+	}
+	var prop ParamProperty
+	if r.Kind == Slice {
+		prop.Array = true
+		r = stripNullable(r.Elem)
+	}
+	switch {
+	case files && isFile(r):
+		prop.Type = "file"
+	case jsonType(r) != "":
+		prop.Type = jsonType(r)
+	case r.Kind == Any:
+		prop.Type = "any"
+	case prop.Array:
+		return prop, false
+	default:
+		props, additional, ok := objectShape(r, false, seen)
+		if !ok {
+			return prop, false
+		}
+		prop.Type, prop.Properties, prop.Additional = "object", props, additional
+	}
+	return prop, true
+}
+
+// isFile reports whether r is oapi.File or an alias of it.
+func isFile(r *Ref) bool {
+	for r.Kind == Named && r.Type.Kind == Alias {
+		r = r.Type.Underlying
+	}
+	return r.Kind == Builtin && r.Name == "oapi.File"
 }
 
 // jsonType returns the JSON Schema type of a scalar, or "".
@@ -553,10 +641,16 @@ func structured(kind string) bool {
 	return kind == "json" || kind == "form" || kind == "multipart"
 }
 
-func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Body {
+func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fields namespace) *Body {
 	body := &Body{Required: rb.Required, Doc: strings.TrimSpace(rb.Description)}
-	var first *oas.Schema
-	var group string
+	// groups are the fields, keyed like their media types: text and binary
+	// bodies share one per kind, structured ones one per schema.
+	type group struct {
+		kind   string
+		schema *oas.Schema
+		field  *BodyField
+	}
+	var groups []*group
 	var rejected []string
 	for mt, m := range rb.Content.All() {
 		kind := mediaKind(mt)
@@ -566,48 +660,217 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody) *Bo
 			rejected = append(rejected, mt)
 			continue
 		}
-		if m.Deref().Encoding.Len() > 0 {
+		if m.Deref().Encoding.Len() > 0 && kind != "multipart" {
 			b.warnAt(m, []string{"encoding"}, "the encoding object is not applied yet")
 		}
 		g := kind
 		if structured(kind) {
 			g = "structured"
 		}
+		i := slices.IndexFunc(groups, func(gr *group) bool {
+			return gr.kind == g && (g != "structured" || sameSchema(gr.schema, deref(schema)))
+		})
+		var field *BodyField
 		switch {
-		case body.Value == nil:
-			group, first = g, deref(schema)
-			body.Value = b.bodyValue(o, kind, schema)
-		case g != group || (g == "structured" && deref(schema) != first):
-			b.warnAt(m, nil, fmt.Sprintf("request body type %s cannot share a Go type with the operation's first media type and is answered with 415", mt))
+		case i >= 0:
+			field = groups[i].field
+		case len(groups) > 0 && kind == "binary" && !opaque(deref(schema)):
+			// Handing over bytes a schema describes but nothing checked,
+			// such as XML, would surprise handlers written for Body.
+			b.warnAt(m, nil, fmt.Sprintf("request bodies of type %s are not decoded from their schema yet and are answered with 415", mt))
 			rejected = append(rejected, mt)
 			continue
+		default:
+			field = &BodyField{Name: "Body"}
+			hint := o.Name + "RequestBody"
+			if len(groups) > 0 {
+				field.Name = bodyFieldName(fields, kind, mt)
+				hint = o.Name + strings.TrimSuffix(field.Name, "Body") + "RequestBody"
+			}
+			field.Value = b.bodyValue(kind, schema, hint)
 		}
-		media := &BodyMedia{MediaType: mt, Kind: kind}
+		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field}
 		if kind == "form" || kind == "multipart" {
-			props, ok := objectProperties(body.Value, kind == "multipart")
+			props, additional, ok := objectProperties(field.Value, kind == "multipart")
 			if !ok {
-				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects of primitive values or arrays of them; %s is answered with 415", kind, mt))
+				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects of primitive values, arrays of them or objects of them; %s is answered with 415", kind, mt))
 				rejected = append(rejected, mt)
 				continue
 			}
-			media.Properties = props
+			if kind == "multipart" {
+				b.partEncodings(m.Deref(), props)
+			}
+			media.Properties, media.Additional = props, additional
 		}
+		if i < 0 {
+			if len(groups) > 0 {
+				field.Name = fields.claim(field.Name)
+			}
+			groups = append(groups, &group{kind: g, schema: deref(schema), field: field})
+			body.Fields = append(body.Fields, field)
+		}
+		field.Media = append(field.Media, media)
 		body.Media = append(body.Media, media)
 	}
 	if len(body.Media) == 0 {
 		b.unsupported(o, op.RequestBody, fmt.Sprintf("request bodies of type %s are not supported yet", strings.Join(rejected, ", ")))
 		return nil
 	}
-	body.Type = body.Value
-	if !body.Required {
-		body.Type = b.optional(body.Value)
+	for i, f := range body.Fields {
+		f.Type = f.Value
+		if i > 0 || !body.Required {
+			f.Type = b.optional(f.Value)
+		}
 	}
+	body.Value, body.Type = body.Fields[0].Value, body.Fields[0].Type
 	return body
+}
+
+// opaque reports whether a binary body's schema leaves its bytes
+// undescribed: no schema, or a string.
+func opaque(s *oas.Schema) bool {
+	if s == nil || s.Bool != nil {
+		return true
+	}
+	types, _ := splitTypes(s)
+	if len(types) == 0 {
+		return inferType(s) == "" || inferType(s) == "string"
+	}
+	return slices.Equal(types, []string{"string"})
+}
+
+// sameSchema reports whether two body schemas are the same or written
+// the same way, so that they can share a Go type.
+func sameSchema(a, b *oas.Schema) bool {
+	return a == b || a != nil && b != nil && reflect.DeepEqual(*a, *b)
+}
+
+// bodyFieldName names the request field for bodies of a media type that
+// cannot be decoded into Body: after its kind, or after the media type if
+// another field has that name. The caller claims it once the field is used.
+func bodyFieldName(fields namespace, kind, mediaType string) string {
+	name := map[string]string{"json": "JSON", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary"}[kind] + "Body"
+	if fields[name] {
+		mt, _, _ := strings.Cut(mediaType, ";")
+		name = GoName(mt) + "Body"
+	}
+	return name
+}
+
+// partEncodings applies the encoding object of a multipart media type to
+// its properties: the content types each part may have and the headers
+// it must carry.
+func (b *builder) partEncodings(m *oas.MediaType, props []ParamProperty) {
+	for name, enc := range m.Encoding.All() {
+		i := slices.IndexFunc(props, func(p ParamProperty) bool { return p.Name == name })
+		if i < 0 || enc == nil {
+			b.warnAt(m, []string{"encoding", name}, fmt.Sprintf("the encoding of %q names no property and is ignored", name))
+			continue
+		}
+		for ct := range strings.SplitSeq(enc.ContentType, ",") {
+			// Parameters such as charset do not decide whether a part matches.
+			ct, _, _ = strings.Cut(ct, ";")
+			if ct = strings.TrimSpace(ct); ct != "" {
+				props[i].ContentTypes = append(props[i].ContentTypes, ct)
+			}
+		}
+		for hname, h := range enc.Headers.All() {
+			h = h.Deref()
+			// The part's Content-Type is described by contentType.
+			if h == nil || strings.EqualFold(hname, "Content-Type") {
+				continue
+			}
+			if h.Required {
+				props[i].Headers = append(props[i].Headers, http.CanonicalHeaderKey(hname))
+			}
+			if h.Schema != nil || h.Content.Len() > 0 {
+				b.warnAt(enc, []string{"headers", hname}, fmt.Sprintf("the value of part header %q is not checked yet, only its presence", hname))
+			}
+		}
+		if enc.Style != "" || enc.Explode != nil || enc.AllowReserved != nil {
+			b.warnAt(enc, nil, "style, explode and allowReserved do not apply to multipart/form-data parts and are ignored")
+		}
+	}
+}
+
+// markFileParts records which properties of multipart request bodies hold
+// files although they are not format: binary, the 3.0 way: OpenAPI 3.1
+// writes a file part as a string with a contentMediaType, or as a schema
+// without a type. Elsewhere such schemas stay strings and any, since a
+// JSON string with a contentMediaType holds text, not bytes.
+func (b *builder) markFileParts() {
+	b.fileParts = map[*oas.Schema]bool{}
+	if b.spec.Document.Paths == nil {
+		return
+	}
+	for _, item := range b.spec.Document.Paths.Items.All() {
+		for _, op := range item.Deref().Operations() {
+			rb := op.RequestBody.Deref()
+			if rb == nil {
+				continue
+			}
+			for mt, m := range rb.Content.All() {
+				if mediaKind(mt) == "multipart" {
+					b.markFileProperties(deref(m.Deref().Schema), map[*oas.Schema]bool{})
+				}
+			}
+		}
+	}
+}
+
+// markFileProperties marks the file parts among the properties of s and
+// of its allOf members, and the items of arrays of them.
+func (b *builder) markFileProperties(s *oas.Schema, seen map[*oas.Schema]bool) {
+	if s == nil || seen[s] {
+		return
+	}
+	seen[s] = true
+	for _, prop := range s.Properties.All() {
+		if p := deref(prop); p != nil && p.Items != nil && slices.Contains([]string(p.Type), "array") {
+			b.markFile(p.Items)
+		}
+		b.markFile(prop)
+	}
+	for _, m := range s.AllOf {
+		b.markFileProperties(deref(m), seen)
+	}
+}
+
+// markFile marks s, and the schemas its $ref chain passes through, if the
+// chain ends at a file part.
+func (b *builder) markFile(s *oas.Schema) {
+	if !isFilePart(deref(s)) {
+		return
+	}
+	for seen := map[*oas.Schema]bool{}; s != nil && !seen[s]; s = s.Resolved {
+		seen[s] = true
+		b.fileParts[s] = true
+		if s.Ref == "" {
+			return
+		}
+	}
+}
+
+// isFilePart reports whether the schema of a multipart property describes
+// a file: a string with a contentMediaType and no other encoding or
+// format, or a schema that does not constrain the value.
+func isFilePart(s *oas.Schema) bool {
+	switch {
+	case s == nil:
+		return false
+	case s.Bool != nil:
+		return *s.Bool
+	case s.ContentMediaType != "":
+		types, _ := splitTypes(s)
+		return s.ContentEncoding == "" && s.Format == "" &&
+			(slices.Equal(types, []string{"string"}) || len(types) == 0 && inferType(s) == "string")
+	}
+	return s.Ref == "" && !hasConstraints(s)
 }
 
 // bodyValue returns the Go type of a body of the given kind: the schema's
 // type for structured bodies, a string for text and bytes for binary.
-func (b *builder) bodyValue(o *Operation, kind string, schema *oas.Schema) *Ref {
+func (b *builder) bodyValue(kind string, schema *oas.Schema, hint string) *Ref {
 	switch kind {
 	case "text":
 		if s := deref(schema); s != nil && slices.Equal([]string(s.Type), []string{"string"}) {
@@ -617,7 +880,7 @@ func (b *builder) bodyValue(o *Operation, kind string, schema *oas.Schema) *Ref 
 	case "binary":
 		return &Ref{Kind: Builtin, Name: "[]byte"}
 	}
-	return b.use(schema, o.Name+"RequestBody", nil)
+	return b.use(schema, hint, nil)
 }
 
 func (b *builder) response(o *Operation, status string, resp *oas.Response) []*Response {
@@ -655,7 +918,7 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			}
 			suffix = "JSON"
 		case "text":
-			v.Body = b.bodyValue(o, kind, media.Schema)
+			v.Body = b.bodyValue(kind, media.Schema, "")
 			suffix = "Text"
 		case "binary":
 			v.Body = &Ref{Kind: Builtin, Name: "[]byte"}
@@ -698,13 +961,25 @@ func (b *builder) responseHeaders(o *Operation, statusName string, r *oas.Respon
 			continue
 		}
 		hdr := h.Deref()
-		if hdr == nil || hdr.Content.Len() > 0 {
-			b.warnAt(h, nil, fmt.Sprintf("header %q with content is not supported yet and is not sent", name))
+		if hdr == nil {
 			continue
 		}
-		ref := stripNullable(b.use(hdr.Schema, o.Name+statusName+GoName(name), nil))
 		header := &Header{Name: name, Doc: strings.TrimSpace(hdr.Description), Required: hdr.Required}
+		schema := hdr.Schema
+		for mt, m := range hdr.Content.All() {
+			header.Content, schema = strings.ToLower(mt), m.Deref().Schema
+			break
+		}
+		if header.Content != "" && !isJSONMediaType(header.Content) {
+			b.warnAt(h, nil, fmt.Sprintf("header %q with content of type %s is not supported yet and is not sent", name, header.Content))
+			continue
+		}
+		ref := stripNullable(b.use(schema, o.Name+statusName+GoName(name), nil))
 		switch {
+		case header.Content != "":
+			// Any value can be written as JSON.
+			header.Elem = ref
+			header.Type = ref
 		case isScalar(ref):
 			header.Elem = ref
 			header.Type = ref
@@ -822,11 +1097,17 @@ func (b *builder) security(o *Operation, op *oas.Operation) {
 	if len(reqs) == 0 {
 		return
 	}
+	// Scheme names written as relative URI references are resolved
+	// against the file of the requirement's owner.
+	var owner any = b.spec.Document
+	if op.Security != nil {
+		owner = op
+	}
 	o.Security = [][]*SecurityUse{}
 	for _, req := range reqs {
 		uses := []*SecurityUse{}
 		for name, scopes := range req.All() {
-			scheme, why := b.securityScheme(name)
+			scheme, why := b.securityScheme(owner, name)
 			if why != "" {
 				b.unsupported(o, op, why)
 				return
@@ -837,21 +1118,21 @@ func (b *builder) security(o *Operation, op *oas.Operation) {
 	}
 }
 
-// securityScheme returns the scheme named name, mapping it on first use.
-func (b *builder) securityScheme(name string) (*SecurityScheme, string) {
+// securityScheme returns the scheme a requirement of owner names, by
+// component name or URI reference, mapping it on first use. Names that
+// lead to the same scheme share one SecurityHandler method.
+func (b *builder) securityScheme(owner any, name string) (*SecurityScheme, string) {
+	def := b.spec.SecurityScheme(owner, name)
+	if def == nil {
+		return nil, fmt.Sprintf("security scheme %q is not defined", name)
+	}
 	for _, s := range b.model.SecuritySchemes {
-		if s.Name == name {
+		if s.def == def {
 			return s, ""
 		}
 	}
-	var def *oas.SecurityScheme
-	if c := b.spec.Document.Components; c != nil {
-		def, _ = c.SecuritySchemes.Get(name)
-	}
-	if def = def.Deref(); def == nil {
-		return nil, fmt.Sprintf("security scheme %q is not a component (URI references to schemes are not supported yet)", name)
-	}
-	s := &SecurityScheme{Name: name, Type: def.Type, Scheme: strings.ToLower(def.Scheme), Doc: strings.TrimSpace(def.Description)}
+	name = b.componentSchemeName(def, name)
+	s := &SecurityScheme{def: def, Name: name, Type: def.Type, Scheme: strings.ToLower(def.Scheme), Doc: strings.TrimSpace(def.Description)}
 	switch def.Type {
 	case "apiKey":
 		s.In, s.ParamName = def.In, def.Name
@@ -859,9 +1140,28 @@ func (b *builder) securityScheme(name string) (*SecurityScheme, string) {
 	default:
 		return nil, fmt.Sprintf("security scheme %q has the unknown type %q", name, def.Type)
 	}
-	s.Method = b.securityMethods.claim(GoName(name))
+	method := name
+	if i := strings.LastIndexAny(method, "#/:"); i >= 0 {
+		// A URI reference not to a component: name the method after the
+		// last segment, as for a component.
+		method = method[i+1:]
+	}
+	s.Method = b.securityMethods.claim(GoName(method))
 	b.model.SecuritySchemes = append(b.model.SecuritySchemes, s)
 	return s, ""
+}
+
+// componentSchemeName returns the component name of def, or name if def
+// is not a component of the document.
+func (b *builder) componentSchemeName(def *oas.SecurityScheme, name string) string {
+	if c := b.spec.Document.Components; c != nil {
+		for key, s := range c.SecuritySchemes.All() {
+			if s.Deref() == def {
+				return key
+			}
+		}
+	}
+	return name
 }
 
 func nonEmpty(ss ...string) []string {

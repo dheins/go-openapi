@@ -14,7 +14,6 @@ import (
 
 	"github.com/dheins/go-openapi/codegen"
 	"github.com/dheins/go-openapi/ir"
-	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/validate"
 )
 
@@ -125,12 +124,10 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		generate = codegen.Server
 		opts.OperationsPackage, opts.OperationsImport = *operations, opsImport
 		opts.ModelsPackage, opts.ModelsImport = *models, modelsImport
-		// Embed the document as written, not as upgraded for the model.
-		src, err := loader.Parse(file)
-		if err != nil {
-			return fail("%v", err)
-		}
-		if opts.Document, err = src.JSON(); err != nil {
+		// Embed the document as written, not as upgraded for the model,
+		// with the objects it refers to in other files copied in, so that
+		// clients of server.WithDocument can follow every reference.
+		if opts.Document, err = res.Spec.Bundle(); err != nil {
 			return fail("%v", err)
 		}
 	}

@@ -13,6 +13,12 @@ checked off under [Fixed](#fixed), by the release they shipped in.
   (`pet.yaml#/properties/id`), the sub-pointer target and the copy inside the
   whole document can be distinct Go objects. Values are equal; only pointer
   identity differs. *Workaround:* reference external files consistently.
+- **Bundling moves schemas out of their own resources.** `Spec.Bundle`
+  removes a `$id` whose scope holds a rewritten reference, and `$anchor`s
+  and `$dynamicRef`s of copied files then belong to the root document: two
+  copied files with the same anchor make `#anchor` ambiguous there. A
+  single-file document is not changed at all, so a reference to its own
+  file by name (`openapi.yaml#/...`) is still served as written.
 - **`$id`/`$anchor` indexing is heuristic in fragments.** Data keywords
   (`example`, `examples`, `default`, `const`, `enum`, `value`, `dataValue`)
   are skipped, but any other non-schema mapping holding `$id` would be

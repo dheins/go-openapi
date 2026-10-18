@@ -12,7 +12,7 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var lookupCriteriaProperties = map[string]server.Property{"role": {Type: "string", Array: false}, "age": {Type: "integer", Array: false}, "tags": {Type: "string", Array: true}}
+var lookupCriteriaProperties = server.Property{Type: "object", Properties: map[string]server.Property{"role": {Type: "string"}, "age": {Type: "integer"}, "tags": {Type: "string", Array: true}, "owner": {Type: "object", Properties: map[string]server.Property{"name": {Type: "string"}, "age": {Type: "integer"}}}, "labels": {Type: "object", Additional: &server.Property{Type: "integer"}}}}
 
 // HandleLookup returns the HTTP handler of Lookup.
 //
