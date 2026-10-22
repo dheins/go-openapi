@@ -74,14 +74,14 @@ func (c Components) MarshalJSON() ([]byte, error) {
 	return marshalExtensible(plain(c), c.Extensions)
 }
 
-func (p *PathItem) UnmarshalJSON(data []byte) error {
+func (pi *PathItem) UnmarshalJSON(data []byte) error {
 	type plain PathItem
-	return unmarshalExtensible(data, (*plain)(p), &p.Extensions)
+	return unmarshalExtensible(data, (*plain)(pi), &pi.Extensions)
 }
 
-func (p PathItem) MarshalJSON() ([]byte, error) {
+func (pi PathItem) MarshalJSON() ([]byte, error) {
 	type plain PathItem
-	return marshalExtensible(plain(p), p.Extensions)
+	return marshalExtensible(plain(pi), pi.Extensions)
 }
 
 func (o *Operation) UnmarshalJSON(data []byte) error {

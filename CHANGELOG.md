@@ -79,6 +79,9 @@
 
 ### Changed
 
+- Requires Go 1.27.3, whose `crypto/x509` distrusts compromised
+  intermediate certificates (GO-2026-6809); the loader's `HTTPFetcher`
+  verifies certificates with it.
 - Regenerate servers: multipart properties typed `string` or `any` because
   of a `contentMediaType` or a missing type become `oapi.File`.
 - Operations accepting media types with different schemas now accept all
