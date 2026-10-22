@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/dheins/go-openapi/oapi"
 )
 
 // FuzzParamStyles checks that splitting parameter values never panics,
@@ -64,6 +66,15 @@ func FuzzMultipart(f *testing.F) {
 		}
 		props := Property{Type: "object", Properties: map[string]Property{"name": {Type: "string"}, "photo": {Type: "file"}}}
 		_, _ = DecodeMultipart[upload](bytes.Clone(body), "multipart/form-data; boundary="+boundary, props)
+		// The same body as positional parts, of each kind of item.
+		ct := "multipart/mixed; boundary=" + boundary
+		rules := Parts{Prefix: []Property{{ContentTypes: []string{"application/json"}, Headers: []string{"X-Seq"}}}}
+		rules.Item = "json"
+		_, _ = DecodeParts[upload](bytes.Clone(body), ct, rules)
+		rules.Item = "text"
+		_, _ = DecodeParts[string](bytes.Clone(body), ct, rules)
+		rules.Item = "file"
+		_, _ = DecodeParts[oapi.File](bytes.Clone(body), ct, rules)
 	})
 }
 
@@ -86,6 +97,31 @@ func FuzzObjectJSON(f *testing.F) {
 		data, err := ObjectJSON(q, obj)
 		if err == nil && !json.Valid(data) {
 			t.Fatalf("invalid JSON %s for %q", data, query)
+		}
+	})
+}
+
+// FuzzXMLToJSON checks that converting XML never panics, gives valid
+// JSON, and that what it gives is written back as XML that reads the
+// same.
+func FuzzXMLToJSON(f *testing.F) {
+	f.Add([]byte(`<p:pet xmlns:p="urn:pets" id="7"><p:name>Rex</p:name><photoUrls><photoUrl>a</photoUrl></photoUrls><tag><name>x</name></tag><category><id>1</id>Dogs</category></p:pet>`))
+	f.Add([]byte(`<p:pet xmlns:p="urn:pets"><extra a="1"><b>2</b><b>3</b>t</extra><vip xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:nil="true"/></p:pet>`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		out, err := XMLToJSON(data, petXML)
+		if err != nil {
+			return
+		}
+		if !json.Valid(out) {
+			t.Fatalf("invalid JSON %s from %q", out, data)
+		}
+		doc, err := JSONToXML(out, petXML)
+		if err != nil {
+			t.Fatalf("writing %s: %v", out, err)
+		}
+		back, err := XMLToJSON(doc, petXML)
+		if err != nil || string(back) != string(out) {
+			t.Fatalf("%q\n-> %s\n-> %s\n-> %s (%v)", data, out, doc, back, err)
 		}
 	})
 }

@@ -1,2 +1,2 @@
-80:13: request bodies of type application/xml are not decoded from their schema yet and are answered with 415
 315:21: the value of part header "X-Checksum" is not checked yet, only its presence
+407:21: the value of part header "X-Seq" is not checked yet, only its presence

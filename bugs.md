@@ -81,6 +81,13 @@ checked off under [Fixed](#fixed), by the release they shipped in.
 
 ## Fixed
 
+Unreleased:
+
+- [x] **Duplicate keys were accepted silently.** A YAML or JSON mapping
+  that repeated a key (two `/pets:` entries under `paths`) loaded without
+  an error, and one of the definitions was dropped. It is a loading error
+  at the repeated key now.
+
 v0.2.0:
 
 - [x] **Headers survived a failed response encoding.** Headers are now

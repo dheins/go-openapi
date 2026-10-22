@@ -357,6 +357,103 @@ paths:
       responses:
         "204":
           description: Imported.
+  /pets/{petId}/card:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getCard
+      responses:
+        "200":
+          description: The pet's card, as JSON or XML.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Card"
+    put:
+      operationId: putCard
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/Card"
+      responses:
+        "204":
+          description: Stored.
+  /pets/batch:
+    post:
+      operationId: batchPets
+      description: Pets as positional JSON parts.
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Pet"
+            prefixEncoding:
+              - contentType: application/json
+                headers:
+                  X-Seq:
+                    required: true
+                    schema:
+                      type: string
+            itemEncoding:
+              contentType: application/json
+      responses:
+        "200":
+          description: The pets stored.
+          content:
+            multipart/mixed:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+  /bundle:
+    post:
+      operationId: uploadBundle
+      requestBody:
+        required: true
+        content:
+          multipart/related:
+            itemEncoding:
+              contentType: image/*
+      responses:
+        "200":
+          description: The images back.
+          content:
+            multipart/related:
+              schema:
+                type: array
+                items:
+                  type: string
+                  contentMediaType: image/png
+  /memos:
+    put:
+      operationId: putNotes
+      requestBody:
+        required: true
+        content:
+          multipart/alternative:
+            schema:
+              type: array
+              items:
+                type: string
+                minLength: 1
+            itemEncoding:
+              contentType: text/plain, text/html
+      responses:
+        "204":
+          description: Stored.
   /pets/form:
     post:
       operationId: submitForm
@@ -462,6 +559,68 @@ components:
         secret:
           type: string
           writeOnly: true
+    Card:
+      type: object
+      required: [id, name]
+      xml:
+        name: card
+        namespace: urn:example:pets
+        prefix: p
+      properties:
+        id:
+          type: integer
+          format: int64
+          xml:
+            attribute: true
+        name:
+          type: string
+          minLength: 1
+          xml:
+            namespace: urn:example:pets
+            prefix: p
+        nicknames:
+          type: array
+          xml:
+            wrapped: true
+          items:
+            type: string
+            xml:
+              name: nickname
+        vets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vet"
+        note:
+          $ref: "#/components/schemas/Note"
+        secret:
+          type: string
+          writeOnly: true
+    Vet:
+      type: object
+      xml:
+        name: vet
+      properties:
+        name:
+          type: string
+          xml:
+            nodeType: text
+        phone:
+          type: string
+          xml:
+            nodeType: attribute
+    Note:
+      type: object
+      xml:
+        name: remark
+      properties:
+        lang:
+          type: string
+          xml:
+            attribute: true
+        text:
+          type: string
+          xml:
+            nodeType: cdata
     Filter:
       type: object
       required: [role]

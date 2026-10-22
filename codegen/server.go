@@ -452,6 +452,24 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			w(3, "} else {")
 			validate(4)
 			w(3, "}")
+		case "parts":
+			_, sub, _ := strings.Cut(m.MediaType, "/")
+			parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", partsLiteral(m.Parts))
+			w(3, "if v, err := server.DecodeParts[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", f.goType(sliceElem(m.Field.Value)), parts)
+			w(4, "b.Body(err)")
+			w(3, "} else {")
+			// v is a []T; the field may hold a named slice type.
+			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, f.goType(m.Field.Value)+"(v)"))
+			validate(4)
+			w(3, "}")
+		case "xml":
+			shape := f.declareVar(lowerFirst(o.Name)+"XMLShape", xmlNodeLiteral(m.XML))
+			w(3, "if v, err := server.DecodeXML[%s](body, %s); err != nil {", elem(), shape)
+			w(4, "b.Body(err)")
+			w(3, "} else {")
+			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
+			validate(4)
+			w(3, "}")
 		case "form", "multipart":
 			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional))
 			if m.Kind == "form" {
@@ -475,6 +493,78 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 	}
 	w(2, "}")
 	w(1, "}")
+}
+
+// partsLiteral renders how positional parts are read and written as a
+// server.Parts.
+func partsLiteral(p *ir.Parts) string {
+	rule := func(r ir.ParamProperty) string {
+		var fields []string
+		if len(r.ContentTypes) > 0 {
+			fields = append(fields, "ContentTypes: "+stringSlice(r.ContentTypes))
+		}
+		if len(r.Headers) > 0 {
+			fields = append(fields, "Headers: "+stringSlice(r.Headers))
+		}
+		return "{" + strings.Join(fields, ", ") + "}"
+	}
+	fields := []string{fmt.Sprintf("Item: %q", p.Item)}
+	if len(p.Prefix) > 0 {
+		var prefix []string
+		for _, r := range p.Prefix {
+			prefix = append(prefix, rule(r))
+		}
+		fields = append(fields, "Prefix: []server.Property{"+strings.Join(prefix, ", ")+"}")
+	}
+	if rest := rule(p.Rest); rest != "{}" {
+		fields = append(fields, "Rest: server.Property"+rest)
+	}
+	return "server.Parts{" + strings.Join(fields, ", ") + "}"
+}
+
+// sliceElem returns the item type of r, a slice or a named slice type.
+func sliceElem(r *ir.Ref) *ir.Ref {
+	for r.Kind == ir.Named && (r.Type.Kind == ir.Defined || r.Type.Kind == ir.Alias) {
+		r = r.Type.Underlying
+	}
+	return r.Elem
+}
+
+// xmlNodeLiteral renders an XML shape as a *server.XMLNode.
+func xmlNodeLiteral(n *ir.XMLNode) string {
+	var b strings.Builder
+	b.WriteString("&server.XMLNode{")
+	var fields []string
+	add := func(name, value string) { fields = append(fields, name+": "+value) }
+	if n.Name != "" {
+		add("Name", strconv.Quote(n.Name))
+	}
+	if n.Namespace != "" {
+		add("Namespace", strconv.Quote(n.Namespace))
+	}
+	if n.Prefix != "" {
+		add("Prefix", strconv.Quote(n.Prefix))
+	}
+	if n.Kind != "" {
+		add("Kind", strconv.Quote(n.Kind))
+	}
+	add("Type", strconv.Quote(n.Type))
+	if n.Wrapped {
+		add("Wrapped", "true")
+	}
+	if n.Items != nil {
+		add("Items", xmlNodeLiteral(n.Items))
+	}
+	if len(n.Properties) > 0 {
+		props := make([]string, len(n.Properties))
+		for i, p := range n.Properties {
+			props[i] = fmt.Sprintf("{Name: %q, Node: %s}", p.Name, xmlNodeLiteral(p.Node))
+		}
+		add("Properties", "[]server.XMLProperty{"+strings.Join(props, ", ")+"}")
+	}
+	b.WriteString(strings.Join(fields, ", "))
+	b.WriteString("}")
+	return b.String()
 }
 
 // objectProperty renders an object with the given properties, and type
@@ -671,7 +761,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(2, "return err")
 		w(1, "}")
 	}
-	if r.Kind == "json" {
+	if r.Kind == "json" || r.Kind == "xml" || r.Kind == "parts" {
 		if stmts := f.validation("r.Body", r.Body, 2); stmts != "" {
 			w(1, "if c.ValidateResponses {")
 			w(2, "var errs oapi.ValidationErrors")
@@ -724,6 +814,12 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	switch r.Kind {
 	case "json":
 		w(1, "return c.WriteJSON(w, %s, %s, r.Body, %s)", status, contentType, header)
+	case "parts":
+		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", partsLiteral(r.Parts))
+		w(1, "return server.WriteParts(w, %s, %s, r.Body, %s, %s)", status, contentType, parts, header)
+	case "xml":
+		shape := f.declareVar(lowerFirst(r.TypeName)+"XMLShape", xmlNodeLiteral(r.XML))
+		w(1, "return c.WriteXML(w, %s, %s, r.Body, %s, %s)", status, contentType, shape, header)
 	case "text":
 		w(1, "return server.WriteText(w, %s, %s, string(r.Body), %s)", status, contentType, header)
 	case "binary":

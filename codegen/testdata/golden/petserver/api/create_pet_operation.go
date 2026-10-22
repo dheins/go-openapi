@@ -14,6 +14,9 @@ import (
 type CreatePetRequest struct {
 	// Body is the request body.
 	Body model.Pet
+	// ContentType is the media type the body was sent as: one of
+	// "application/json", "application/xml".
+	ContentType string
 }
 
 // CreatePetResponse is one of the responses of CreatePet:

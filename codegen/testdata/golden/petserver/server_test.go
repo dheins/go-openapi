@@ -13,6 +13,7 @@ import (
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"io"
 	"log/slog"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -154,6 +155,37 @@ func (s *store) ImportPet(_ context.Context, req *api.ImportPetRequest) (api.Imp
 func (s *store) Upload(_ context.Context, req *api.UploadRequest) (api.UploadResponse, error) {
 	s.seen["Upload"] = req
 	return api.Upload204Response{}, nil
+}
+
+func (s *store) GetCard(ctx context.Context, req *api.GetCardRequest) (api.GetCardResponse, error) {
+	card := model.Card{ID: req.PetID, Name: "Rex", Nicknames: oapi.Some([]string{"T-Rex"}), Secret: oapi.Some("hidden"),
+		Vets: oapi.Some([]model.Vet{{Name: oapi.Some("Dr. Who"), Phone: oapi.Some("555")}}),
+		Note: oapi.Some(model.Note{Lang: oapi.Some("en"), Text: oapi.Some("likes <bones>")})}
+	r, _ := server.HTTPRequest(ctx)
+	if server.Negotiate(r, "application/json", "application/xml") == "application/xml" {
+		return api.GetCard200XMLResponse{Body: card}, nil
+	}
+	return api.GetCard200JSONResponse{Body: card}, nil
+}
+
+func (s *store) PutCard(_ context.Context, req *api.PutCardRequest) (api.PutCardResponse, error) {
+	s.seen["PutCard"] = req
+	return api.PutCard204Response{}, nil
+}
+
+func (s *store) BatchPets(_ context.Context, req *api.BatchPetsRequest) (api.BatchPetsResponse, error) {
+	s.seen["BatchPets"] = req
+	return api.BatchPets200MixedResponse{Body: req.Body}, nil
+}
+
+func (s *store) UploadBundle(_ context.Context, req *api.UploadBundleRequest) (api.UploadBundleResponse, error) {
+	s.seen["UploadBundle"] = req
+	return api.UploadBundle200RelatedResponse{Body: req.Body}, nil
+}
+
+func (s *store) PutNotes(_ context.Context, req *api.PutNotesRequest) (api.PutNotesResponse, error) {
+	s.seen["PutNotes"] = req
+	return api.PutNotes204Response{}, nil
 }
 
 func (s *store) GetPhoto(_ context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {
@@ -435,9 +467,13 @@ func TestCreatePet(t *testing.T) {
 	if got := problemErrors(t, r); !slices.Equal(got, []string{"body: request body is required"}) {
 		t.Errorf("missing body = %q", got)
 	}
-	r = do(t, h, "POST", "/pets", "application/xml", "<pet/>")
-	if r.status != 415 {
+	// Without an xml name, the root element is named after the component.
+	if r := do(t, h, "POST", "/pets", "application/xml", "<Pet><name>Rex</name></Pet>"); r.status != 201 {
 		t.Errorf("xml body: %d %s", r.status, r.body)
+	}
+	r = do(t, h, "POST", "/pets", "application/xml", "<pet/>")
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body: expected element <Pet>, got <pet>"}) {
+		t.Errorf("xml root = %q", got)
 	}
 }
 
@@ -750,6 +786,176 @@ func TestNestedFields(t *testing.T) {
 	}
 	if got := s.seen["Upload"].(*api.UploadRequest).Body.Value; got["a"] != "1" || got["b"] != "x" {
 		t.Errorf("upload = %v", got)
+	}
+}
+
+func TestXMLBodies(t *testing.T) {
+	s, h := newTestServer()
+	doc := `<?xml version="1.0"?>
+<p:card xmlns:p="urn:example:pets" id="7">
+  <p:name>Rex</p:name>
+  <nicknames><nickname>T-Rex</nickname><nickname>Rexy</nickname></nicknames>
+  <vet phone="555">Dr. Who</vet>
+  <vet>Dr. No</vet>
+  <remark lang="en"><![CDATA[likes <bones>]]></remark>
+  <secret>s3</secret>
+</p:card>`
+	if r := do(t, h, "PUT", "/pets/7/card", "application/xml", doc); r.status != 204 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	got := s.seen["PutCard"].(*api.PutCardRequest).Body
+	if got.ID != 7 || got.Name != "Rex" || len(got.Nicknames.Value) != 2 || len(got.Vets.Value) != 2 ||
+		got.Vets.Value[0].Name.Value != "Dr. Who" || got.Vets.Value[0].Phone.Value != "555" ||
+		got.Note.Value.Text.Value != "likes <bones>" || got.Note.Value.Lang.Value != "en" || got.Secret.Value != "s3" {
+		t.Errorf("card = %+v", got)
+	}
+
+	// Problems point into the value, as for JSON.
+	r := do(t, h, "PUT", "/pets/7/card", "application/xml", `<p:card xmlns:p="urn:example:pets" id="x"><p:name></p:name><nicknames><x/></nicknames></p:card>`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /nicknames/0: expected element <nickname>, got <x>"}) {
+		t.Errorf("errors = %q", got)
+	}
+	r = do(t, h, "PUT", "/pets/7/card", "application/xml", `<p:card xmlns:p="urn:example:pets" id="x"><p:name></p:name></p:card>`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /id: expected integer, got string"}) {
+		t.Errorf("errors = %q", got)
+	}
+	r = do(t, h, "PUT", "/pets/7/card", "application/xml", `<p:card xmlns:p="urn:example:pets" id="7"><p:name></p:name></p:card>`)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /name: length must be at least 1"}) {
+		t.Errorf("errors = %q", got)
+	}
+	r = do(t, h, "PUT", "/pets/7/card", "application/xml", `<card`)
+	if got := problemErrors(t, r); len(got) != 1 || !strings.HasPrefix(got[0], "body: invalid XML:") {
+		t.Errorf("errors = %q", got)
+	}
+
+	// Responses are negotiated; write-only properties are left out.
+	r = do(t, h, "GET", "/pets/7/card", "", "", "Accept", "application/xml")
+	want := `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
+		`<p:card xmlns:p="urn:example:pets" id="7"><p:name>Rex</p:name><nicknames><nickname>T-Rex</nickname></nicknames>` +
+		`<vet phone="555">Dr. Who</vet><remark lang="en"><![CDATA[likes <bones>]]></remark></p:card>`
+	if r.status != 200 || r.header.Get("Content-Type") != "application/xml" || r.body != want {
+		t.Errorf("xml response: %d %s\n%s\nwant\n%s", r.status, r.header.Get("Content-Type"), r.body, want)
+	}
+	r = do(t, h, "GET", "/pets/7/card", "", "", "Accept", "application/json")
+	if r.status != 200 || !strings.Contains(r.body, `"nicknames":["T-Rex"]`) || strings.Contains(r.body, "secret") {
+		t.Errorf("json response: %d %s", r.status, r.body)
+	}
+}
+
+// partsBody builds a multipart body of the given subtype from pairs of
+// part headers and data.
+func partsBody(t *testing.T, subtype string, parts ...any) (string, string) {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	for i := 0; i < len(parts); i += 2 {
+		pw, err := mw.CreatePart(parts[i].(textproto.MIMEHeader))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pw.Write([]byte(parts[i+1].(string)))
+	}
+	mw.Close()
+	return "multipart/" + subtype + "; boundary=" + mw.Boundary(), body.String()
+}
+
+func header(pairs ...string) textproto.MIMEHeader {
+	h := textproto.MIMEHeader{}
+	for i := 0; i < len(pairs); i += 2 {
+		h.Set(pairs[i], pairs[i+1])
+	}
+	return h
+}
+
+// readParts splits a multipart response into the parts' content types
+// and bodies.
+func readParts(t *testing.T, r result) []string {
+	t.Helper()
+	mt, params, err := mime.ParseMediaType(r.header.Get("Content-Type"))
+	if err != nil {
+		t.Fatalf("content type %q: %v", r.header.Get("Content-Type"), err)
+	}
+	out := []string{mt}
+	mr := multipart.NewReader(strings.NewReader(r.body), params["boundary"])
+	for {
+		p, err := mr.NextPart()
+		if err == io.EOF {
+			return out
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(p)
+		out = append(out, p.Header.Get("Content-Type")+" "+string(data))
+	}
+}
+
+func TestPositionalParts(t *testing.T) {
+	s, h := newTestServer()
+	ct, body := partsBody(t, "mixed",
+		header("Content-Type", "application/json", "X-Seq", "1"), `{"name": "Rex", "secret": "s"}`,
+		header("Content-Type", "application/json"), `{"name": "Tom"}`,
+	)
+	r := do(t, h, "POST", "/pets/batch", ct, body)
+	if r.status != 200 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	if got := s.seen["BatchPets"].(*api.BatchPetsRequest).Body; len(got) != 2 || got[0].Name != "Rex" || got[1].Name != "Tom" {
+		t.Errorf("pets = %+v", got)
+	}
+	// Written back as JSON parts, as responses: the write-only secret is
+	// left out, the required read-only id is written.
+	want := []string{"multipart/mixed", `application/json {"id":0,"name":"Rex"}`, `application/json {"id":0,"name":"Tom"}`}
+	if got := readParts(t, r); !slices.Equal(got, want) {
+		t.Errorf("parts = %q", got)
+	}
+
+	// Problems are reported at the part's index.
+	ct, body = partsBody(t, "mixed",
+		header("Content-Type", "application/json"), `{"name": "Rex"}`,
+		header("Content-Type", "text/plain"), `Tom`,
+		header("Content-Type", "application/json"), `{"name": 3}`,
+	)
+	r = do(t, h, "POST", "/pets/batch", ct, body)
+	want = []string{`body /0: part header "X-Seq" is missing`, `body /1: content type "text/plain" is not allowed; expected application/json`,
+		"body /2/name: expected string, got number"}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+
+	// Without a schema, the parts are the items: files.
+	ct, body = partsBody(t, "related",
+		header("Content-Type", "image/png", "Content-ID", "<a>"), "PNG",
+		header("Content-Type", "image/gif"), "GIF",
+	)
+	r = do(t, h, "POST", "/bundle", ct, body)
+	if r.status != 200 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	files := s.seen["UploadBundle"].(*api.UploadBundleRequest).Body
+	if len(files) != 2 || string(files[0].Data) != "PNG" || files[0].Header.Get("Content-ID") != "<a>" || files[1].ContentType != "image/gif" {
+		t.Errorf("files = %+v", files)
+	}
+	if got := readParts(t, r); !slices.Equal(got, []string{"multipart/related", "image/png PNG", "image/gif GIF"}) {
+		t.Errorf("parts = %q", got)
+	}
+	ct, body = partsBody(t, "related", header("Content-Type", "text/plain"), "x")
+	if got := problemErrors(t, do(t, h, "POST", "/bundle", ct, body)); !slices.Equal(got, []string{`body /0: content type "text/plain" is not allowed; expected image/*`}) {
+		t.Errorf("errors = %q", got)
+	}
+
+	// Text items are checked like strings.
+	ct, body = partsBody(t, "alternative",
+		header("Content-Type", "text/plain"), "hi",
+		header("Content-Type", "text/html"), "",
+	)
+	r = do(t, h, "PUT", "/memos", ct, body)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /1: length must be at least 1"}) {
+		t.Errorf("errors = %q", got)
+	}
+	ct, body = partsBody(t, "alternative", header("Content-Type", "text/plain"), "hi", header("Content-Type", "text/html"), "<b>hi</b>")
+	if r := do(t, h, "PUT", "/memos", ct, body); r.status != 204 || !slices.Equal(s.seen["PutNotes"].(*api.PutNotesRequest).Body, []string{"hi", "<b>hi</b>"}) {
+		t.Errorf("notes: %d %s", r.status, r.body)
 	}
 }
 

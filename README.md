@@ -109,7 +109,7 @@ metrics.
 
 ## Development
 
-Requires Go 1.27.2.
+Requires Go 1.27.3.
 
 ```sh
 go test ./...

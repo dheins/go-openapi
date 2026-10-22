@@ -48,6 +48,18 @@ type Handler interface {
 	//
 	// Media types with different schemas.
 	ImportPet(ctx context.Context, req *ImportPetRequest) (ImportPetResponse, error)
+	// GetCard handles GET /pets/{petId}/card.
+	GetCard(ctx context.Context, req *GetCardRequest) (GetCardResponse, error)
+	// PutCard handles PUT /pets/{petId}/card.
+	PutCard(ctx context.Context, req *PutCardRequest) (PutCardResponse, error)
+	// BatchPets handles POST /pets/batch.
+	//
+	// Pets as positional JSON parts.
+	BatchPets(ctx context.Context, req *BatchPetsRequest) (BatchPetsResponse, error)
+	// UploadBundle handles POST /bundle.
+	UploadBundle(ctx context.Context, req *UploadBundleRequest) (UploadBundleResponse, error)
+	// PutNotes handles PUT /memos.
+	PutNotes(ctx context.Context, req *PutNotesRequest) (PutNotesResponse, error)
 	// SubmitForm handles POST /pets/form.
 	SubmitForm(ctx context.Context, req *SubmitFormRequest) (SubmitFormResponse, error)
 	// Shout handles POST /notes.

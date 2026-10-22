@@ -3,11 +3,11 @@ package oas
 // Deref methods return the object a reference resolves to, or the receiver
 // itself when it is not a reference (or has not been resolved).
 
-func (p *PathItem) Deref() *PathItem {
-	if p != nil && p.Resolved != nil {
-		return p.Resolved
+func (pi *PathItem) Deref() *PathItem {
+	if pi != nil && pi.Resolved != nil {
+		return pi.Resolved
 	}
-	return p
+	return pi
 }
 
 func (p *Parameter) Deref() *Parameter {

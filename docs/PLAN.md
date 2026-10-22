@@ -13,7 +13,7 @@ generate Go models and servers, and run them on a small runtime built on
 | Spec model | Own `oas` package; no dependency on kin-openapi/libopenapi. |
 | v1 scope | Models + server. |
 | Router | `net/http.ServeMux` (Go 1.22+ patterns). Generated servers are plain `http.Handler`s, so they mount in chi/echo/gin; middleware is `func(http.Handler) http.Handler`. A small `Router` interface allows adapters later. |
-| Go version | 1.27.2. |
+| Go version | 1.27.3. |
 | JSON Schema validation | `santhosh-tekuri/jsonschema/v6` with the official OAS schemas embedded. |
 | Remote `$ref`s | Off by default; local files only unless a `loader.Fetcher` is supplied. |
 

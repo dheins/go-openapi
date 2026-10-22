@@ -77,5 +77,6 @@ jobs:
           runtime/server FuzzNegotiate
           runtime/server FuzzMultipart
           runtime/server FuzzObjectJSON
+          runtime/server FuzzXMLToJSON
           codegen/testdata/golden/petstore FuzzModels
           TARGETS

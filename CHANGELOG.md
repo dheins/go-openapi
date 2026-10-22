@@ -53,14 +53,35 @@
   `oapi.Date.AppendText`.
 - `oapi.DiscriminatorValue` reads the discriminator token by token
   instead of collecting the object.
+- XML bodies (`application/xml`, `text/xml`, `*+xml`) with a schema:
+  requests decode into the schema's type and responses are written from it,
+  as the schemas' `xml` objects describe (names, namespaces and prefixes,
+  attributes, text and CDATA, wrapped arrays, 3.2 `nodeType`). The XML is
+  converted to and from JSON, so validation and problem paths are those of
+  JSON bodies (`server.DecodeXML`, `Config.WriteXML`, `server.XMLNode`).
+- Multipart types other than `multipart/form-data` (`mixed`, `related`,
+  `alternative`, ...): the parts are the items of the body's array schema,
+  read as files, text or JSON, or the raw parts (`[]oapi.File`) without
+  one; `prefixEncoding` and `itemEncoding` are checked by position.
+  Responses of these types are written part by part (`server.Parts`,
+  `DecodeParts`, `WriteParts`).
 
 ### Fixed
 
 - `oapi.EnsureProperty` accepted data after the object, and returned it
   unchanged when the property was set. Found by `FuzzEnsureProperty`.
+- An integer form field or object parameter property written with leading
+  zeros or a plus sign (`007`, `+7`) made invalid JSON; it is the integer
+  it denotes. Found by `FuzzXMLToJSON`.
+- A mapping that repeated a key, in YAML or JSON, loaded silently with one
+  of the values dropped (two `/pets:` paths became one operation). The
+  loader reports the repeated key with its position.
 
 ### Changed
 
+- Requires Go 1.27.3, whose `crypto/x509` distrusts compromised
+  intermediate certificates (GO-2026-6809); the loader's `HTTPFetcher`
+  verifies certificates with it.
 - Regenerate servers: multipart properties typed `string` or `any` because
   of a `contentMediaType` or a missing type become `oapi.File`.
 - Operations accepting media types with different schemas now accept all
@@ -75,6 +96,17 @@
   nested property `b` of `a`.
 - A security requirement naming a scheme by a URI reference that does not
   resolve is a loading error, like an unresolvable `$ref`.
+- XML responses with a schema are typed: `...XMLResponse` holds the
+  schema's value instead of `[]byte`, and the server writes it. XML
+  request bodies with a schema are decoded instead of being answered with
+  415 next to JSON, or passed on as bytes when alone; `text/xml` with a
+  schema is no longer a string.
+- Documents, and the files they refer to, that repeat a key in a mapping
+  no longer load: `goapi validate` and `goapi generate` report the key
+  and where it is repeated.
+- Operations with multipart bodies other than `multipart/form-data` used
+  to be answered with 501, and such responses could not be returned; they
+  are generated now, so the `Handler` interface gains their methods.
 - Properties named like the methods of generated structs (`DecodeJSON`,
   `EncodeJSON`, `DecodeJSONFrom`, `UnmarshalJSONFrom`) get a numbered field
   name, as `Validate` already did.

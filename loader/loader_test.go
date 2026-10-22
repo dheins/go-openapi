@@ -756,3 +756,51 @@ components:
 		t.Errorf("bundle does not load on its own: %v", err)
 	}
 }
+
+func TestDuplicateKeys(t *testing.T) {
+	tests := []struct {
+		name, doc, want string
+	}{
+		{"paths", "openapi: 3.2.0\ninfo: {title: t, version: v}\npaths:\n  /a: {}\n  /a: {}\n",
+			`openapi.yaml:5:3: /paths/~1a: duplicate key "/a" (first defined on line 4)`},
+		{"in a sequence", "openapi: 3.2.0\ninfo: {title: t, version: v}\ntags:\n  - name: a\n    name: b\n",
+			`openapi.yaml:5:5: /tags/0/name: duplicate key "name" (first defined on line 4)`},
+		{"JSON", `{"openapi": "3.2.0", "info": {"title": "t", "title": "u", "version": "v"}}`,
+			`openapi.yaml:1:45: /info/title: duplicate key "title" (first defined on line 1)`},
+		// Quoting does not make a key different.
+		{"quoted", "openapi: 3.2.0\ninfo: {title: t, version: v, \"title\": u}\n",
+			`openapi.yaml:2:30: /info/title: duplicate key "title" (first defined on line 2)`},
+	}
+	for _, tt := range tests {
+		_, err := LoadBytes([]byte(tt.doc), WithBaseURI("file:///api/openapi.yaml"))
+		if err == nil || !strings.HasSuffix(err.Error(), tt.want) {
+			t.Errorf("%s: got %v, want …%s", tt.name, err, tt.want)
+		}
+		var lerr *Error
+		if !errors.As(err, &lerr) || !lerr.Position.IsValid() {
+			t.Errorf("%s: %T is not a loader error with a position", tt.name, err)
+		}
+	}
+
+	// An alias is checked once, where it is defined, not where it is used.
+	ok := `openapi: 3.2.0
+info: {title: t, version: v}
+x-base: &base {a: 1, b: 2}
+x-again: *base
+x-list: [*base, *base]
+paths: {}
+`
+	if _, err := LoadBytes([]byte(ok), WithBaseURI("file:///api/openapi.yaml")); err != nil {
+		t.Errorf("aliases: %v", err)
+	}
+
+	// Referenced files are checked too, with their own location.
+	fetch := func(u *url.URL) ([]byte, error) {
+		return []byte("type: object\ntype: string\n"), nil
+	}
+	_, err := LoadBytes([]byte("openapi: 3.2.0\ninfo: {title: t, version: v}\ncomponents:\n  schemas:\n    A: {$ref: a.yaml}\n"),
+		WithFetcher(fetch), WithBaseURI("file:///api/openapi.yaml"))
+	if err == nil || !strings.Contains(err.Error(), `a.yaml:2:1: /type: duplicate key "type" (first defined on line 1)`) {
+		t.Errorf("referenced file: %v", err)
+	}
+}

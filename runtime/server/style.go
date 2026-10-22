@@ -476,8 +476,9 @@ func (n *fieldNode) indexedJSON(path string, prop Property) (json.RawMessage, er
 func scalarJSON(v, typ string) json.RawMessage {
 	switch typ {
 	case "integer":
-		if _, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return json.RawMessage(v)
+		// Written as parsed: "007" and "+7" are 7, which JSON can hold.
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return strconv.AppendInt(nil, n, 10)
 		}
 	case "number":
 		if f, err := strconv.ParseFloat(v, 64); err == nil {

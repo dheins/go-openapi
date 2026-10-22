@@ -344,9 +344,11 @@ this way and are not supported; nor are objects with additional properties
 in the exploded `form` style, which sends each property as a parameter of
 its own (use `deepObject` or `explode: false`).
 
-Supported request bodies: JSON (`application/json`, `*+json`),
-`application/x-www-form-urlencoded`, `multipart/form-data`, `text/*` (a
-string) and anything else as bytes. In a multipart body, a part is a file,
+Supported request bodies: JSON (`application/json`, `*+json`), XML
+(`application/xml`, `text/xml`, `*+xml`),
+`application/x-www-form-urlencoded`, `multipart/form-data`, other
+multipart types (see below), `text/*` (a string) and anything else as
+bytes. In a multipart body, a part is a file,
 an `oapi.File` with the part's name, content type, headers and data, when
 its schema is `format: binary` (3.0) or, the 3.1 way, a string with a
 `contentMediaType` or a schema without a type; a part need not have a file
@@ -369,6 +371,45 @@ media type other than the first that is neither JSON, form, multipart nor
 text and has a schema describing structured data, such as XML, is
 answered with 415, since nothing would check its bytes.
 
+### XML
+
+An XML body with a schema decodes into the schema's type, like JSON, and
+an `...XMLResponse` is written from it; problems have the same JSON
+pointers. The schema's `xml` objects say how: the root element is named by
+`xml.name`, else after the component; a property is an element named
+after it unless `xml.name` renames it (or the schema it refers to has a
+name), an attribute (`attribute: true`, or 3.2's `nodeType: attribute`),
+or the element's text (`nodeType: text` or `cdata`); an array's items
+repeat in the parent unless `wrapped: true` (or `nodeType: element`) puts
+them in an element of their own, and are named by the items' `xml.name`
+or the property's name. `namespace` and `prefix` are checked when reading
+and declared when writing; `xsi:nil="true"` is null. Elements and
+attributes the schema does not declare are kept as properties, for the
+decoder to accept or reject.
+
+XML without a schema (or with a string schema) stays bytes, or a string
+for `text/xml`. Schemas XML cannot describe yet, such as unions, maps and
+recursive types, are answered with 415 in requests and cannot be returned
+in responses, with a warning. Documents are read with `encoding/xml`,
+which does not process DTDs or external entities; nesting is limited.
+
+### Positional multipart bodies
+
+Multipart types other than `multipart/form-data`, such as
+`multipart/mixed`, `multipart/related` or `multipart/alternative`, hold
+parts by position. With a schema `type: array` and `items: X`, the body is
+a `[]X`: each part is a file (an `oapi.File`, when the items are
+`format: binary` or have a `contentMediaType`), its text (string items) or
+its body decoded as JSON (anything else), and problems are reported at the
+part's index (`body /2/name: ...`). Otherwise, also with `prefixItems`,
+the body is the parts themselves, a `[]oapi.File` with each part's headers
+(`Content-ID` and so on). `prefixEncoding` applies to the first parts and
+`itemEncoding` to the others: a part that declares a content type must
+match, and required part headers must be present. Responses of these
+types (`...MixedResponse`, `...RelatedResponse`) are written the same way,
+each part with the first content type its encoding names, else the file's
+own, `text/plain` or `application/json`.
+
 ## Responses
 
 Each declared response is a type; return the one you mean:
@@ -382,7 +423,7 @@ return api.CreatePet4XXJSONResponse{StatusCode: 409, Body: problem}, nil // rang
 Response headers are fields of the response type; a header with JSON
 `content` holds its schema's type and is sent as compact JSON. Media types
 become
-separate types: `...JSONResponse`, `...TextResponse`, binary ones named
+separate types: `...JSONResponse`, `...XMLResponse`, `...TextResponse`, binary ones named
 after the subtype (`...PNGResponse`; `image/*` adds a `ContentType` field),
 and streams:
 

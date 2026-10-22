@@ -30,8 +30,11 @@ shipped in.
 
 - Request bodies streamed as JSON Lines or server-sent events (responses
   can stream already). — later
-- Bodies in other formats: XML, and multipart types other than
-  `multipart/form-data`. — later
+- Typed positional parts (`prefixItems` with `prefixEncoding`; such
+  bodies are raw parts today), `multipart/byteranges` for range requests,
+  and multipart bodies streamed with `itemSchema`. — later
+- XML for unions, maps, recursive types and `nodeType: none` on objects
+  (answered with 415 today). — later
 - Checking the values of multipart part headers against their schemas
   (only `required` is checked), and `contentEncoding` (`[]byte`) parts.
   — later
@@ -81,7 +84,13 @@ Unreleased:
 - [x] Generated encoders: structs and sealed unions append their JSON to
   one buffer (`AppendJSON`), with typed appends for known property types;
   objects with inline unions decode token by token too, and discriminators
-  are read without collecting the object.
+  are read without collecting the object. (a64886f)
+- [x] XML request and response bodies, from the schemas' `xml` objects
+  (names, namespaces, attributes, text and CDATA, wrapped arrays, 3.2
+  `nodeType`). (243f060)
+- [x] Multipart types other than `multipart/form-data`: positional parts
+  as items of the array schema (files, text or JSON) or raw parts, with
+  `prefixEncoding` and `itemEncoding`, in requests and responses.
 
 v0.3.1:
 
