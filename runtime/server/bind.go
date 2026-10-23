@@ -241,6 +241,13 @@ func (c *Config) ReadBody(w http.ResponseWriter, r *http.Request, b *Binder, med
 
 // matchMediaType reports whether mt matches one of the patterns, which
 // may use wildcards ("application/*", "*/*", "application/*+json").
+// MatchMediaType reports whether the media type mt (without parameters)
+// matches one of the patterns: media types or ranges such as image/* or
+// application/*+json.
+func MatchMediaType(mt string, patterns ...string) bool {
+	return matchMediaType(mt, patterns)
+}
+
 func matchMediaType(mt string, patterns []string) bool {
 	mt = strings.ToLower(mt)
 	typ, sub, _ := strings.Cut(mt, "/")

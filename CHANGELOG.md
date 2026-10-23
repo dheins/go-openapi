@@ -4,6 +4,17 @@
 
 ### Added
 
+- `runtime/client`, the runtime of generated clients: `Config` and options
+  (base URL, `Doer` and middleware, headers, request and response
+  validation, a response size limit); requests with parameters in every
+  style and JSON, form, multipart, positional-part, XML, text and binary
+  bodies, encoded so that generated servers read them back; responses
+  matched by status and media type and decoded, JSON Lines and server-sent
+  events as they arrive; security requirements (`Authorize`, `APIKey`,
+  `Basic`, `Bearer`, `Authorization`); and `InvalidRequest`,
+  `UnexpectedResponse` and `InvalidResponse` errors. `server` gains
+  `MatchMediaType`, `EncodeParts` and `DecodePartsAs`, and `oapi`
+  `DecodeValue`.
 - `unevaluatedItems` is checked where it is plain: without `items`,
   `contains` or applicators that evaluate items, it applies to the items
   after `prefixItems`, as `items` would (`false` limits the length, a

@@ -39,6 +39,13 @@ func (p Parts) encoding(i int) Property {
 // type T, as p describes, checking each part against its encoding.
 // Problems are reported at the index of the part.
 func DecodeParts[T any](body []byte, contentType string, p Parts) ([]T, error) {
+	return DecodePartsAs[T](body, contentType, p, oapi.Request)
+}
+
+// DecodePartsAs decodes positional parts like DecodeParts, with text and
+// JSON items decoded in direction dir: oapi.Response for a client reading
+// a response.
+func DecodePartsAs[T any](body []byte, contentType string, p Parts, dir oapi.Direction) ([]T, error) {
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil || params["boundary"] == "" {
 		return nil, &oapi.ValidationError{Message: "multipart body without a boundary"}
@@ -73,9 +80,9 @@ func DecodeParts[T any](body []byte, contentType string, p Parts) ([]T, error) {
 			*file = oapi.File{Name: part.FileName(), ContentType: part.Header.Get("Content-Type"), Header: part.Header, Data: data}
 		case "text":
 			// Through JSON, so that enums and formats are checked as usual.
-			errs.Nested(path, oapi.DecodeRequest(oapi.AppendString(nil, string(data)), &item))
+			errs.Nested(path, oapi.DecodeValue(oapi.AppendString(nil, string(data)), &item, dir))
 		default:
-			errs.Nested(path, oapi.DecodeRequest(data, &item))
+			errs.Nested(path, oapi.DecodeValue(data, &item, dir))
 		}
 		items = append(items, item)
 	}
@@ -87,11 +94,27 @@ func DecodeParts[T any](body []byte, contentType string, p Parts) ([]T, error) {
 
 // WriteParts sends items as a multipart body of positional parts, with
 // the subtype of contentType (such as multipart/mixed) and a new
-// boundary. Each part has the first content type its encoding names,
-// else the file's own (application/octet-stream if none), text/plain for
-// text and application/json for JSON, which leaves out write-only
-// properties. As with WriteJSON, nothing is written when encoding fails.
+// boundary: see EncodeParts. JSON items leave out write-only properties.
+// As with WriteJSON, nothing is written when encoding fails.
 func WriteParts[T any](w http.ResponseWriter, status int, contentType string, items []T, p Parts, header http.Header) error {
+	body, ct, err := EncodeParts(items, contentType, p, oapi.Response)
+	if err != nil {
+		return fmt.Errorf("encoding the %d response: %w", status, err)
+	}
+	applyHeader(w, header)
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(status)
+	// The status line is sent; a failed write means the client is gone.
+	_, _ = w.Write(body)
+	return nil
+}
+
+// EncodeParts encodes items as a multipart body of positional parts, in
+// direction dir, and returns it with its content type: the subtype of
+// contentType with a new boundary. Each part has the first content type
+// its encoding names, else the file's own (application/octet-stream if
+// none), text/plain for text and application/json for JSON.
+func EncodeParts[T any](items []T, contentType string, p Parts, dir oapi.Direction) ([]byte, string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	for i, item := range items {
@@ -102,7 +125,7 @@ func WriteParts[T any](w http.ResponseWriter, status int, contentType string, it
 		case "file":
 			file, ok := any(item).(oapi.File)
 			if !ok {
-				return fmt.Errorf("parts of type file need oapi.File items, not %T", item)
+				return nil, "", fmt.Errorf("parts of type file need oapi.File items, not %T", item)
 			}
 			for k, vs := range file.Header {
 				h[k] = vs
@@ -112,19 +135,19 @@ func WriteParts[T any](w http.ResponseWriter, status int, contentType string, it
 				partType = "application/octet-stream"
 			}
 		case "text":
-			text, err := oapi.EncodeResponse(item)
+			text, err := oapi.EncodeValue(item, dir)
 			if err != nil {
-				return fmt.Errorf("encoding part %d of the %d response: %w", i, status, err)
+				return nil, "", fmt.Errorf("part %d: %w", i, err)
 			}
 			var s string
 			if err := oapi.Decode(text, &s); err != nil {
-				return fmt.Errorf("encoding part %d of the %d response: %w", i, status, err)
+				return nil, "", fmt.Errorf("part %d: %w", i, err)
 			}
 			data, partType = []byte(s), "text/plain; charset=utf-8"
 		default:
 			var err error
-			if data, err = oapi.EncodeResponse(item); err != nil {
-				return fmt.Errorf("encoding part %d of the %d response: %w", i, status, err)
+			if data, err = oapi.EncodeValue(item, dir); err != nil {
+				return nil, "", fmt.Errorf("part %d: %w", i, err)
 			}
 			partType = "application/json"
 		}
@@ -134,23 +157,18 @@ func WriteParts[T any](w http.ResponseWriter, status int, contentType string, it
 		h.Set("Content-Type", partType)
 		pw, err := mw.CreatePart(h)
 		if err != nil {
-			return err
+			return nil, "", err
 		}
 		// Writing to a buffer cannot fail.
 		_, _ = pw.Write(data)
 	}
 	if err := mw.Close(); err != nil {
-		return err
+		return nil, "", err
 	}
 	mt, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return fmt.Errorf("content type %q: %w", contentType, err)
+		return nil, "", fmt.Errorf("content type %q: %w", contentType, err)
 	}
 	params["boundary"] = mw.Boundary()
-	applyHeader(w, header)
-	w.Header().Set("Content-Type", mime.FormatMediaType(mt, params))
-	w.WriteHeader(status)
-	// The status line is sent; a failed write means the client is gone.
-	_, _ = w.Write(buf.Bytes())
-	return nil
+	return buf.Bytes(), mime.FormatMediaType(mt, params), nil
 }

@@ -51,6 +51,12 @@ func DecodeResponse(data []byte, dst any) error {
 	return decodeDocument(data, dst, Response)
 }
 
+// DecodeValue decodes data like Decode, in direction dir, as DecodeRequest
+// and DecodeResponse do for theirs.
+func DecodeValue(data []byte, dst any, dir Direction) error {
+	return decodeDocument(data, dst, dir)
+}
+
 func decodeDocument(data []byte, dst any, dir Direction) error {
 	var errs ValidationErrors
 	errs.Nested("", DecodeField(data, dst, false, dir))
