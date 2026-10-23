@@ -318,7 +318,14 @@ func TestSealedWrappers(t *testing.T) {
 	if out, err := json.Marshal(NewLoose(LooseVariant2{Value: []any{1.0}})); err != nil || string(out) != `[1]` {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
-	assertMessages(t, json.Unmarshal([]byte(`5`), &l), "matches several variants (Integer, Variant2), but exactly one is allowed")
+	// 5 is an integer, which the second variant (not integer) rules out.
+	if err := json.Unmarshal([]byte(`5`), &l); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := l.Value().(LooseInteger); !ok || v != 5 {
+		t.Errorf("loose = %#v", l.Value())
+	}
+	assertMessages(t, NewLoose(LooseVariant2{Value: 5.0}).Validate(), "must not match the schema in not")
 }
 
 func TestUntaggedUnions(t *testing.T) {
@@ -822,4 +829,61 @@ func TestDependentRequiredAndPropertyNames(t *testing.T) {
 	// while decoding.
 	var s Strict
 	assertMessages(t, json.Unmarshal([]byte(`{"id": 1, "x": 2, "ok": 3}`), &s), `/x: property name: length must be at least 2`)
+}
+
+func TestSubschemaKeywords(t *testing.T) {
+	decode := func(data string, v interface{ Validate() error }) error {
+		t.Helper()
+		if err := json.Unmarshal([]byte(data), v); err != nil {
+			return err
+		}
+		return v.Validate()
+	}
+	// if/then/else: US addresses need a state and a five-digit code.
+	assertMessages(t, decode(`{"country": "US", "postalCode": "1234"}`, new(Shipment)),
+		"/state: required property is missing", "/postalCode: must match the pattern ^[0-9]{5}$")
+	assertMessages(t, decode(`{"country": "FR", "postalCode": "12"}`, new(Shipment)), "/postalCode: length must be at least 3")
+	if err := decode(`{"country": "US", "state": "NY", "postalCode": "10001"}`, new(Shipment)); err != nil {
+		t.Errorf("valid shipment: %v", err)
+	}
+	if err := decode(`{"postalCode": "12345678"}`, new(Shipment)); err != nil {
+		t.Errorf("shipment without country: %v", err)
+	}
+
+	// not: a ticket cannot be both cancelled and refunded.
+	assertMessages(t, decode(`{"cancelled": true, "refunded": false}`, new(Ticket)), "must not match the schema in not")
+	if err := decode(`{"cancelled": true}`, new(Ticket)); err != nil {
+		t.Errorf("valid ticket: %v", err)
+	}
+
+	// contains with minContains (default 1) and maxContains.
+	assertMessages(t, decode(`{"lines": [{"sku": "a"}], "flags": ["urgent", "urgent"]}`, new(Order)),
+		"/lines: must contain at least 1 item matching contains, has 0",
+		"/flags: must contain at most 1 item matching contains, has 2")
+	assertMessages(t, decode(`{"lines": [{"gift": true}, {"gift": true}, {"gift": true}]}`, new(Order)),
+		"/lines: must contain at most 2 items matching contains, has 3")
+	if err := decode(`{"lines": [{"gift": false}, {"gift": true}], "flags": []}`, new(Order)); err != nil {
+		t.Errorf("valid order: %v", err)
+	}
+
+	// dependentSchemas applies when the property is there.
+	assertMessages(t, decode(`{"creditCard": "4111"}`, new(Checkout)), "/billingAddress: required property is missing")
+	assertMessages(t, decode(`{"creditCard": "4111", "billingAddress": "x"}`, new(Checkout)), "/billingAddress: length must be at least 5")
+	if err := decode(`{"billingAddress": "x"}`, new(Checkout)); err != nil {
+		t.Errorf("checkout without a card: %v", err)
+	}
+
+	// On scalars: not, and if/then with an integer check of a number.
+	assertMessages(t, Rating(0).Validate(), "must not match the schema in not")
+	assertMessages(t, Rating(12.5).Validate(), "must be an integer")
+	if err := Rating(12).Validate(); err != nil {
+		t.Errorf("rating 12: %v", err)
+	}
+	if err := Rating(2.5).Validate(); err != nil {
+		t.Errorf("rating 2.5: %v", err)
+	}
+	assertMessages(t, Grade("Abcd").Validate(), "length must be at most 3")
+	if err := Grade("Bcdef").Validate(); err != nil {
+		t.Errorf("grade Bcdef: %v", err)
+	}
 }

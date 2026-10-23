@@ -157,6 +157,10 @@ components:
         "^y": {type: string}
     C:
       not: {type: string}
+    D:
+      type: string
+      enum: [a, b]
+      not: {const: a}
 `, Options{})
 	var got []string
 	for _, w := range m.Warnings {
@@ -165,7 +169,8 @@ components:
 	want := []string{
 		"/components/schemas/B/patternProperties: patternProperties is not supported yet and is not reflected in the generated type",
 		"/components/schemas/B/properties/x/pattern: pattern is not a valid ECMA-262 regular expression and is not checked",
-		"/components/schemas/C/not: not is not supported yet and is not reflected in the generated type",
+		// C's not is checked; D is an enum, which does not apply it.
+		"/components/schemas/D/not: not is not checked on this kind of type yet",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("warnings:\n%s", strings.Join(got, "\n"))
@@ -542,5 +547,54 @@ components:
 	}
 	if strings.Contains(all, "propertyNames is not supported") || strings.Contains(all, "dependentRequired is not supported") {
 		t.Errorf("the keywords are still reported as unsupported:\n%s", all)
+	}
+}
+
+func TestSubschemaRules(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Short: {type: string, maxLength: 3}
+    Nested:
+      type: string
+      if:
+        not: {const: x}
+      then:
+        $ref: "#/components/schemas/Short"
+        minLength: 2
+    Untyped:
+      not: {type: [string, "null"]}
+    Mixed:
+      type: string
+      not:
+        anyOf: [{const: a}, {const: b}]
+    Choice:
+      type: string
+      enum: [a, b]
+      not: {const: a}
+`, Options{})
+	nested := typeNamed(t, m, "Nested")
+	rules := nested.Underlying.Checks.Rules
+	if len(rules) != 1 || rules[0].Kind != "if" || len(rules[0].Schema.Rules) != 1 || rules[0].Schema.Rules[0].Kind != "not" ||
+		len(rules[0].Then.AllOf) != 2 {
+		t.Errorf("Nested rules = %+v", rules)
+	}
+	if r := typeNamed(t, m, "Untyped").Underlying.Checks.Rules; len(r) != 1 || fmt.Sprint(r[0].Schema.AnyTypes) != "[string null]" {
+		t.Errorf("Untyped rules = %+v", r)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Location.Pointer+": "+w.Message)
+	}
+	all := strings.Join(warnings, "\n")
+	for _, want := range []string{
+		"/components/schemas/Mixed/not: not is not checked yet: anyOf and oneOf inside a subschema",
+		"/components/schemas/Choice/not: not is not checked on this kind of type yet",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no warning %q in:\n%s", want, all)
+		}
 	}
 }

@@ -9,9 +9,39 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 	"time"
 	"unicode/utf8"
 )
+
+// HasJSONType reports whether v, a value decoded from JSON into any, has
+// one of the JSON types: an integer is also a number.
+func HasJSONType(v any, types ...string) bool {
+	var t string
+	switch x := v.(type) {
+	case nil:
+		t = "null"
+	case string:
+		t = "string"
+	case bool:
+		t = "boolean"
+	case float64:
+		t = "number"
+		if x == math.Trunc(x) && !math.IsInf(x, 0) && slices.Contains(types, "integer") {
+			return true
+		}
+	case json.Number:
+		t = "number"
+		if _, err := x.Int64(); err == nil && slices.Contains(types, "integer") {
+			return true
+		}
+	case []any:
+		t = "array"
+	case map[string]any:
+		t = "object"
+	}
+	return slices.Contains(types, t)
+}
 
 // HasKey reports whether m has the key k.
 func HasKey[K ~string, V any](m map[K]V, k K) bool {

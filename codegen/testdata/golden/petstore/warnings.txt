@@ -1,2 +1,1 @@
-303:16: not is not supported yet and is not reflected in the generated type
 454:11: property "Legacy_ID" does not satisfy propertyNames, so a value that has it is invalid

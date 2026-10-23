@@ -240,6 +240,7 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 		v.propertyCount(t)
 		v.dependencies(t)
 		v.declaredNames(t)
+		v.rules("m", `""`, &ir.Ref{Kind: ir.Named, Type: t}, t.Rules, 1)
 		if a := t.Additional; a != nil && !a.Forbidden {
 			inner := v.sub()
 			if len(t.PropertyNames) > 0 {
@@ -297,16 +298,21 @@ func presence(fd *ir.Field, recv string) string {
 // properties; "true" for a property that is always there, and "false"
 // for one it cannot have.
 func has(t *ir.Type, name string) string {
+	return hasIn(t, "m", name)
+}
+
+// hasIn is has for the struct value recv.
+func hasIn(t *ir.Type, recv, name string) string {
 	for _, fd := range t.Fields {
 		if fd.JSONName == name {
-			if p := presence(fd, "m"); p != "" {
+			if p := presence(fd, recv); p != "" {
 				return p
 			}
 			return "true"
 		}
 	}
 	if a := t.Additional; a != nil && !a.Forbidden {
-		return fmt.Sprintf("oapi.HasKey(m.%s, %q)", a.FieldName, name)
+		return fmt.Sprintf("oapi.HasKey(%s.%s, %q)", recv, a.FieldName, name)
 	}
 	return "false"
 }
@@ -607,6 +613,7 @@ func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 		}
 	}
 	v.valueChecks(expr, path, c, depth)
+	v.rules(expr, path, r, c.Rules, depth)
 }
 
 // guarded adds the checks of inner, run only when cond holds.

@@ -92,6 +92,9 @@ type Type struct {
 	// DependentRequired the properties others require.
 	PropertyNames     []*Checks
 	DependentRequired []Dependency
+	// Rules apply subschemas to the value: not, if/then/else,
+	// dependentSchemas.
+	Rules []*Rule
 	// Alternatives come from oneOf or anyOf next to properties: a value
 	// must match exactly one (AlternativesOneOf) or at least one of them.
 	Alternatives      []*Alternative
@@ -294,6 +297,9 @@ type Checks struct {
 	// to the properties of a struct (see Type).
 	PropertyNames     []*Checks
 	DependentRequired []Dependency
+	// Rules apply subschemas to the value: not, if/then/else, contains,
+	// dependentSchemas.
+	Rules []*Rule
 
 	// Enum and Const are JSON literals.
 	Enum  []string
@@ -306,7 +312,7 @@ func (c *Checks) IsEmpty() bool {
 		c.MinLength == nil && c.MaxLength == nil && c.Pattern == "" && c.Format == "" &&
 		c.Minimum == "" && c.Maximum == "" && c.ExclusiveMinimum == "" && c.ExclusiveMaximum == "" &&
 		c.MultipleOf == "" && c.MinItems == nil && c.MaxItems == nil && !c.UniqueItems &&
-		c.MinProperties == nil && c.MaxProperties == nil && len(c.PropertyNames) == 0 && len(c.DependentRequired) == 0)
+		c.MinProperties == nil && c.MaxProperties == nil && len(c.PropertyNames) == 0 && len(c.DependentRequired) == 0 && len(c.Rules) == 0)
 }
 
 // AllowsNull reports whether a value of r may be JSON null. A pointer

@@ -4,6 +4,12 @@
 
 ### Added
 
+- `not`, `if`/`then`/`else`, `contains` with `minContains` and
+  `maxContains`, and `dependentSchemas` are checked by `Validate` instead
+  of being warned about. Subschemas are checked against the value's Go
+  type, with required properties, constraints on properties and items,
+  `allOf`, `$ref`, types and these keywords nested; problems keep their
+  paths (`/lines: must contain at least 1 item matching contains, has 0`).
 - `dependentRequired` and `propertyNames` are checked instead of being
   warned about: a present property's dependencies must be present
   (`/billingAddress: required when "creditCard" is present`), and property
@@ -110,6 +116,11 @@
   request bodies with a schema are decoded instead of being answered with
   415 next to JSON, or passed on as bytes when alone; `text/xml` with a
   schema is no longer a string.
+- Values that break `not`, `if`/`then`/`else`, `contains`,
+  `dependentSchemas`, `dependentRequired` or `propertyNames` used to pass
+  validation, with a warning at generation time; requests with them are
+  answered with 400 now. A `oneOf` member with `not` can make a value
+  match one member where it matched several.
 - Documents, and the files they refer to, that repeat a key in a mapping
   no longer load: `goapi validate` and `goapi generate` report the key
   and where it is repeated.

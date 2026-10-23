@@ -477,3 +477,72 @@ components:
           type: integer
       propertyNames:
         minLength: 2
+    Shipment:
+      description: if/then/else on an object.
+      type: object
+      properties:
+        country: {type: string}
+        state: {type: string}
+        postalCode: {type: string}
+      if:
+        properties:
+          country: {const: US}
+        required: [country]
+      then:
+        required: [state]
+        properties:
+          postalCode: {pattern: "^[0-9]{5}$"}
+      else:
+        properties:
+          postalCode: {minLength: 3}
+    Ticket:
+      description: not with required.
+      type: object
+      properties:
+        cancelled: {type: boolean}
+        refunded: {type: boolean}
+      not:
+        required: [cancelled, refunded]
+    Order:
+      description: contains with minContains and maxContains.
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              sku: {type: string}
+              gift: {type: boolean}
+          contains:
+            properties:
+              gift: {const: true}
+            required: [gift]
+          maxContains: 2
+        flags:
+          type: array
+          items: {type: string}
+          contains: {const: urgent}
+          minContains: 0
+          maxContains: 1
+    Checkout:
+      description: dependentSchemas.
+      type: object
+      properties:
+        creditCard: {type: string}
+        billingAddress: {type: string}
+      dependentSchemas:
+        creditCard:
+          required: [billingAddress]
+          properties:
+            billingAddress: {minLength: 5}
+    Rating:
+      description: not and an integer check on a number.
+      type: number
+      not: {const: 0}
+      if: {minimum: 10}
+      then: {type: integer}
+    Grade:
+      type: string
+      if: {pattern: "^A"}
+      then: {maxLength: 3}

@@ -110,7 +110,14 @@ if name, ok := pet.Nickname.Get(); ok { ... }  // read
 `json.Unmarshal` into a generated type reports every problem with a JSON
 pointer, and `Validate` checks the remaining constraints (lengths,
 patterns, bounds, formats, enums, unique items, property counts,
-`dependentRequired`, and `propertyNames` for string schemas, ...).
+`dependentRequired`, and `propertyNames` for string schemas, ...), and
+applies subschemas: `not`, `if`/`then`/`else`, `contains` with
+`minContains`/`maxContains`, and `dependentSchemas`. A subschema is
+checked against the value's Go type: required properties, constraints on
+properties and items, `allOf`, `$ref`, types (an integer check of a
+number, the JSON type of an untyped value), and these keywords nested.
+Subschemas with `anyOf`/`oneOf`, or `additionalProperties` and property
+counts of a struct, are not checked yet, with a warning.
 A property name that fails `propertyNames` is reported at the property
 (`/Bad_key: property name: must match the pattern ...`); names of
 undeclared properties the type does not keep are checked while decoding,

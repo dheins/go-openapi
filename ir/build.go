@@ -124,14 +124,19 @@ func (b *builder) fill(t *Type) {
 	t.NullableUse = nullable
 	switch {
 	case composesScalar(s):
+		b.warnRules(s)
 		b.fillComposed(t)
 	case b.fillScalarAlternatives(t, types):
+		b.warnRules(s)
 	case isUnion(s, types):
+		b.warnRules(s)
 		b.fillUnion(t, types)
 	case enumBase(s, types) != "":
 		b.warnUnionKeywords(s)
+		b.warnRules(s)
 		b.fillEnum(t, types)
 	case isObject(s, types) && len(b.subtypesOf(s)) > 0:
+		b.warnRules(s)
 		b.fillPolymorphic(t)
 	case isObject(s, types):
 		b.fillStruct(t)
@@ -435,6 +440,10 @@ func (b *builder) fillStruct(t *Type) {
 	}
 	// Which properties can be checked depends on whether the others are kept.
 	t.DependentRequired = b.checkableDependencies(t)
+	// Subschemas are checked against the fields, which are known now.
+	for _, part := range parts {
+		t.Rules = append(t.Rules, b.rules(namedRef(t), part)...)
+	}
 	b.fillAlternatives(t, alternatives, oneOf, byName)
 
 	if !simple {
@@ -844,6 +853,12 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 		r = &Ref{Kind: Map, Elem: value, Checks: b.withObjectKeywords(mapChecks(s), s)}
 	default:
 		r = anyRef(valueChecks(s))
+	}
+	if rules := b.rules(r, s); len(rules) > 0 {
+		if r.Checks == nil {
+			r.Checks = &Checks{}
+		}
+		r.Checks.Rules = rules
 	}
 	return r
 }
@@ -1582,13 +1597,24 @@ func (b *builder) warnUnsupported(s *oas.Schema) {
 		}
 	}
 	const later = "is not supported yet and is not reflected in the generated type"
-	check(s.Not != nil, "not", "not "+later)
-	check(s.If != nil, "if", "if/then/else "+later)
 	check(s.PatternProperties != nil, "patternProperties", "patternProperties "+later)
 	check(s.PrefixItems != nil, "prefixItems", "prefixItems "+later)
-	check(s.Contains != nil, "contains", "contains "+later)
-	check(s.DependentSchemas != nil, "dependentSchemas", "dependentSchemas "+later)
 	check(s.UnevaluatedItems != nil, "unevaluatedItems", "unevaluatedItems "+later)
+}
+
+// warnRules reports not, if/then/else, contains and dependentSchemas on a
+// schema whose type does not apply them: an enum, union or composed type.
+func (b *builder) warnRules(s *oas.Schema) {
+	const unchecked = "is not checked on %s yet"
+	what := "this kind of type"
+	for _, kw := range []struct {
+		present bool
+		keyword string
+	}{{s.Not != nil, "not"}, {s.If != nil, "if"}, {s.Contains != nil, "contains"}, {s.DependentSchemas != nil, "dependentSchemas"}} {
+		if kw.present {
+			b.warn(s, []string{kw.keyword}, fmt.Sprintf("%s "+unchecked, kw.keyword, what))
+		}
+	}
 }
 
 // warnUnionKeywords reports oneOf, anyOf and discriminator on a schema
