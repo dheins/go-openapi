@@ -23,8 +23,10 @@ curl -H "X-API-Key: secret" -d '{"name":"Rex","status":"available"}' localhost:8
   It holds `NewServer` (package `gen`), the operations in
   [gen/api](gen/api) (package `api`: the `Handler` interface, request and
   response types, and a handler per operation), and the schema types in
-  [gen/model](gen/model) (package `model`).
-- [main_test.go](main_test.go) exercises it end to end.
+  [gen/model](gen/model) (package `model`). [gen/client](gen/client)
+  (package `client`) is a generated client sharing those types.
+- [main_test.go](main_test.go) exercises it end to end, with raw HTTP
+  requests and through the client.
 
 ## Postman
 
