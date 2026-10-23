@@ -4,6 +4,11 @@
 
 ### Added
 
+- `prefixItems`: each position is checked against its subschema, the
+  other items against `items`, and `items: false` limits the length. When
+  every position has one schema the items keep its type. Subschemas on
+  values of any type are checked by the value's JSON type, so `not`, `if`
+  and the others work on untyped values too.
 - `patternProperties`: a struct keeps its undeclared properties whose
   names match a pattern in a `PatternProperties map[string]T` field, typed
   by the pattern's schema, decoded, validated and encoded like additional
@@ -126,6 +131,9 @@
   validation, with a warning at generation time; requests with them are
   answered with 400 now. A `oneOf` member with `not` can make a value
   match one member where it matched several.
+- Arrays with `prefixItems` whose positions have different schemas have
+  items of any type (`[]any`); with an `items` schema they were typed by
+  it, and decoding failed for positions of another type.
 - Properties whose names match a pattern of `patternProperties` are no
   longer additional properties: `additionalProperties: false` allows them,
   and objects that keep no additional properties keep them.

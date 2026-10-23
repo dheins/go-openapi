@@ -658,6 +658,9 @@ func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 		}
 	}
 	v.valueChecks(expr, path, c, depth)
+	if r.Kind == ir.Slice {
+		v.items(expr, path, r.Elem, c.PrefixItems, c.RestItems, depth)
+	}
 	v.rules(expr, path, r, c.Rules, depth)
 }
 

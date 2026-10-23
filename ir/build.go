@@ -845,7 +845,11 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 	case "boolean":
 		r = &Ref{Kind: Builtin, Name: "bool", Checks: valueChecks(s)}
 	case "array":
-		r = &Ref{Kind: Slice, Elem: b.use(s.Items, hint+"Item", root), Checks: arrayChecks(s)}
+		if len(s.PrefixItems) > 0 {
+			r = b.tuple(s, hint, root)
+		} else {
+			r = &Ref{Kind: Slice, Elem: b.use(s.Items, hint+"Item", root), Checks: arrayChecks(s)}
+		}
 	case "object":
 		value := anyRef(nil)
 		if ap := s.AdditionalProperties; ap != nil && ap.Bool == nil {
@@ -1606,7 +1610,6 @@ func (b *builder) warnUnsupported(s *oas.Schema) {
 		}
 	}
 	const later = "is not supported yet and is not reflected in the generated type"
-	check(s.PrefixItems != nil, "prefixItems", "prefixItems "+later)
 	check(s.UnevaluatedItems != nil, "unevaluatedItems", "unevaluatedItems "+later)
 }
 

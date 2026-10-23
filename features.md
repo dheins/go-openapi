@@ -18,7 +18,7 @@ shipped in.
 
 ## Models
 
-- Keywords that produce a warning and are not checked: `prefixItems`,
+- Keywords that produce a warning and are not checked:
   `unevaluatedItems`, `propertyNames` schemas that are not string schemas,
   `patternProperties` whose patterns have different schemas on an object,
   and subschemas (of `not`, `if`,
@@ -72,7 +72,10 @@ Unreleased:
   value's Go type. (4dfcc72)
 - [x] `patternProperties`: undeclared matching properties are kept in a
   typed `PatternProperties` map, declared ones and map keys are checked
-  against the pattern's subschema.
+  against the pattern's subschema. (4bdb21c)
+- [x] `prefixItems`: positions are checked against their subschemas, with
+  `items` for the others; subschemas on values of any type are checked by
+  the value's JSON type.
 - [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
   schema without a type) and the multipart `encoding` object: per-part
   content types and required part headers, exposed as `oapi.File.Header`.

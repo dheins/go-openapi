@@ -580,8 +580,17 @@ components:
 		len(rules[0].Then.AllOf) != 2 {
 		t.Errorf("Nested rules = %+v", rules)
 	}
-	if r := typeNamed(t, m, "Untyped").Underlying.Checks.Rules; len(r) != 1 || fmt.Sprint(r[0].Schema.AnyTypes) != "[string null]" {
+	// Strings and null match; values of the other dynamic types never do.
+	if r := typeNamed(t, m, "Untyped").Underlying.Checks.Rules; len(r) != 1 || r[0].Schema.NullFails {
 		t.Errorf("Untyped rules = %+v", r)
+	} else {
+		var cases []string
+		for _, d := range r[0].Schema.Dynamic {
+			cases = append(cases, fmt.Sprintf("%s:%t", d.GoType, d.Constraint.Never))
+		}
+		if got := strings.Join(cases, " "); got != "float64:true bool:true []any:true map[string]any:true" {
+			t.Errorf("Untyped cases = %s", got)
+		}
 	}
 	var warnings []string
 	for _, w := range m.Warnings {
@@ -645,5 +654,50 @@ components:
 		if !strings.Contains(all, want) {
 			t.Errorf("no warning %q in:\n%s", want, all)
 		}
+	}
+}
+
+func TestTuples(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Same:
+      type: array
+      prefixItems: [{type: string}, {type: string}]
+      items: {type: string}
+    Mixed:
+      type: array
+      prefixItems: [{type: string}, {type: integer}]
+      items: {type: string}
+    Open:
+      type: array
+      prefixItems: [{type: string}]
+    Inside:
+      type: array
+      items: {type: integer}
+      not:
+        prefixItems: [{const: 0}]
+`, Options{})
+	elem := func(name string) *Ref { return typeNamed(t, m, name).Underlying.Elem }
+	if e := elem("Same"); e.Kind != Builtin || e.Name != "string" {
+		t.Errorf("Same items = %+v", e)
+	}
+	// items do not describe the first position: any.
+	mixed := typeNamed(t, m, "Mixed").Underlying
+	if mixed.Elem.Kind != Any || len(mixed.Checks.PrefixItems) != 2 || mixed.Checks.RestItems == nil {
+		t.Errorf("Mixed = %+v %+v", mixed.Elem, mixed.Checks)
+	}
+	// Without items, the other items may be anything.
+	if e := elem("Open"); e.Kind != Any {
+		t.Errorf("Open items = %+v", e)
+	}
+	inside := typeNamed(t, m, "Inside").Underlying.Checks.Rules
+	if len(inside) != 1 || len(inside[0].Schema.PrefixItems) != 1 {
+		t.Errorf("Inside rules = %+v", inside)
+	}
+	for _, w := range m.Warnings {
+		t.Errorf("warning: %s", w.Message)
 	}
 }

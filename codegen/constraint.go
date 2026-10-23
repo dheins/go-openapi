@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -50,14 +51,9 @@ func (v *validator) constraint(expr, path string, r *ir.Ref, c *ir.Constraint, d
 		v.line(depth, "errs.Add(%s, %q)", path, msg)
 		return
 	}
-	if len(c.AnyTypes) > 0 {
-		quoted := make([]string, len(c.AnyTypes))
-		for i, t := range c.AnyTypes {
-			quoted[i] = strconv.Quote(t)
-		}
-		v.line(depth, "if !oapi.HasJSONType(%s, %s) {", expr, strings.Join(quoted, ", "))
-		v.line(depth+1, "errs.Add(%s, %q)", path, "must be of type "+strings.Join(c.AnyTypes, " or "))
-		v.line(depth, "}")
+	if r.Kind == ir.Any {
+		v.dynamic(expr, path, c, depth)
+		return
 	}
 	if c.Integer {
 		f := expr
@@ -107,31 +103,118 @@ func (v *validator) constraint(expr, path string, r *ir.Ref, c *ir.Constraint, d
 			v.line(depth+1, "errs.Add(oapi.Field(%s, %q), %q)", path, name, "required property is missing")
 			v.line(depth, "}")
 		}
+		var declared []string
+		for _, k := range c.Keys {
+			declared = append(declared, strconv.Quote(k.Name))
+			sub := v.sub()
+			val := fmt.Sprintf("val%d", depth)
+			sub.constraint(val, fmt.Sprintf("oapi.Field(%s, %q)", path, k.Name), r.Elem, k.Constraint, depth+1)
+			if sub.b.Len() > 0 {
+				v.line(depth, "if %s, ok := %s[%q]; ok {", val, expr, k.Name)
+				v.b.WriteString(sub.b.String())
+				v.line(depth, "}")
+			}
+		}
 		if c.Values != nil {
+			// additionalProperties: the keys properties does not name.
 			key := fmt.Sprintf("k%d", depth)
 			inner := v.sub()
 			inner.constraint(expr+"["+key+"]", fmt.Sprintf("oapi.Field(%s, %s)", path, key), r.Elem, c.Values, depth+1)
 			if inner.b.Len() > 0 {
 				v.line(depth, "for _, %s := range %s.Sorted(%s.Keys(%s)) {", key, v.file.imp("slices", "slices"), v.file.imp("maps", "maps"), expr)
+				if len(declared) > 0 {
+					v.line(depth+1, "if %s.Contains([]string{%s}, %s) {", v.file.imp("slices", "slices"), strings.Join(declared, ", "), key)
+					v.line(depth+2, "continue")
+					v.line(depth+1, "}")
+				}
 				v.b.WriteString(inner.b.String())
 				v.line(depth, "}")
 			}
 		}
 	}
-	if r.Kind == ir.Slice && c.Items != nil {
-		item, index := fmt.Sprintf("item%d", depth), fmt.Sprintf("i%d", depth)
-		inner := v.sub()
-		inner.constraint(item, fmt.Sprintf("oapi.Index(%s, %s)", path, index), r.Elem, c.Items, depth+1)
-		if inner.b.Len() > 0 {
-			v.line(depth, "for %s, %s := range %s {", index, item, expr)
-			v.b.WriteString(inner.b.String())
-			v.line(depth, "}")
-		}
+	if r.Kind == ir.Slice {
+		v.items(expr, path, r.Elem, c.PrefixItems, c.Items, depth)
 	}
 	for _, m := range c.AllOf {
 		v.constraint(expr, path, r, m, depth)
 	}
 	v.rules(expr, path, r, c.Rules, depth)
+}
+
+// dynamic writes the checks of c on expr, a value of any type, by its
+// dynamic type.
+func (v *validator) dynamic(expr, path string, c *ir.Constraint, depth int) {
+	x := fmt.Sprintf("x%d", depth)
+	// Types whose checks are the same share a case.
+	type clause struct {
+		types []string
+		body  string
+	}
+	var clauses []*clause
+	used := false
+	for _, d := range c.Dynamic {
+		inner := v.sub()
+		inner.constraint(x, path, d.Ref, d.Constraint, depth+1)
+		body := inner.b.String()
+		if body == "" {
+			continue
+		}
+		if strings.Contains(body, x) {
+			used = true
+		} else if i := slices.IndexFunc(clauses, func(cl *clause) bool { return cl.body == body }); i >= 0 {
+			clauses[i].types = append(clauses[i].types, d.GoType)
+			continue
+		}
+		clauses = append(clauses, &clause{types: []string{d.GoType}, body: body})
+	}
+	if len(clauses) == 0 && !c.NullFails {
+		return
+	}
+	if used {
+		v.line(depth, "switch %s := %s.(type) {", x, expr)
+	} else {
+		v.line(depth, "switch %s.(type) {", expr)
+	}
+	if c.NullFails {
+		v.line(depth, "case nil:")
+		v.line(depth+1, "errs.Add(%s, %q)", path, "must not be null")
+	}
+	for _, cl := range clauses {
+		v.line(depth, "case %s:", strings.Join(cl.types, ", "))
+		v.b.WriteString(cl.body)
+	}
+	v.line(depth, "}")
+}
+
+// items writes the checks of the items of expr, a slice of elem: by
+// position for the first ones (prefix), the others against rest.
+func (v *validator) items(expr, path string, elem *ir.Ref, prefix []*ir.Constraint, rest *ir.Constraint, depth int) {
+	for i, pc := range prefix {
+		inner := v.sub()
+		inner.constraint(fmt.Sprintf("%s[%d]", expr, i), fmt.Sprintf("oapi.Index(%s, %d)", path, i), elem, pc, depth+1)
+		if inner.b.Len() > 0 {
+			v.line(depth, "if len(%s) > %d {", expr, i)
+			v.b.WriteString(inner.b.String())
+			v.line(depth, "}")
+		}
+	}
+	if rest == nil {
+		return
+	}
+	item, index := fmt.Sprintf("item%d", depth), fmt.Sprintf("i%d", depth)
+	inner := v.sub()
+	inner.constraint(item, fmt.Sprintf("oapi.Index(%s, %s)", path, index), elem, rest, depth+1)
+	if inner.b.Len() == 0 {
+		return
+	}
+	if len(prefix) == 0 {
+		v.line(depth, "for %s, %s := range %s {", index, item, expr)
+	} else {
+		v.line(depth, "for %s := %d; %s < len(%s); %s++ {", index, len(prefix), index, expr, index)
+		v.line(depth+1, "%s := %s[%s]", item, expr, index)
+	}
+	v.b.WriteString(inner.b.String())
+	v.line(depth, "}")
 }
 
 func (v *validator) guardedConstraint(cond, expr, path string, inner *ir.Ref, c *ir.Constraint, depth int) {

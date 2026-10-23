@@ -323,6 +323,11 @@ type Checks struct {
 	// a map's matching keys.
 	Rules    []*Rule
 	Patterns []PatternRule
+	// PrefixItems constrain the first items of a slice by position
+	// (prefixItems), RestItems the others (items), when the slice's item
+	// type does not describe them.
+	PrefixItems []*Constraint
+	RestItems   *Constraint
 
 	// Enum and Const are JSON literals.
 	Enum  []string
@@ -335,7 +340,7 @@ func (c *Checks) IsEmpty() bool {
 		c.MinLength == nil && c.MaxLength == nil && c.Pattern == "" && c.Format == "" &&
 		c.Minimum == "" && c.Maximum == "" && c.ExclusiveMinimum == "" && c.ExclusiveMaximum == "" &&
 		c.MultipleOf == "" && c.MinItems == nil && c.MaxItems == nil && !c.UniqueItems &&
-		c.MinProperties == nil && c.MaxProperties == nil && len(c.PropertyNames) == 0 && len(c.DependentRequired) == 0 && len(c.Rules) == 0 && len(c.Patterns) == 0)
+		c.MinProperties == nil && c.MaxProperties == nil && len(c.PropertyNames) == 0 && len(c.DependentRequired) == 0 && len(c.Rules) == 0 && len(c.Patterns) == 0 && len(c.PrefixItems) == 0 && c.RestItems == nil)
 }
 
 // AllowsNull reports whether a value of r may be JSON null. A pointer

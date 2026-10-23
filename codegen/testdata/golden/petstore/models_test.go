@@ -924,3 +924,36 @@ func TestPatternProperties(t *testing.T) {
 	assertMessages(t, l.Validate(), "/l_home/code: length must be at most 2")
 	assertMessages(t, json.Unmarshal([]byte(`{"l_home": 3}`), &l), "/l_home: expected object, got number")
 }
+
+func TestPrefixItems(t *testing.T) {
+	decode := func(data string, v interface{ Validate() error }) error {
+		t.Helper()
+		if err := json.Unmarshal([]byte(data), v); err != nil {
+			return err
+		}
+		return v.Validate()
+	}
+	// Positions with different schemas: items of any type, checked by
+	// position; items: false allows no more.
+	assertMessages(t, decode(`[91, -181, 1]`, new(Point)),
+		"must have at most 2 items", "/0: must be at most 90", "/1: must be at least -180")
+	if err := decode(`[45.5, 10]`, new(Point)); err != nil {
+		t.Errorf("valid point: %v", err)
+	}
+	assertMessages(t, decode(`["", -1, "x", true]`, new(Pair)),
+		"/0: length must be at least 1", "/1: must be at least 0", "/2: must be of type boolean")
+	assertMessages(t, decode(`[null, 1.5]`, new(Pair)), "/0: must not be null", "/1: must be an integer")
+	if err := decode(`["a", 1, true, false]`, new(Pair)); err != nil {
+		t.Errorf("valid pair: %v", err)
+	}
+	// One schema for every position: typed items.
+	assertMessages(t, decode(`[1, 2, 3, 4]`, new(Triple)), "must have at most 3 items")
+	assertMessages(t, oapi.Decode([]byte(`["a"]`), new(Triple)), "/0: expected integer, got string")
+
+	// Subschemas on values of any type apply to the values of their type.
+	assertMessages(t, decode(`{"extra": {"secret": 1}, "note": "abcd"}`, new(Meta)),
+		"/extra: must not match the schema in not", "/note: length must be at most 3")
+	if err := decode(`{"extra": {"public": 1}, "note": 12345}`, new(Meta)); err != nil {
+		t.Errorf("valid meta: %v", err)
+	}
+}

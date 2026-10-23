@@ -5,6 +5,7 @@ package petstore
 import (
 	"encoding/json"
 	"errors"
+	"math"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -81,8 +82,15 @@ func (u *Loose) DecodeJSON(data []byte, dir oapi.Direction) error {
 			var errs oapi.ValidationErrors
 			if func() bool {
 				var errs oapi.ValidationErrors
-				if !oapi.HasJSONType(x, "integer") {
+				switch x4 := x.(type) {
+				case nil:
+					errs.Add("", "must not be null")
+				case string, bool, []any, map[string]any:
 					errs.Add("", "must be of type integer")
+				case float64:
+					if f := float64(x4); f != math.Trunc(f) {
+						errs.Add("", "must be an integer")
+					}
 				}
 				return len(errs) == 0
 			}() {
@@ -133,8 +141,15 @@ func (u Loose) Validate() error {
 	case LooseVariant2:
 		if func() bool {
 			var errs oapi.ValidationErrors
-			if !oapi.HasJSONType(val.Value, "integer") {
+			switch x3 := val.Value.(type) {
+			case nil:
+				errs.Add("", "must not be null")
+			case string, bool, []any, map[string]any:
 				errs.Add("", "must be of type integer")
+			case float64:
+				if f := float64(x3); f != math.Trunc(f) {
+					errs.Add("", "must be an integer")
+				}
 			}
 			return len(errs) == 0
 		}() {
