@@ -143,7 +143,7 @@ func TestGenerateServer(t *testing.T) {
 	}
 	for _, name := range []string{
 		"server.go", "doc.go", "openapi.json",
-		"api/handler.go", "api/list_pets_handler.go", "api/list_pets_operation.go", "api/doc.go",
+		"api/handler.go", "api/list_pets_handler.go", "api/list_pets_operation.go", "api/list_pets_client.go", "api/doc.go",
 		"model/pet.go", "model/doc.go",
 	} {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
@@ -215,6 +215,57 @@ func TestGenerateServerImportPath(t *testing.T) {
 	if code := run([]string{"generate", "server", "-out", out, "-import", "example.com/x/gen", "-models", "api", petserverDoc}, &stdout, &stderr); code != exitFailure ||
 		!strings.Contains(stderr.String(), "must differ") {
 		t.Errorf("same package for operations and models: exit code %d\nstderr: %s", code, &stderr)
+	}
+}
+
+func TestGenerateClient(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/shop\n\ngo 1.27\n")
+	out := filepath.Join(root, "client")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"generate", "client", "-out", out, petserverDoc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	for _, name := range []string{"client.go", "api/doc.go", "api/list_pets_operation.go", "api/list_pets_client.go", "model/pet.go"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+			t.Errorf("%s not generated: %v", name, err)
+		}
+	}
+	for _, name := range []string{"server.go", "openapi.json", "api/handler.go", "api/list_pets_handler.go"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err == nil {
+			t.Errorf("%s generated for a client", name)
+		}
+	}
+	c := readFile(t, filepath.Join(out, "client.go"))
+	for _, want := range []string{"package client\n", `"example.com/shop/client/api"`, "func New(creds Credentials, opts ...client.Option)",
+		"func (c *Client) ListPets(ctx context.Context, req *api.ListPetsRequest) (api.ListPetsResponse, error)"} {
+		if !strings.Contains(c, want) {
+			t.Errorf("client.go does not contain %q", want)
+		}
+	}
+
+	// With -types, only the client package is written, using the types
+	// of a server generated before.
+	out = filepath.Join(root, "sdk")
+	stderr.Reset()
+	if code := run([]string{"generate", "client", "-out", out, "-types", "example.com/shop/gen/api", petserverDoc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("-types: exit code %d\nstderr: %s", code, &stderr)
+	}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "client.go" {
+		t.Errorf("-types wrote %v, want only client.go", entries)
+	}
+	if c := readFile(t, filepath.Join(out, "client.go")); !strings.Contains(c, `"example.com/shop/gen/api"`) || !strings.Contains(c, "api.NewListPetsRequest(") {
+		t.Error("the -types package is not used")
+	}
+
+	stderr.Reset()
+	if code := run([]string{"generate", "client", "-out", out, "-operations", "", petserverDoc}, &stdout, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), "-operations or -types") {
+		t.Errorf("client without an operations package: exit code %d\nstderr: %s", code, &stderr)
 	}
 }
 

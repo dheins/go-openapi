@@ -4,6 +4,15 @@
 
 ### Added
 
+- `goapi generate client` (`codegen.Client`): a client package with a
+  `Client` type, `New`, a `Credentials` struct with a field per security
+  scheme, a method per operation, and `DefaultServerURL` from the first
+  absolute server URL. It writes the same `api` and `model` packages as
+  `generate server`, or uses an existing operations package with
+  `-types`. Every operations package now has `NewXRequest` and
+  `ReadXResponse` per operation (in `<op>_client.go`), which build the
+  HTTP request, validating it first unless disabled, and read the declared
+  response variants.
 - `runtime/client`, the runtime of generated clients: `Config` and options
   (base URL, `Doer` and middleware, headers, request and response
   validation, a response size limit); requests with parameters in every

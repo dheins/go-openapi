@@ -10,10 +10,6 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var copyPetPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: false, Shape: server.Scalar}
-
-var copyPetDestinationParam = server.Param{Name: "Destination", Style: "simple", Explode: false, Shape: server.Scalar}
-
 // HandleCopyPet returns the HTTP handler of CopyPet.
 //
 // It decodes and validates the

@@ -123,6 +123,11 @@ func Invalid(resp *http.Response, err error) error {
 	return &InvalidResponse{StatusCode: resp.StatusCode, Err: err}
 }
 
+// MissingHeader reports a response without the required header name.
+func MissingHeader(resp *http.Response, name string) error {
+	return &InvalidResponse{StatusCode: resp.StatusCode, Err: fmt.Errorf("header %s is required", name)}
+}
+
 // Header decodes the response header name into dst with parse
 // (server.ParseScalar or ParseArray), reporting whether it was present.
 func Header[T any](resp *http.Response, name string, parse func([]string) (T, error), dst *T) (bool, error) {

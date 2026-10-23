@@ -288,7 +288,7 @@ func (r *Request) CookieParam(p server.Param, v any) {
 }
 
 // ContentParam sets a parameter serialized as JSON (content), in the
-// query, a header or a cookie.
+// query, a header or a cookie, or appends it to the path.
 func (r *Request) ContentParam(in, name string, v any) {
 	data, err := oapi.EncodeRequest(v)
 	if err != nil {
@@ -301,6 +301,8 @@ func (r *Request) ContentParam(in, name string, v any) {
 		return
 	}
 	switch in {
+	case "path":
+		r.path.WriteString(url.PathEscape(compact.String()))
 	case "query":
 		r.query.Set(name, compact.String())
 	case "header":

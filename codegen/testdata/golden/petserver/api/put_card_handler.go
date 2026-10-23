@@ -12,8 +12,6 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var putCardPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: false, Shape: server.Scalar}
-
 var putCardXMLShape = &server.XMLNode{Name: "card", Namespace: "urn:example:pets", Prefix: "p", Type: "object", Properties: []server.XMLProperty{{Name: "id", Node: &server.XMLNode{Name: "id", Kind: "attribute", Type: "integer"}}, {Name: "name", Node: &server.XMLNode{Name: "name", Namespace: "urn:example:pets", Prefix: "p", Type: "string"}}, {Name: "nicknames", Node: &server.XMLNode{Name: "nicknames", Type: "array", Wrapped: true, Items: &server.XMLNode{Name: "nickname", Type: "string"}}}, {Name: "vets", Node: &server.XMLNode{Name: "vets", Type: "array", Items: &server.XMLNode{Name: "vet", Type: "object", Properties: []server.XMLProperty{{Name: "name", Node: &server.XMLNode{Name: "name", Kind: "text", Type: "string"}}, {Name: "phone", Node: &server.XMLNode{Name: "phone", Kind: "attribute", Type: "string"}}}}}}, {Name: "note", Node: &server.XMLNode{Name: "remark", Type: "object", Properties: []server.XMLProperty{{Name: "lang", Node: &server.XMLNode{Name: "lang", Kind: "attribute", Type: "string"}}, {Name: "text", Node: &server.XMLNode{Name: "text", Kind: "cdata", Type: "string"}}}}}, {Name: "secret", Node: &server.XMLNode{Name: "secret", Type: "string"}}}}
 
 // HandlePutCard returns the HTTP handler of PutCard.

@@ -28,8 +28,10 @@ type Model struct {
 	// order, when Options.Operations is set.
 	Operations []*Operation
 	// BasePath is the path of the document's first server URL (with
-	// variables at their defaults), which routes are served below.
-	BasePath string
+	// variables at their defaults), which routes are served below, and
+	// ServerURL that URL when it is absolute (clients send to it), or "".
+	BasePath  string
+	ServerURL string
 	// SecuritySchemes are the schemes the generated operations use, in
 	// document order.
 	SecuritySchemes []*SecurityScheme

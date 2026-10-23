@@ -180,6 +180,13 @@ func TestBuild(t *testing.T) {
 	}
 
 	r = NewRequest("GET")
+	r.Path("/owners/")
+	r.ContentParam("path", "owner", owner{"Ann", 3})
+	if got := build(t, r).URL.EscapedPath(); got != "/v1/owners/%7B%22name%22:%22Ann%22%2C%22age%22:3%7D" {
+		t.Errorf("path with content = %s", got)
+	}
+
+	r = NewRequest("GET")
 	r.QueryString(owner{"Ann", 3})
 	if got, ok, err := server.QueryString(build(t, r)); !ok || err != nil || got != `{"name":"Ann","age":3}` {
 		t.Errorf("querystring = %q, %v, %v", got, ok, err)
@@ -301,6 +308,10 @@ func TestResponses(t *testing.T) {
 	var unexpected *UnexpectedResponse
 	if err := c.Unexpected(resp); !errors.As(err, &unexpected) || unexpected.Problem == nil || unexpected.Problem.Detail != "taken" {
 		t.Errorf("unexpected = %v", err)
+	}
+	var invalid *InvalidResponse
+	if err := MissingHeader(resp, "X-Rate"); !errors.As(err, &invalid) || invalid.StatusCode != 409 {
+		t.Errorf("missing header = %v", err)
 	}
 	resp = &http.Response{StatusCode: 200, Body: readCloser(strings.Repeat("x", 10))}
 	c.MaxResponseBytes = 5

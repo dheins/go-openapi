@@ -11,8 +11,6 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var deletePetPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: false, Shape: server.Scalar}
-
 // HandleDeletePet returns the HTTP handler of DeletePet.
 //
 // It checks the credentials with sec, decodes and validates the

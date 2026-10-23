@@ -15,10 +15,6 @@ import (
 
 var getFileSegment0 = regexp.MustCompile("^(.+)\\.(.+)$")
 
-var getFileNameParam = server.Param{Name: "name", Style: "simple", Explode: false, Shape: server.Scalar}
-
-var getFileExtParam = server.Param{Name: "ext", Style: "simple", Explode: false, Shape: server.Scalar}
-
 // HandleGetFile returns the HTTP handler of GetFile.
 //
 // It decodes and validates the

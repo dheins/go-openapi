@@ -12,14 +12,6 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var listPetsLimitParam = server.Param{Name: "limit", Style: "form", Explode: true, Shape: server.Scalar}
-
-var listPetsTagsParam = server.Param{Name: "tags", Style: "form", Explode: false, Shape: server.Array}
-
-var listPetsXRequestIDParam = server.Param{Name: "X-Request-ID", Style: "simple", Explode: false, Shape: server.Scalar}
-
-var listPetsSortParam = server.Param{Name: "sort", Style: "form", Explode: true, Shape: server.Scalar}
-
 // HandleListPets returns the HTTP handler of ListPets.
 //
 // It decodes and validates the

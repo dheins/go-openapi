@@ -10,8 +10,6 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var getCardPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: false, Shape: server.Scalar}
-
 // HandleGetCard returns the HTTP handler of GetCard.
 //
 // It decodes and validates the

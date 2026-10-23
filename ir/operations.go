@@ -236,14 +236,32 @@ func (b *builder) buildOperations() {
 	if doc.Webhooks.Len() > 0 {
 		b.warnAt(doc, []string{"webhooks"}, "webhooks are not generated yet")
 	}
-	b.model.BasePath = basePath(doc)
+	b.model.BasePath, b.model.ServerURL = basePath(doc), serverURL(doc)
 }
 
 // basePath returns the path of the first server URL, with its variables
 // replaced by their defaults, without a trailing slash.
 func basePath(doc *oas.Document) string {
-	if len(doc.Servers) == 0 || doc.Servers[0] == nil {
+	u := firstServerURL(doc)
+	if u == nil {
 		return ""
+	}
+	return strings.TrimSuffix(u.Path, "/")
+}
+
+// serverURL returns the first server URL, with its variables replaced by
+// their defaults and without a trailing slash, if it is absolute.
+func serverURL(doc *oas.Document) string {
+	u := firstServerURL(doc)
+	if u == nil || !u.IsAbs() || u.Host == "" {
+		return ""
+	}
+	return strings.TrimSuffix(u.String(), "/")
+}
+
+func firstServerURL(doc *oas.Document) *url.URL {
+	if len(doc.Servers) == 0 || doc.Servers[0] == nil {
+		return nil
 	}
 	s := doc.Servers[0]
 	raw := templateParam.ReplaceAllStringFunc(s.URL, func(m string) string {
@@ -254,9 +272,9 @@ func basePath(doc *oas.Document) string {
 	})
 	u, err := url.Parse(raw)
 	if err != nil {
-		return ""
+		return nil
 	}
-	return strings.TrimSuffix(u.Path, "/")
+	return u
 }
 
 // register adds the route of o to a scratch ServeMux to find patterns

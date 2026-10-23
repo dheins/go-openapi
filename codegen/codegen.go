@@ -42,6 +42,11 @@ type Options struct {
 	OperationsImport  string
 	ModelsPackage     string
 	ModelsImport      string
+	// TypesPackage and TypesImport, if set, make Client use the
+	// operations' package of a server or client generated before, by its
+	// name and import path, instead of generating the types again.
+	TypesPackage string
+	TypesImport  string
 }
 
 // layout says which package each kind of generated code goes to, by
@@ -91,7 +96,10 @@ type generator struct {
 	self string
 	lay  layout
 	// vars are the package-level variables declared so far, across files.
-	vars      map[string]bool
+	vars map[string]bool
+	// params are the variables describing parameters, shared by a
+	// package's client functions and handlers.
+	params    map[*ir.Param]string
 	files     []File
 	fileNames map[string]bool
 }
@@ -100,7 +108,7 @@ func newGenerator(opts Options) (*generator, error) {
 	if opts.Package == "" {
 		return nil, fmt.Errorf("codegen: package name is required")
 	}
-	return &generator{opts: opts, vars: map[string]bool{}, fileNames: map[string]bool{}}, nil
+	return &generator{opts: opts, vars: map[string]bool{}, params: map[*ir.Param]string{}, fileNames: map[string]bool{}}, nil
 }
 
 func (g *generator) models(m *ir.Model) error {
@@ -311,6 +319,9 @@ func (f *fileGen) funcs() template.FuncMap {
 		"unionValidateStmts": f.unionValidateStmts,
 	}
 	for name, fn := range f.serverFuncs() {
+		funcs[name] = fn
+	}
+	for name, fn := range f.clientFuncs() {
 		funcs[name] = fn
 	}
 	return funcs
