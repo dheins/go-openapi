@@ -1,15 +1,16 @@
 package petserver
 
-// End-to-end tests of the generated sender of webhooks and callbacks.
-// They are not generated; codegen's TestGeneratedCode runs them.
+// End-to-end tests of the generated sender and receivers of webhooks and
+// callbacks. They are not generated; codegen's TestGeneratedCode runs
+// them.
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,32 +19,67 @@ import (
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/client"
+	"github.com/dheins/go-openapi/runtime/problem"
+	"github.com/dheins/go-openapi/runtime/server"
 )
 
-// received is a request a receiver got.
-type received struct {
-	method, path, query, event, contentType, body string
+// receiver implements WebhookHandler and CallbackHandler, recording the
+// requests it gets.
+type receiver struct {
+	mu   sync.Mutex
+	seen []any
+	// gone makes pet events answer 410, and fail an error.
+	gone, fail bool
 }
 
-// newReceiver starts a server recording the requests it gets and
-// answering them with respond.
-func newReceiver(t *testing.T, respond func(w http.ResponseWriter, r *http.Request)) (*httptest.Server, func() []received) {
-	t.Helper()
-	var mu sync.Mutex
-	var got []received
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		got = append(got, received{r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("X-Event"), r.Header.Get("Content-Type"), string(body)})
-		mu.Unlock()
-		respond(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	return srv, func() []received {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([]received(nil), got...)
+func (r *receiver) record(req any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, req)
+}
+
+func (r *receiver) last() any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.seen) == 0 {
+		return nil
 	}
+	return r.seen[len(r.seen)-1]
+}
+
+func (r *receiver) PetAdoptedWebhook(_ context.Context, req *api.PetAdoptedWebhookRequest) (api.PetAdoptedWebhookResponse, error) {
+	r.record(req)
+	return api.PetAdoptedWebhook200JSONResponse{Body: model.PetAdoptedWebhook200ResponseBody{Ok: oapi.Some(req.Body.By != "nobody")}}, nil
+}
+
+func (r *receiver) SubscribePetEventCallback(_ context.Context, req *api.SubscribePetEventCallbackRequest) (api.SubscribePetEventCallbackResponse, error) {
+	r.record(req)
+	switch {
+	case r.fail:
+		return nil, problem.New(http.StatusServiceUnavailable, "try later")
+	case r.gone:
+		return api.SubscribePetEventCallback410Response{}, nil
+	}
+	return api.SubscribePetEventCallback204Response{}, nil
+}
+
+func (r *receiver) SubscribePingCallback(_ context.Context, req *api.SubscribePingCallbackRequest) (api.SubscribePingCallbackResponse, error) {
+	r.record(req)
+	return api.SubscribePingCallback200TextResponse{Body: "pong " + strconv.FormatInt(req.N.Value, 10)}, nil
+}
+
+// newReceiver serves r's handlers at the paths a consumer would register:
+// the webhook at /hooks/adopted, pet events below /hooks (the URL of the
+// subscription) and pings at /ping.
+func newReceiver(t *testing.T, r *receiver) *httptest.Server {
+	t.Helper()
+	cfg := server.NewConfig(server.WithLogger(slog.New(slog.DiscardHandler)))
+	cfg.Handle(api.PetAdoptedWebhookOperation, "/hooks/adopted", api.HandlePetAdoptedWebhook(cfg, r))
+	cfg.Handle(api.SubscribePetEventCallbackOperation, "/hooks/pets/POST", api.HandleSubscribePetEventCallback(cfg, r))
+	cfg.Handle(api.SubscribePingCallbackOperation, "/ping", api.HandleSubscribePingCallback(cfg, r))
+	srv := httptest.NewServer(cfg.Handler())
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 func newSender(t *testing.T, opts ...client.Option) *Sender {
@@ -55,12 +91,10 @@ func newSender(t *testing.T, opts ...client.Option) *Sender {
 	return s
 }
 
-func TestSendWebhook(t *testing.T) {
+func TestWebhookRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	srv, got := newReceiver(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"ok":true}`)
-	})
+	r := &receiver{}
+	srv := newReceiver(t, r)
 	s := newSender(t)
 
 	req := &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{ID: 1, Name: "Rex", Secret: oapi.Some("s")}, By: "Ann"}}
@@ -68,46 +102,43 @@ func TestSendWebhook(t *testing.T) {
 	if ack, ok := resp.(api.PetAdoptedWebhook200JSONResponse); err != nil || !ok || !ack.Body.Ok.Value {
 		t.Fatalf("response %+v %v", resp, err)
 	}
-	r := got()
-	if len(r) != 1 || r[0].method != "POST" || r[0].path != "/hooks/adopted" || r[0].contentType != "application/json" {
-		t.Fatalf("received %+v", r)
-	}
-	// Sent like a request: write-only properties in, read-only ones out.
-	var body map[string]any
-	if err := json.Unmarshal([]byte(r[0].body), &body); err != nil {
-		t.Fatal(err)
-	}
-	if pet := body["pet"].(map[string]any); body["by"] != "Ann" || pet["secret"] != "s" || pet["id"] != nil {
-		t.Errorf("body = %s", r[0].body)
+	// Sent as a request: write-only properties in, read-only ones out.
+	got := r.last().(*api.PetAdoptedWebhookRequest)
+	if got.Body.By != "Ann" || got.Body.Pet.Name != "Rex" || got.Body.Pet.Secret.Value != "s" || got.Body.Pet.ID != 0 {
+		t.Errorf("received %+v", got.Body)
 	}
 
-	// An invalid webhook is not sent.
-	var invalid *client.InvalidRequest
-	if _, err := s.PetAdoptedWebhook(ctx, srv.URL, &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{Name: "Rex"}}}); !errors.As(err, &invalid) {
+	// An invalid webhook is not sent; sent anyway, the receiver rejects it.
+	invalid := &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{Name: "Rex"}}}
+	var invalidReq *client.InvalidRequest
+	if _, err := s.PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", invalid); !errors.As(err, &invalidReq) || invalidReq.Problem.Errors[0].Pointer != "/by" {
 		t.Errorf("invalid webhook: %v", err)
 	}
-	if len(got()) != 1 {
+	if r.last() != any(got) {
 		t.Error("an invalid webhook was sent")
+	}
+	_, err = newSender(t, client.WithoutRequestValidation()).PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", invalid)
+	var unexpected *client.UnexpectedResponse
+	if !errors.As(err, &unexpected) || unexpected.StatusCode != 400 || unexpected.Problem == nil || unexpected.Problem.Errors[0].Pointer != "/by" {
+		t.Errorf("rejected webhook: %v", err)
+	}
+
+	// Routes the receiver does not serve.
+	if _, err := s.PetAdoptedWebhook(ctx, srv.URL+"/hooks/other", req); !errors.As(err, &unexpected) || unexpected.StatusCode != 404 {
+		t.Errorf("unknown route: %v", err)
 	}
 	if _, err := s.PetAdoptedWebhook(ctx, "/relative", req); err == nil {
 		t.Error("sent to a relative URL")
 	}
 }
 
-func TestSendCallbacks(t *testing.T) {
+func TestCallbackRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	status := 204
-	srv, got := newReceiver(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			w.Header().Set("Content-Type", "text/plain")
-			io.WriteString(w, "pong "+r.URL.Query().Get("n"))
-			return
-		}
-		w.WriteHeader(status)
-	})
+	r := &receiver{}
+	srv := newReceiver(t, r)
 	s := newSender(t)
 
-	// The subscription, as the server received it, gives the URLs.
+	// The subscription, as the API received it, gives the URLs.
 	sub := &api.SubscribeRequest{XCallback: oapi.Some(srv.URL + "/ping"), Body: model.SubscribeRequestBody{URL: srv.URL + "/hooks"}}
 	eventURL, err := api.SubscribePetEventCallbackURL(sub)
 	if err != nil || eventURL != srv.URL+"/hooks/pets/POST" {
@@ -125,29 +156,38 @@ func TestSendCallbacks(t *testing.T) {
 	if resp, err := s.SubscribePetEventCallback(ctx, eventURL, event); err != nil || resp != (api.SubscribePetEventCallback204Response{}) {
 		t.Fatalf("event: %+v %v", resp, err)
 	}
-	if r := got(); r[0].path != "/hooks/pets/POST" || r[0].event != "created" || r[0].body != `{"name":"Rex"}` {
-		t.Errorf("received %+v", r[0])
+	if got := r.last().(*api.SubscribePetEventCallbackRequest); got.XEvent != model.SubscribePetEventCallbackXEventCreated || got.Body.Name != "Rex" {
+		t.Errorf("received %+v", got)
 	}
-	status = 410
+	r.gone = true
 	if resp, err := s.SubscribePetEventCallback(ctx, eventURL, event); err != nil || resp != (api.SubscribePetEventCallback410Response{}) {
 		t.Errorf("unsubscribed: %+v %v", resp, err)
 	}
-	status = 500
+	r.fail = true
 	var unexpected *client.UnexpectedResponse
-	if _, err := s.SubscribePetEventCallback(ctx, eventURL, event); !errors.As(err, &unexpected) || unexpected.StatusCode != 500 {
-		t.Errorf("unexpected: %v", err)
+	if _, err := s.SubscribePetEventCallback(ctx, eventURL, event); !errors.As(err, &unexpected) || unexpected.StatusCode != 503 || unexpected.Problem.Detail != "try later" {
+		t.Errorf("problem: %v", err)
 	}
-	// The required header is checked before sending.
+	// The required header is checked before sending, and by the receiver.
+	noEvent := &api.SubscribePetEventCallbackRequest{Body: model.Pet{Name: "Rex"}}
 	var invalid *client.InvalidRequest
-	if _, err := s.SubscribePetEventCallback(ctx, eventURL, &api.SubscribePetEventCallbackRequest{Body: model.Pet{Name: "Rex"}}); !errors.As(err, &invalid) {
+	if _, err := s.SubscribePetEventCallback(ctx, eventURL, noEvent); !errors.As(err, &invalid) {
 		t.Errorf("event without X-Event: %v", err)
+	}
+	_, err = newSender(t, client.WithoutRequestValidation()).SubscribePetEventCallback(ctx, eventURL, noEvent)
+	if !errors.As(err, &unexpected) || unexpected.StatusCode != 400 || unexpected.Problem.Errors[0].Parameter != "X-Event" {
+		t.Errorf("rejected event: %v", err)
 	}
 
 	resp, err := s.SubscribePingCallback(ctx, pingURL, &api.SubscribePingCallbackRequest{N: oapi.Some(int64(3))})
 	if pong, ok := resp.(api.SubscribePingCallback200TextResponse); err != nil || !ok || pong.Body != "pong 3" {
 		t.Errorf("ping: %+v %v", resp, err)
 	}
-	if r := got(); r[len(r)-1].method != "GET" || r[len(r)-1].query != "n=3" {
-		t.Errorf("ping received %+v", r[len(r)-1])
+	if got := r.last().(*api.SubscribePingCallbackRequest); got.N.Value != 3 {
+		t.Errorf("ping received %+v", got)
+	}
+	// The receiver answers the method it does not serve.
+	if _, err := s.PetAdoptedWebhook(ctx, pingURL, &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{Name: "Rex"}, By: "Ann"}}); !errors.As(err, &unexpected) || unexpected.StatusCode != 405 {
+		t.Errorf("wrong method: %v", err)
 	}
 }

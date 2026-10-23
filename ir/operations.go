@@ -219,7 +219,7 @@ type Header struct {
 
 // reservedServerNames are exported identifiers the generated server
 // declares, which types must not take.
-var reservedServerNames = []string{"Handler", "NewServer", "Sender", "NewSender"}
+var reservedServerNames = []string{"Handler", "NewServer", "Sender", "NewSender", "WebhookHandler", "CallbackHandler"}
 
 // buildOperations adds the operations of the document's paths.
 func (b *builder) buildOperations() {
@@ -245,9 +245,6 @@ func (b *builder) buildOperations() {
 		}
 	}
 	b.buildWebhooks(methods)
-	if doc.Webhooks.Len() > 0 {
-		b.warnAt(doc, []string{"webhooks"}, "receiving webhooks is not generated yet, only sending them")
-	}
 	b.model.BasePath, b.model.ServerURL = basePath(doc), serverURL(doc)
 }
 
@@ -380,9 +377,6 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 	case site.kind == PathOperation:
 		b.security(o, op)
 		b.callbacks(o, op, methods)
-		if op.Callbacks.Len() > 0 {
-			b.warnAt(op, []string{"callbacks"}, "receiving callbacks is not generated yet, only sending them")
-		}
 	case len(op.Security) > 0:
 		// The document's security is for the operations the API serves.
 		b.warnAt(op, []string{"security"}, "security requirements of webhooks and callbacks are not applied; add credentials or signatures with client middleware")

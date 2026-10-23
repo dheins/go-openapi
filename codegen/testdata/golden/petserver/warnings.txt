@@ -1,4 +1,2 @@
 315:21: the value of part header "X-Checksum" is not checked yet, only its presence
 407:21: the value of part header "X-Seq" is not checked yet, only its presence
-566:9: receiving callbacks is not generated yet, only sending them
-604:3: receiving webhooks is not generated yet, only sending them

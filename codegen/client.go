@@ -80,8 +80,14 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 				return nil, err
 			}
 		}
-		for _, o := range sentOperations(m) {
+		sent := sentOperations(m)
+		for _, o := range sent {
 			if err := og.operationFiles(o); err != nil {
+				return nil, err
+			}
+		}
+		if len(sent) > 0 {
+			if err := og.receiverFile(sent); err != nil {
 				return nil, err
 			}
 		}
@@ -117,6 +123,31 @@ func (g *generator) operationFiles(o *ir.Operation) error {
 		return fmt.Errorf("generating the client functions of %s: %w", o.Name, err)
 	}
 	g.add(base+"_client.go", content)
+	switch o.Kind {
+	case ir.Webhook:
+		return g.handlerFile(handlerData{o, false, "WebhookHandler"})
+	case ir.Callback:
+		return g.handlerFile(handlerData{o, false, "CallbackHandler"})
+	}
+	return nil
+}
+
+// receiverFile adds receiver.go, the interfaces receivers of the webhooks
+// and callbacks sent implement, to the operations' package.
+func (g *generator) receiverFile(sent []*ir.Operation) error {
+	var data struct{ Webhooks, Callbacks []*ir.Operation }
+	for _, o := range sent {
+		if o.Kind == ir.Webhook {
+			data.Webhooks = append(data.Webhooks, o)
+		} else {
+			data.Callbacks = append(data.Callbacks, o)
+		}
+	}
+	content, err := g.render("receivers", data, nil)
+	if err != nil {
+		return fmt.Errorf("generating receiver.go: %w", err)
+	}
+	g.add("receiver.go", content)
 	return nil
 }
 
@@ -185,6 +216,7 @@ func (f *fileGen) clientFuncs() map[string]any {
 		"clientOps":      f.clientOps,
 		"clientMethod":   f.clientMethod,
 		"senderMethod":   f.senderMethod,
+		"opLabel":        opLabel,
 		"credentialDoc":  credentialDoc,
 		"credentialType": f.credentialType,
 	}

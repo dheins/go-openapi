@@ -1,0 +1,46 @@
+{{- /*
+Template for receivers of webhooks and callbacks: "receivers" (the
+WebhookHandler and CallbackHandler interfaces) goes to the operations'
+package, by both the server and the client.
+*/ -}}
+
+{{define "receivers"}}
+{{- if .Webhooks}}
+// WebhookHandler is implemented by a receiver of the document's webhooks,
+// with one method per webhook. Route a webhook to its handler with
+// server.Config.Handle, at the path the receiver registered with the API:
+//
+//	cfg.Handle(XWebhookOperation, "/hooks/x", HandleXWebhook(cfg, h))
+//
+// The handler decodes and validates each request before calling the
+// method. A method returns one of the webhook's response types, or an
+// error: a *problem.Problem is sent as it is, anything else is logged and
+// answered with 500 Internal Server Error.
+type WebhookHandler interface {
+{{- range .Webhooks}}
+{{handlerDoc .}}
+	{{.Name}}(ctx {{imp "context" "context"}}.Context, req *{{.RequestType}}) ({{.ResponseType}}, error)
+{{- end}}
+}
+{{- end}}
+{{- if .Callbacks}}
+
+// CallbackHandler is implemented by a receiver of the document's
+// callbacks, with one method per callback. Route a callback to its handler
+// with server.Config.Handle, at the path of the URL the receiver gave in
+// the request asking for it:
+//
+//	cfg.Handle(XCallbackOperation, "/callbacks/x", HandleXCallback(cfg, h))
+//
+// The handler decodes and validates each request before calling the
+// method. A method returns one of the callback's response types, or an
+// error: a *problem.Problem is sent as it is, anything else is logged and
+// answered with 500 Internal Server Error.
+type CallbackHandler interface {
+{{- range .Callbacks}}
+{{handlerDoc .}}
+	{{.Name}}(ctx {{imp "context" "context"}}.Context, req *{{.RequestType}}) ({{.ResponseType}}, error)
+{{- end}}
+}
+{{- end}}
+{{- end}}

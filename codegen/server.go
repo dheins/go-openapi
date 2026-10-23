@@ -92,25 +92,18 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		if err := og.operationFiles(o); err != nil {
 			return nil, err
 		}
-		base := strings.TrimSuffix(fileName(o.Name), ".go")
-		handler := struct {
-			*ir.Operation
-			Secured bool
-		}{o, len(m.SecuritySchemes) > 0}
-		content, err := og.render("handler", handler, func(f *fileGen) {
-			f.imp("net/http", "http")
-			f.imp(serverImport, "server")
-		})
-		if err != nil {
-			return nil, fmt.Errorf("generating the handler of %s: %w", o.Name, err)
+		if err := og.handlerFile(handlerData{o, len(m.SecuritySchemes) > 0, "Handler"}); err != nil {
+			return nil, err
 		}
-		og.add(base+"_handler.go", content)
 	}
 	if sent := sentOperations(m); len(sent) > 0 {
 		for _, o := range sent {
 			if err := og.operationFiles(o); err != nil {
 				return nil, err
 			}
+		}
+		if err := og.receiverFile(sent); err != nil {
+			return nil, err
 		}
 		content, err := g.render("sender", sent, func(f *fileGen) {
 			f.imp(clientImport, "client")
@@ -121,6 +114,28 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		g.add("sender.go", content)
 	}
 	return packageFiles(gens, order), nil
+}
+
+// handlerData is what the handler template needs: the operation, whether
+// the handler takes a SecurityHandler, and the interface it calls.
+type handlerData struct {
+	*ir.Operation
+	Secured   bool
+	Interface string
+}
+
+// handlerFile adds the file of the HTTP handler of d.Operation.
+func (g *generator) handlerFile(d handlerData) error {
+	base := strings.TrimSuffix(fileName(d.Name), ".go")
+	content, err := g.render("handler", d, func(f *fileGen) {
+		f.imp("net/http", "http")
+		f.imp(serverImport, "server")
+	})
+	if err != nil {
+		return fmt.Errorf("generating the handler of %s: %w", d.Name, err)
+	}
+	g.add(base+"_handler.go", content)
+	return nil
 }
 
 // packageFiles returns the files of the package generators gens, in
@@ -226,14 +241,19 @@ func opInfo(o *ir.Operation) string {
 }
 
 func handlerDoc(o *ir.Operation) string {
-	lines := []string{fmt.Sprintf("%s handles %s %s.", o.Name, o.Method, o.Path)}
+	first := strings.TrimSuffix(wrapComment(fmt.Sprintf("%s handles %s.", o.Name, opLabel(o))), "\n")
+	doc := "\t" + strings.ReplaceAll(first, "\n", "\n\t")
+	var lines []string
 	if o.Doc != "" {
 		lines = append(lines, "", o.Doc)
 	}
 	if o.Deprecated {
 		lines = append(lines, "", "Deprecated: the operation is marked as deprecated.")
 	}
-	return comment("\t", lines)
+	if len(lines) > 0 {
+		doc += "\n" + comment("\t", lines)
+	}
+	return doc
 }
 
 func paramDoc(p *ir.Param) string {

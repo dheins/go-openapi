@@ -146,7 +146,7 @@ func TestGenerateServer(t *testing.T) {
 		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
 	}
 	for _, name := range []string{
-		"server.go", "doc.go", "openapi.json",
+		"server.go", "doc.go", "openapi.json", "sender.go", "api/receiver.go", "api/pet_adopted_webhook_handler.go",
 		"api/handler.go", "api/list_pets_handler.go", "api/list_pets_operation.go", "api/list_pets_client.go", "api/doc.go",
 		"model/pet.go", "model/doc.go",
 	} {
@@ -230,12 +230,13 @@ func TestGenerateClient(t *testing.T) {
 	if code := run([]string{"generate", "client", "-out", out, petserverDoc}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
 	}
-	for _, name := range []string{"client.go", "api/doc.go", "api/list_pets_operation.go", "api/list_pets_client.go", "model/pet.go"} {
+	for _, name := range []string{"client.go", "api/doc.go", "api/list_pets_operation.go", "api/list_pets_client.go", "model/pet.go",
+		"api/receiver.go", "api/pet_adopted_webhook_handler.go", "api/subscribe_ping_callback_client.go"} {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
 			t.Errorf("%s not generated: %v", name, err)
 		}
 	}
-	for _, name := range []string{"server.go", "openapi.json", "api/handler.go", "api/list_pets_handler.go"} {
+	for _, name := range []string{"server.go", "sender.go", "openapi.json", "api/handler.go", "api/list_pets_handler.go"} {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err == nil {
 			t.Errorf("%s generated for a client", name)
 		}

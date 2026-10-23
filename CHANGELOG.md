@@ -15,6 +15,11 @@
   a function computing its URL from the request that declared it.
   `runtime/client` gains `NewSenderConfig`, `Config.BuildTo`,
   `ParamValue`, `BodyValue` and `MissingValue`.
+- Receiving webhooks and callbacks: operations packages, from both
+  `generate server` and `generate client`, have `WebhookHandler` and
+  `CallbackHandler` interfaces and, per webhook and callback, its HTTP
+  handler (`HandleXWebhook`) and a `server.Operation` (`XWebhookOperation`)
+  to route it with `server.Config.Handle` at the path the receiver chose.
 - `goapi generate client` (`codegen.Client`): a client package with a
   `Client` type, `New`, a `Credentials` struct with a field per security
   scheme, a method per operation, and `DefaultServerURL` from the first
