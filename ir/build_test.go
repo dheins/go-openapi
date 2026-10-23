@@ -493,3 +493,54 @@ components:
 		}
 	}
 }
+
+func TestObjectKeywords(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Closed:
+      type: object
+      properties: {a: {type: string}, b: {type: string}}
+      propertyNames: {not: {const: a}}
+      dependentRequired: {a: [b, c], d: [a]}
+    Base:
+      type: object
+      properties: {a: {type: string}}
+      propertyNames: {maxLength: 3}
+    Derived:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          properties: {b: {type: string}}
+          propertyNames: {minLength: 1}
+          dependentRequired: {a: [b]}
+`, Options{})
+	closed := typeNamed(t, m, "Closed")
+	// Only the dependency between declared properties can be checked.
+	if fmt.Sprint(closed.DependentRequired) != "[{a [b]}]" || len(closed.PropertyNames) != 0 {
+		t.Errorf("Closed = %v, %v", closed.DependentRequired, closed.PropertyNames)
+	}
+	derived := typeNamed(t, m, "Derived")
+	if len(derived.PropertyNames) != 2 || fmt.Sprint(derived.DependentRequired) != "[{a [b]}]" {
+		t.Errorf("Derived = %v, %v", derived.DependentRequired, derived.PropertyNames)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Message)
+	}
+	all := strings.Join(warnings, "\n")
+	for _, want := range []string{
+		"propertyNames other than a string schema is not checked yet",
+		`the undeclared property "c" that "a" requires is not checked`,
+		`dependentRequired of the undeclared property "d" is not checked`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no warning %q in:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "propertyNames is not supported") || strings.Contains(all, "dependentRequired is not supported") {
+		t.Errorf("the keywords are still reported as unsupported:\n%s", all)
+	}
+}

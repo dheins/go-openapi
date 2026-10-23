@@ -18,10 +18,10 @@ shipped in.
 
 ## Models
 
-- Keywords that produce a warning and are not reflected in types: `not`,
+- Keywords that produce a warning and are not checked: `not`,
   `if`/`then`/`else`, `patternProperties`, `prefixItems`, `contains`,
-  `propertyNames`, `dependentSchemas`, `dependentRequired`,
-  `unevaluatedItems`. — later
+  `dependentSchemas`, `unevaluatedItems`, and `propertyNames` schemas
+  that are not string schemas. — later
 - Applying `default` values inside responses and to nested objects of
   parameters (defaults are applied to absent request properties and
   parameters today). — later
@@ -62,6 +62,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `dependentRequired` and `propertyNames` (string schemas) are checked,
+  on structs, including their `allOf` members, and on maps.
 - [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
   schema without a type) and the multipart `encoding` object: per-part
   content types and required part headers, exposed as `oapi.File.Header`.

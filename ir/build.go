@@ -396,6 +396,14 @@ func (b *builder) fillStruct(t *Type) {
 		}
 	}
 
+	// Every allOf member's property names and dependencies apply.
+	for _, part := range parts {
+		names, deps := b.objectKeywords(part)
+		t.PropertyNames = append(t.PropertyNames, names...)
+		t.DependentRequired = append(t.DependentRequired, deps...)
+	}
+	b.checkDeclaredNames(t)
+
 	// Every allOf member's property counts apply; the strictest wins.
 	for _, part := range parts {
 		if n := part.MinProperties; n != nil && (t.MinProperties == nil || *n > *t.MinProperties) {
@@ -425,6 +433,8 @@ func (b *builder) fillStruct(t *Type) {
 		// The 2020-12 way to close an object built with allOf.
 		t.Additional = &Additional{Forbidden: true}
 	}
+	// Which properties can be checked depends on whether the others are kept.
+	t.DependentRequired = b.checkableDependencies(t)
 	b.fillAlternatives(t, alternatives, oneOf, byName)
 
 	if !simple {
@@ -589,7 +599,7 @@ func (b *builder) extraChecks(fieldType *Ref, s *oas.Schema) (*Ref, bool) {
 		checks = arrayChecks(s)
 		leaf = &Ref{Kind: Slice, Elem: anyRef(nil)}
 	case inner.Kind == Map:
-		checks = mapChecks(s)
+		checks = b.withObjectKeywords(mapChecks(s), s)
 		leaf = &Ref{Kind: Map, Elem: anyRef(nil)}
 	default:
 		// Named types, booleans and any: only enum and const apply, which
@@ -831,7 +841,7 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 		if ap := s.AdditionalProperties; ap != nil && ap.Bool == nil {
 			value = b.use(ap, hint+"Value", root)
 		}
-		r = &Ref{Kind: Map, Elem: value, Checks: mapChecks(s)}
+		r = &Ref{Kind: Map, Elem: value, Checks: b.withObjectKeywords(mapChecks(s), s)}
 	default:
 		r = anyRef(valueChecks(s))
 	}
@@ -1577,9 +1587,7 @@ func (b *builder) warnUnsupported(s *oas.Schema) {
 	check(s.PatternProperties != nil, "patternProperties", "patternProperties "+later)
 	check(s.PrefixItems != nil, "prefixItems", "prefixItems "+later)
 	check(s.Contains != nil, "contains", "contains "+later)
-	check(s.PropertyNames != nil, "propertyNames", "propertyNames "+later)
 	check(s.DependentSchemas != nil, "dependentSchemas", "dependentSchemas "+later)
-	check(s.DependentRequired != nil, "dependentRequired", "dependentRequired "+later)
 	check(s.UnevaluatedItems != nil, "unevaluatedItems", "unevaluatedItems "+later)
 }
 

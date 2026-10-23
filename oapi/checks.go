@@ -13,6 +13,12 @@ import (
 	"unicode/utf8"
 )
 
+// HasKey reports whether m has the key k.
+func HasKey[K ~string, V any](m map[K]V, k K) bool {
+	_, ok := m[k]
+	return ok
+}
+
 // StringLength returns the length of s as JSON Schema counts it: in
 // Unicode code points, not bytes.
 func StringLength(s string) int {

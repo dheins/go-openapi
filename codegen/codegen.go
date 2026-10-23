@@ -268,6 +268,7 @@ func (f *fileGen) funcs() template.FuncMap {
 		"unionAppendStmts":  f.unionAppendStmts,
 
 		"alternativeMethods": f.alternativeMethods,
+		"propertyNameMethod": f.propertyNameMethod,
 		"validateStmts":      f.validateStmts,
 		"enumMessage":        enumMessage,
 		"variantDoc":         variantDoc,

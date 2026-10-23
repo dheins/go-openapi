@@ -4,6 +4,13 @@
 
 ### Added
 
+- `dependentRequired` and `propertyNames` are checked instead of being
+  warned about: a present property's dependencies must be present
+  (`/billingAddress: required when "creditCard" is present`), and property
+  names must pass a `propertyNames` string schema (`/Bad_key: property
+  name: must match the pattern ...`), for structs, their `allOf` members
+  and maps. Names of undeclared properties a struct does not keep are
+  checked while decoding.
 - Multipart file parts written the OpenAPI 3.1 way: a string with a
   `contentMediaType`, or a property without a type, is an `oapi.File`
   (only in `multipart/form-data` bodies; elsewhere such a string stays a

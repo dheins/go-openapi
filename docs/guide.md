@@ -109,7 +109,12 @@ if name, ok := pet.Nickname.Get(); ok { ... }  // read
 
 `json.Unmarshal` into a generated type reports every problem with a JSON
 pointer, and `Validate` checks the remaining constraints (lengths,
-patterns, bounds, formats, enums, unique items, ...). Patterns are
+patterns, bounds, formats, enums, unique items, property counts,
+`dependentRequired`, and `propertyNames` for string schemas, ...).
+A property name that fails `propertyNames` is reported at the property
+(`/Bad_key: property name: must match the pattern ...`); names of
+undeclared properties the type does not keep are checked while decoding,
+since they are dropped then. Patterns are
 ECMA-262: those Go's `regexp` cannot compile (lookarounds,
 backreferences) are matched by a backtracking engine, with a 100 ms limit
 per match so that a crafted value cannot tie up the server.

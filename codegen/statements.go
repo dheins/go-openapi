@@ -33,7 +33,10 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 		w(1, "var problems [%d]error", n)
 	}
 	a := t.Additional
-	if a != nil {
+	// Undeclared names the decoder drops are checked against
+	// propertyNames here; Validate checks those it keeps.
+	checkNames := a == nil && len(t.PropertyNames) > 0
+	if a != nil || checkNames {
 		w(1, "var unknown []oapi.NamedError")
 	}
 	w(1, "for obj.Next() {")
@@ -74,6 +77,9 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 	switch {
 	case a == nil:
 		w(3, "obj.Skip()")
+		if checkNames {
+			w(3, "unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: v.checkPropertyName(obj.Name())})")
+		}
 	case a.Forbidden:
 		w(3, "obj.Skip()")
 		w(3, "unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: &oapi.ValidationError{Message: \"property is not allowed\"}})")
@@ -110,7 +116,7 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 		// The union reads the whole object's text, which DecodeJSON has.
 		w(1, "errs.Nested(\"\", v.%s.DecodeJSON(data, dir))", iu.Name)
 	}
-	if a != nil {
+	if a != nil || checkNames {
 		w(1, "oapi.AddNamed(&errs, unknown)")
 	}
 	w(1, "if err := errs.Err(); err != nil {")
@@ -232,8 +238,13 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 			v.line(1, "errs.Nested(\"\", m.%s.Validate())", iu.Name)
 		}
 		v.propertyCount(t)
+		v.dependencies(t)
+		v.declaredNames(t)
 		if a := t.Additional; a != nil && !a.Forbidden {
 			inner := v.sub()
+			if len(t.PropertyNames) > 0 {
+				inner.line(2, "errs.Nested(oapi.Field(\"\", name), m.checkPropertyName(name))")
+			}
 			inner.ref("m."+a.FieldName+"[name]", `oapi.Field("", name)`, a.Value, "Value", 2)
 			if inner.b.Len() > 0 {
 				v.line(1, "for _, name := range %s.Sorted(%s.Keys(m.%s)) {", f.imp("slices", "slices"), f.imp("maps", "maps"), a.FieldName)
@@ -249,6 +260,124 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 		v.matches(t, "v")
 	}
 	return strings.TrimSuffix(v.b.String(), "\n")
+}
+
+// mapDependencies checks dependentRequired on the keys of a map.
+func (v *validator) mapDependencies(expr, path string, deps []ir.Dependency, depth int) {
+	for _, d := range deps {
+		v.line(depth, "if oapi.HasKey(%s, %q) {", expr, d.Property)
+		for _, r := range d.Required {
+			v.line(depth+1, "if !oapi.HasKey(%s, %q) {", expr, r)
+			v.line(depth+2, "errs.Add(oapi.Field(%s, %q), %q)", path, r, fmt.Sprintf("required when %q is present", d.Property))
+			v.line(depth+1, "}")
+		}
+		v.line(depth, "}")
+	}
+}
+
+// presence returns the condition under which a value, recv, has the
+// property of field fd, or "" if it always has it.
+func presence(fd *ir.Field, recv string) string {
+	if fd.Required {
+		return ""
+	}
+	switch fd.Type.Kind {
+	case ir.Optional:
+		return recv + "." + fd.Name + ".Set"
+	case ir.Pointer, ir.Any:
+		return recv + "." + fd.Name + " != nil"
+	case ir.Slice, ir.Map:
+		return "len(" + recv + "." + fd.Name + ") > 0"
+	}
+	return ""
+}
+
+// has returns the condition under which a struct value m has the property
+// name: a declared field's presence, or a key of its additional
+// properties; "true" for a property that is always there, and "false"
+// for one it cannot have.
+func has(t *ir.Type, name string) string {
+	for _, fd := range t.Fields {
+		if fd.JSONName == name {
+			if p := presence(fd, "m"); p != "" {
+				return p
+			}
+			return "true"
+		}
+	}
+	if a := t.Additional; a != nil && !a.Forbidden {
+		return fmt.Sprintf("oapi.HasKey(m.%s, %q)", a.FieldName, name)
+	}
+	return "false"
+}
+
+// negate returns the negation of a condition.
+func negate(cond string) string {
+	if strings.ContainsAny(cond, " ") {
+		return "!(" + cond + ")"
+	}
+	return "!" + cond
+}
+
+// dependencies checks dependentRequired: when a property is present, the
+// properties it requires must be too.
+func (v *validator) dependencies(t *ir.Type) {
+	for _, d := range t.DependentRequired {
+		inner := v.sub()
+		for _, r := range d.Required {
+			switch cond := has(t, r); cond {
+			case "true":
+			case "false":
+				inner.line(2, "errs.Add(%s, %q)", pointerLiteral(r), fmt.Sprintf("required when %q is present", d.Property))
+			default:
+				inner.line(2, "if %s {", negate(cond))
+				inner.line(3, "errs.Add(%s, %q)", pointerLiteral(r), fmt.Sprintf("required when %q is present", d.Property))
+				inner.line(2, "}")
+			}
+		}
+		if inner.b.Len() == 0 {
+			continue
+		}
+		v.line(1, "if %s {", has(t, d.Property))
+		v.b.WriteString(inner.b.String())
+		v.line(1, "}")
+	}
+}
+
+// declaredNames reports the declared properties whose names fail
+// propertyNames, when a value has them.
+func (v *validator) declaredNames(t *ir.Type) {
+	for _, fd := range t.Fields {
+		if !fd.NameViolates {
+			continue
+		}
+		cond := presence(fd, "m")
+		if cond == "" {
+			v.line(1, "errs.Nested(%s, m.checkPropertyName(%q))", pointerLiteral(fd.JSONName), fd.JSONName)
+			continue
+		}
+		v.line(1, "if %s {", cond)
+		v.line(2, "errs.Nested(%s, m.checkPropertyName(%q))", pointerLiteral(fd.JSONName), fd.JSONName)
+		v.line(1, "}")
+	}
+}
+
+// propertyNameMethod returns the checkPropertyName method of a struct
+// with propertyNames, which checks a name as the schemas require.
+func (f *fileGen) propertyNameMethod(t *ir.Type) string {
+	if t.Kind != ir.Struct || len(t.PropertyNames) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n// checkPropertyName checks a property name against propertyNames.\n")
+	fmt.Fprintf(&b, "func (%s) checkPropertyName(name string) error {\n\tvar errs oapi.ValidationErrors\n", t.Name)
+	v := &validator{file: f, typeName: t.Name}
+	for _, c := range t.PropertyNames {
+		v.ref("name", `""`, &ir.Ref{Kind: ir.Builtin, Name: "string", Checks: c}, "Name", 1)
+	}
+	b.WriteString(v.b.String())
+	b.WriteString("\treturn oapi.PropertyName(errs.Err())\n}")
+	return b.String()
 }
 
 // matches checks that the value, recv, matches exactly one (oneOf) or at
@@ -448,8 +577,21 @@ func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 		}
 	case ir.Map:
 		v.counts(depth, "len("+expr+")", path, c.MinProperties, c.MaxProperties, "property")
+		if c != nil {
+			v.mapDependencies(expr, path, c.DependentRequired, depth)
+		}
 		key := fmt.Sprintf("k%d", depth)
 		inner := v.sub()
+		if c != nil && len(c.PropertyNames) > 0 {
+			// The checks of a name, as a closure: they report to errs.
+			inner.line(depth+1, "errs.Nested(oapi.Field(%s, %s), oapi.PropertyName(func(name string) error {", path, key)
+			inner.line(depth+2, "var errs oapi.ValidationErrors")
+			for _, nc := range c.PropertyNames {
+				inner.ref("name", `""`, &ir.Ref{Kind: ir.Builtin, Name: "string", Checks: nc}, hint+"Name", depth+2)
+			}
+			inner.line(depth+2, "return errs.Err()")
+			inner.line(depth+1, "}(%s)))", key)
+		}
 		inner.ref(expr+"["+key+"]", fmt.Sprintf("oapi.Field(%s, %s)", path, key), r.Elem, hint+"Value", depth+1)
 		if inner.b.Len() > 0 {
 			v.line(depth, "for _, %s := range %s.Sorted(%s.Keys(%s)) {", key, v.file.imp("slices", "slices"), v.file.imp("maps", "maps"), expr)

@@ -73,6 +73,21 @@ func (es ValidationErrors) Err() error {
 	return es
 }
 
+// PropertyName marks the problems found by checking a property name as a
+// string as being about the name, so that "length must be at most 8" at
+// the property reads "property name: length must be at most 8".
+func PropertyName(err error) error {
+	var list ValidationErrors
+	if !errors.As(err, &list) {
+		return err
+	}
+	out := make(ValidationErrors, len(list))
+	for i, e := range list {
+		out[i] = &ValidationError{Path: e.Path, Message: "property name: " + e.Message}
+	}
+	return out.Err()
+}
+
 // Field returns the JSON pointer of property name below path.
 func Field(path, name string) string {
 	return path + "/" + pointerEscaper.Replace(name)

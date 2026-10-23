@@ -100,6 +100,7 @@ func (m {{.Name}}) Validate() error {
 	return errs.Err()
 }
 {{- alternativeMethods .}}
+{{- propertyNameMethod .}}
 {{- end}}
 
 {{define "union"}}

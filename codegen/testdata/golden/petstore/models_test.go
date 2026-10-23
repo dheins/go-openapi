@@ -786,3 +786,40 @@ func TestDecodeProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestDependentRequiredAndPropertyNames(t *testing.T) {
+	decode := func(data string, v interface{ Validate() error }) error {
+		t.Helper()
+		if err := json.Unmarshal([]byte(data), v); err != nil {
+			return err
+		}
+		return v.Validate()
+	}
+	var p Payment
+	assertMessages(t, decode(`{"creditCard": "4111", "name": "Ann", "nickname": "A", "zip": "1"}`, &p),
+		`/billingAddress: required when "creditCard" is present`)
+	if err := decode(`{"creditCard": "4111", "billingAddress": "Main St"}`, &p); err != nil {
+		t.Errorf("valid payment: %v", err)
+	}
+	// Undeclared names are kept and checked; so is a declared name that
+	// propertyNames rules out, when it is there.
+	assertMessages(t, decode(`{"name": "Ann", "Legacy_ID": "7", "Bad_key": "x"}`, &p),
+		`/nickname: required when "name" is present`,
+		`/Legacy_ID: property name: must match the pattern ^[a-z][a-zA-Z]*$`,
+		`/Bad_key: property name: must match the pattern ^[a-z][a-zA-Z]*$`)
+
+	var d Dictionary
+	assertMessages(t, decode(`{"min": 1, "toolong": 2, "A": 3}`, &d),
+		`/max: required when "min" is present`,
+		`/A: property name: must match the pattern ^[a-z]+$`,
+		`/toolong: property name: length must be at most 5`)
+	var valid Dictionary
+	if err := decode(`{"min": 1, "max": 2}`, &valid); err != nil {
+		t.Errorf("valid dictionary: %v", err)
+	}
+
+	// Strict keeps no undeclared properties: their names are checked
+	// while decoding.
+	var s Strict
+	assertMessages(t, json.Unmarshal([]byte(`{"id": 1, "x": 2, "ok": 3}`), &s), `/x: property name: length must be at least 2`)
+}

@@ -439,3 +439,41 @@ components:
     Password:
       type: string
       pattern: "^(?=.*[0-9])(?=.*[A-Z]).{8,}$"
+    Payment:
+      description: dependentRequired and propertyNames on an object that keeps
+        additional properties.
+      type: object
+      properties:
+        name:
+          type: string
+        creditCard:
+          type: string
+        billingAddress:
+          type: string
+        Legacy_ID:
+          type: string
+      additionalProperties:
+        type: string
+      propertyNames:
+        pattern: "^[a-z][a-zA-Z]*$"
+      dependentRequired:
+        creditCard: [billingAddress]
+        name: [nickname]
+    Dictionary:
+      description: propertyNames and dependentRequired on a map.
+      type: object
+      additionalProperties:
+        type: integer
+      propertyNames:
+        maxLength: 5
+        pattern: "^[a-z]+$"
+      dependentRequired:
+        min: [max]
+    Strict:
+      description: Undeclared names are dropped, but checked first.
+      type: object
+      properties:
+        id:
+          type: integer
+      propertyNames:
+        minLength: 2
