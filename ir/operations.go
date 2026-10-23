@@ -44,8 +44,18 @@ type Operation struct {
 	Security [][]*SecurityUse
 
 	// Unsupported says why the operation is not generated; the server
-	// answers it with 501 Not Implemented.
+	// answers an operation of its paths with 501 Not Implemented.
 	Unsupported string
+
+	// Kind says whether the API serves the operation or sends it, as a
+	// webhook or callback. A webhook has its name in Webhook and no Path;
+	// a callback has its URL in Callback, and Path is that URL's
+	// expression.
+	Kind     OperationKind
+	Webhook  string
+	Callback *CallbackURL
+	// Callbacks are the operations of the callbacks this one declares.
+	Callbacks []*Operation
 }
 
 // SecurityScheme is a security scheme a generated server checks through
@@ -214,25 +224,27 @@ var reservedServerNames = []string{"Handler", "NewServer"}
 // buildOperations adds the operations of the document's paths.
 func (b *builder) buildOperations() {
 	doc := b.spec.Document
-	if doc.Paths == nil {
-		return
-	}
+	// Operations, webhooks and callbacks are all functions of the
+	// operations' package, so they share one namespace.
 	methods := namespace{}
-	mux := http.NewServeMux()
-	for path, item := range doc.Paths.Items.All() {
-		pi := item.Deref()
-		if pi == nil {
-			continue
-		}
-		for method, op := range pi.Operations() {
-			o := b.operation(path, strings.ToUpper(method), pi, op, methods)
-			b.register(mux, o)
-			b.model.Operations = append(b.model.Operations, o)
-		}
-		if len(pi.Servers) > 0 {
-			b.warnAt(pi, []string{"servers"}, "path-level servers are not used by the generated server")
+	if doc.Paths != nil {
+		mux := http.NewServeMux()
+		for path, item := range doc.Paths.Items.All() {
+			pi := item.Deref()
+			if pi == nil {
+				continue
+			}
+			for method, op := range pi.Operations() {
+				o := b.operation(path, strings.ToUpper(method), pi, op, methods, opSite{fallback: strings.ToLower(method) + " " + path})
+				b.register(mux, o)
+				b.model.Operations = append(b.model.Operations, o)
+			}
+			if len(pi.Servers) > 0 {
+				b.warnAt(pi, []string{"servers"}, "path-level servers are not used by the generated server")
+			}
 		}
 	}
+	b.buildWebhooks(methods)
 	if doc.Webhooks.Len() > 0 {
 		b.warnAt(doc, []string{"webhooks"}, "webhooks are not generated yet")
 	}
@@ -294,30 +306,37 @@ func (b *builder) register(mux *http.ServeMux, o *Operation) {
 	mux.Handle(o.Pattern, http.NotFoundHandler())
 }
 
-func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Operation, methods namespace) *Operation {
-	o := &Operation{Method: method, Path: path, ID: op.OperationID, Deprecated: op.Deprecated}
+func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Operation, methods namespace, site opSite) *Operation {
+	o := &Operation{Method: method, Path: path, ID: op.OperationID, Deprecated: op.Deprecated, Kind: site.kind}
 	o.Location, _ = b.spec.Location(op)
 	o.Doc = strings.TrimSpace(strings.Join(nonEmpty(op.Summary, op.Description), "\n\n"))
 
 	name := op.OperationID
 	if name == "" {
-		name = strings.ToLower(method) + " " + path
+		name = site.fallback
 	}
-	o.Name = methods.claim(GoName(name))
+	o.Name = methods.claim(GoName(name) + site.suffix)
 	o.RequestType = b.names.claim(o.Name + "Request")
 	o.ResponseType = b.names.claim(o.Name + "Response")
 
-	var err error
-	o.Pattern, o.Segments, err = routePattern(method, path)
-	o.Route = strings.TrimPrefix(o.Pattern, method+" ")
-	if err != nil {
-		o.Unsupported = err.Error()
-		b.warnOperation(o, err.Error())
-		return o
+	// Webhooks and callbacks are sent to a URL, not routed.
+	if site.kind == PathOperation {
+		var err error
+		o.Pattern, o.Segments, err = routePattern(method, path)
+		o.Route = strings.TrimPrefix(o.Pattern, method+" ")
+		if err != nil {
+			o.Unsupported = err.Error()
+			b.warnOperation(o, err.Error())
+			return o
+		}
 	}
 
 	fields := namespace{"Body": true, "ContentType": true}
 	for _, p := range effectiveParameters(pi, op) {
+		if site.kind != PathOperation && p.Deref().In == "path" {
+			b.unsupported(o, p, "a webhook or callback has no path parameters")
+			continue
+		}
 		param, why := b.param(o, p.Deref(), fields)
 		if why != "" {
 			b.unsupported(o, p, why)
@@ -357,9 +376,19 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 		b.warnOperation(o, o.Unsupported)
 	}
 
-	b.security(o, op)
-	if op.Callbacks.Len() > 0 {
-		b.warnAt(op, []string{"callbacks"}, "callbacks are not generated yet")
+	switch {
+	case site.kind == PathOperation:
+		b.security(o, op)
+		b.callbacks(o, op, methods)
+		if op.Callbacks.Len() > 0 {
+			b.warnAt(op, []string{"callbacks"}, "callbacks are not generated yet")
+		}
+	case len(op.Security) > 0:
+		// The document's security is for the operations the API serves.
+		b.warnAt(op, []string{"security"}, "security requirements of webhooks and callbacks are not applied; add credentials or signatures with client middleware")
+	}
+	if site.kind != PathOperation && op.Callbacks.Len() > 0 {
+		b.warnAt(op, []string{"callbacks"}, "callbacks of webhooks and callbacks are not generated")
 	}
 	return o
 }
@@ -368,6 +397,10 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 func (b *builder) unsupported(o *Operation, obj any, why string) {
 	if o.Unsupported == "" {
 		o.Unsupported = why
+	}
+	if o.Kind != PathOperation {
+		b.warnAt(obj, nil, why+"; it is not generated")
+		return
 	}
 	b.warnAt(obj, nil, why+"; the operation is answered with 501 Not Implemented")
 }

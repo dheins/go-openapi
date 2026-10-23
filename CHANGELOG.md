@@ -4,6 +4,11 @@
 
 ### Added
 
+- `ir` maps webhooks (`Model.Webhooks`) and callbacks
+  (`Operation.Callbacks`) to operations, with their callback URLs parsed
+  into text and request values (`$method`, `$request.path`, `.query`,
+  `.header` and `.body#/pointer`); other expressions are reported. They
+  are not generated yet.
 - `goapi generate client` (`codegen.Client`): a client package with a
   `Client` type, `New`, a `Credentials` struct with a field per security
   scheme, a method per operation, and `DefaultServerURL` from the first
