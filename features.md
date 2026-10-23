@@ -18,9 +18,10 @@ shipped in.
 
 ## Models
 
-- Keywords that produce a warning and are not checked:
-  `patternProperties`, `prefixItems`, `unevaluatedItems`, `propertyNames`
-  schemas that are not string schemas, and subschemas (of `not`, `if`,
+- Keywords that produce a warning and are not checked: `prefixItems`,
+  `unevaluatedItems`, `propertyNames` schemas that are not string schemas,
+  `patternProperties` whose patterns have different schemas on an object,
+  and subschemas (of `not`, `if`,
   `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
   `additionalProperties` or property counts of a struct; these keywords on
   enums and unions. — later
@@ -68,7 +69,10 @@ Unreleased:
   on structs, including their `allOf` members, and on maps. (50b65ed)
 - [x] `not`, `if`/`then`/`else`, `contains` (`minContains`, `maxContains`)
   and `dependentSchemas` are checked, with subschemas checked against the
-  value's Go type.
+  value's Go type. (4dfcc72)
+- [x] `patternProperties`: undeclared matching properties are kept in a
+  typed `PatternProperties` map, declared ones and map keys are checked
+  against the pattern's subschema.
 - [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
   schema without a type) and the multipart `encoding` object: per-part
   content types and required part headers, exposed as `oapi.File.Header`.

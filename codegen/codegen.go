@@ -234,6 +234,35 @@ type fileGen struct {
 	gen      *generator
 	imports  map[string]string // path -> package name
 	varDecls []string
+	// patterns are the variables of the patterns of patternProperties,
+	// by type and pattern.
+	patterns map[[2]string]string
+}
+
+// patternVar returns the variable holding pattern p, compiled, for the
+// properties of type typeName, declaring it on first use.
+func (f *fileGen) patternVar(typeName, p string) string {
+	key := [2]string{typeName, p}
+	if v, ok := f.patterns[key]; ok {
+		return v
+	}
+	if f.patterns == nil {
+		f.patterns = map[[2]string]string{}
+	}
+	v := f.declareVar(lowerFirst(typeName)+"PropertyPattern",
+		fmt.Sprintf("%s.MustCompilePattern(%s)", f.imp(oapiImport, "oapi"), strconv.Quote(p)))
+	f.patterns[key] = v
+	return v
+}
+
+// matchesPatterns returns the condition under which name, a Go string
+// expression, matches one of the patterns of type typeName.
+func (f *fileGen) matchesPatterns(typeName string, patterns []string, name string) string {
+	conds := make([]string, len(patterns))
+	for i, p := range patterns {
+		conds[i] = f.patternVar(typeName, p) + ".Check(" + name + ") == nil"
+	}
+	return strings.Join(conds, " || ")
 }
 
 func (f *fileGen) imp(path, name string) string {

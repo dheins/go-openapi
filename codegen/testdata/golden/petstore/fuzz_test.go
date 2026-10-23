@@ -41,7 +41,7 @@ func FuzzModels(f *testing.F) {
 		`{"value": "a", "next": {"value": "b", "next": null}}`, `{"kind": "extensible", "a": 1}`,
 		`{"id": 1, "parent": {"id": 2}, "children": [{"name": "c"}]}`,
 		`{"kind": "automobile", "wheels": 4, "doors": 3}`, `{"vehicles": [{"kind": "Bike", "wheels": 2, "gears": 1}]}`,
-		`{"name": "a", "email": "a@example.com"}`, `{"code": "ABC"}`, `["a"]`, `true`, `"2026-10-12T08:30:00Z"`, `"auto"`, `3`, `{"species": "pup", "ageWeeks": 8}`, `{"hounds": [{"species": "Mutt"}]}`, `{"id": 1, "kind": "flat", "floor": 2}`, `{"title": "t", "url": "u"}`, `{"title": "t", "kind": "house", "rooms": 1}`, `{"creditCard": "4", "Bad_key": "x", "name": "n"}`, `{"min": 1, "toolong": 2}`, `{"id": 1, "x": 2}`, `{"country": "US", "postalCode": "1234"}`, `{"cancelled": true, "refunded": true}`, `{"lines": [{"gift": true}], "flags": ["urgent"]}`, `{"creditCard": "4"}`, `12.5`, `"Abcd"`,
+		`{"name": "a", "email": "a@example.com"}`, `{"code": "ABC"}`, `["a"]`, `true`, `"2026-10-12T08:30:00Z"`, `"auto"`, `3`, `{"species": "pup", "ageWeeks": 8}`, `{"hounds": [{"species": "Mutt"}]}`, `{"id": 1, "kind": "flat", "floor": 2}`, `{"title": "t", "url": "u"}`, `{"title": "t", "kind": "house", "rooms": 1}`, `{"creditCard": "4", "Bad_key": "x", "name": "n"}`, `{"min": 1, "toolong": 2}`, `{"id": 1, "x": 2}`, `{"country": "US", "postalCode": "1234"}`, `{"cancelled": true, "refunded": true}`, `{"lines": [{"gift": true}], "flags": ["urgent"]}`, `{"creditCard": "4"}`, `12.5`, `"Abcd"`, `{"name": "n", "x-a": "b", "other": 1}`, `{"X-A": "", "Content-Type": "html"}`, `{"id": 1, "l_home": {"code": "AB"}}`,
 	} {
 		f.Add([]byte(seed))
 	}
@@ -80,5 +80,8 @@ func FuzzModels(f *testing.F) {
 		roundTrip[Checkout](t, data)
 		roundTrip[Rating](t, data)
 		roundTrip[Grade](t, data)
+		roundTrip[Extensions](t, data)
+		roundTrip[HeaderMap](t, data)
+		roundTrip[Labelled](t, data)
 	})
 }

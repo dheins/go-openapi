@@ -93,7 +93,7 @@ func TestGenerateModel(t *testing.T) {
 func TestGenerateReportsWarnings(t *testing.T) {
 	dir := t.TempDir()
 	doc := filepath.Join(dir, "openapi.yaml")
-	err := os.WriteFile(doc, []byte("openapi: 3.2.0\ninfo: {title: t, version: v}\ncomponents:\n  schemas:\n    Tags:\n      patternProperties: {\"^x-\": {type: string}}\n"), 0o644)
+	err := os.WriteFile(doc, []byte("openapi: 3.2.0\ninfo: {title: t, version: v}\ncomponents:\n  schemas:\n    A:\n      $ref: \"#/components/schemas/B\"\n    B:\n      $ref: \"#/components/schemas/A\"\n"), 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestGenerateReportsWarnings(t *testing.T) {
 	if code := run([]string{"generate", "model", "-out", filepath.Join(dir, "m"), doc}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
 	}
-	if !strings.Contains(stderr.String(), "openapi.yaml:6:26: warning: patternProperties is not supported yet") {
+	if !strings.Contains(stderr.String(), "openapi.yaml:6:7: warning: reference loop without a concrete schema") {
 		t.Errorf("warnings not reported:\n%s", &stderr)
 	}
 }

@@ -4,6 +4,11 @@
 
 ### Added
 
+- `patternProperties`: a struct keeps its undeclared properties whose
+  names match a pattern in a `PatternProperties map[string]T` field, typed
+  by the pattern's schema, decoded, validated and encoded like additional
+  properties; declared properties and map keys whose names match are
+  checked against the pattern's subschema.
 - `not`, `if`/`then`/`else`, `contains` with `minContains` and
   `maxContains`, and `dependentSchemas` are checked by `Validate` instead
   of being warned about. Subschemas are checked against the value's Go
@@ -121,6 +126,9 @@
   validation, with a warning at generation time; requests with them are
   answered with 400 now. A `oneOf` member with `not` can make a value
   match one member where it matched several.
+- Properties whose names match a pattern of `patternProperties` are no
+  longer additional properties: `additionalProperties: false` allows them,
+  and objects that keep no additional properties keep them.
 - Documents, and the files they refer to, that repeat a key in a mapping
   no longer load: `goapi validate` and `goapi generate` report the key
   and where it is repeated.

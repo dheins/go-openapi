@@ -887,3 +887,40 @@ func TestSubschemaKeywords(t *testing.T) {
 		t.Errorf("grade Bcdef: %v", err)
 	}
 }
+
+func TestPatternProperties(t *testing.T) {
+	// Names matching ^x- are kept and checked; others are not allowed.
+	var e Extensions
+	assertMessages(t, json.Unmarshal([]byte(`{"name": "n", "x-a": "b", "other": 1}`), &e), "/other: property is not allowed")
+	if err := json.Unmarshal([]byte(`{"name": "n", "x-a": "b", "x-internal": "i"}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.PatternProperties["x-a"] != "b" || e.XInternal.Value != "i" {
+		t.Errorf("extensions = %+v", e)
+	}
+	if out, err := json.Marshal(e); err != nil || string(out) != `{"name":"n","x-internal":"i","x-a":"b"}` {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+	e.PatternProperties["x-long"] = "0123456789a"
+	e.XInternal = oapi.Some("0123456789a")
+	// A declared property whose name matches is checked too.
+	assertMessages(t, e.Validate(), "/x-internal: length must be at most 10", "/x-long: length must be at most 10")
+
+	// On a map, each pattern's subschema applies to the keys it matches.
+	var h HeaderMap
+	if err := json.Unmarshal([]byte(`{"X-A": "", "Content-Type": "html", "Other": ""}`), &h); err != nil {
+		t.Fatal(err)
+	}
+	assertMessages(t, h.Validate(), `/Content-Type: must be one of "json", "xml"`, "/X-A: length must be at least 1")
+
+	// Matching values are typed, and validated as their type.
+	var l Labelled
+	if err := json.Unmarshal([]byte(`{"id": 1, "l_home": {"code": "ABC"}, "Other": 3}`), &l); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l.PatternProperties["l_home"]; !ok || len(l.PatternProperties) != 1 {
+		t.Errorf("labelled = %+v", l)
+	}
+	assertMessages(t, l.Validate(), "/l_home/code: length must be at most 2")
+	assertMessages(t, json.Unmarshal([]byte(`{"l_home": 3}`), &l), "/l_home: expected object, got number")
+}

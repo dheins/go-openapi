@@ -103,7 +103,7 @@ func nameFails(name string, c *Checks) bool {
 func (b *builder) checkableDependencies(t *Type) []Dependency {
 	kept := t.Additional != nil && !t.Additional.Forbidden
 	known := func(name string) bool {
-		if kept {
+		if kept || t.Patterns != nil && matchesAny(t.Patterns.Patterns, name) {
 			return true
 		}
 		for _, f := range t.Fields {
@@ -138,4 +138,96 @@ func (b *builder) checkableDependencies(t *Type) []Dependency {
 		}
 	}
 	return out
+}
+
+// patternList returns the patterns of patternProperties in s and its
+// allOf members (parts) with their schemas, leaving out and reporting
+// patterns that do not compile.
+func (b *builder) patternList(parts []*oas.Schema) ([]string, []*oas.Schema) {
+	var patterns []string
+	var schemas []*oas.Schema
+	for _, part := range parts {
+		for p, ps := range part.PatternProperties.All() {
+			if _, err := oapi.CompilePattern(p); err != nil {
+				b.warn(part, []string{"patternProperties", p}, "the pattern is not a valid ECMA-262 regular expression; its properties are not checked")
+				continue
+			}
+			patterns = append(patterns, p)
+			schemas = append(schemas, ps)
+		}
+	}
+	return patterns, schemas
+}
+
+// fillPatterns keeps the undeclared properties of t that match a pattern
+// of patternProperties in a map field, typed by the patterns' schema, and
+// checks the declared properties that match one against its subschema.
+// Patterns with different schemas would need values of different types
+// in one map: they are reported and not applied.
+func (b *builder) fillPatterns(t *Type, parts []*oas.Schema, fieldNames namespace) {
+	patterns, schemas := b.patternList(parts)
+	if len(patterns) == 0 {
+		return
+	}
+	for _, ps := range schemas[1:] {
+		if !sameSchema(deref(schemas[0]), deref(ps)) {
+			b.warn(t.Schema, []string{"patternProperties"}, "patternProperties with different schemas for different patterns are not checked yet")
+			return
+		}
+	}
+	for _, f := range t.Fields {
+		for i, p := range patterns {
+			if !matchesAny([]string{p}, f.JSONName) {
+				continue
+			}
+			c, why := b.constraint(f.Type, schemas[i], map[*oas.Schema]bool{})
+			if why != "" {
+				b.warn(t.Schema, []string{"patternProperties", p}, fmt.Sprintf("the pattern's subschema is not checked on the property %q yet: %s", f.JSONName, why))
+				continue
+			}
+			if c != nil {
+				t.PatternFields = append(t.PatternFields, FieldConstraint{Field: f, Constraint: c})
+			}
+		}
+	}
+	t.Patterns = &PatternProperties{
+		FieldName: fieldNames.claim("PatternProperties"),
+		Value:     b.use(schemas[0], t.Name+"PatternValue", t.Root),
+		Patterns:  patterns,
+	}
+}
+
+// mapPatterns returns the patternProperties of s for a map with values
+// of type value: the subschema of each pattern as a constraint on the
+// values of the keys that match it.
+func (b *builder) mapPatterns(value *Ref, s *oas.Schema) []PatternRule {
+	patterns, schemas := b.patternList([]*oas.Schema{s})
+	var rules []PatternRule
+	for i, p := range patterns {
+		c, why := b.constraint(value, schemas[i], map[*oas.Schema]bool{})
+		if why != "" {
+			b.warn(s, []string{"patternProperties", p}, "the pattern's subschema is not checked yet: "+why)
+			continue
+		}
+		if c != nil {
+			rules = append(rules, PatternRule{Pattern: p, Constraint: c})
+		}
+	}
+	return rules
+}
+
+// matchesAny reports whether name matches one of the patterns, which
+// compile.
+func matchesAny(patterns []string, name string) bool {
+	for _, p := range patterns {
+		if re, err := oapi.CompilePattern(p); err == nil && re.Check(name) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// Matches reports whether name matches one of the patterns.
+func (p *PatternProperties) Matches(name string) bool {
+	return matchesAny(p.Patterns, name)
 }

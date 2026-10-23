@@ -95,6 +95,11 @@ type Type struct {
 	// Rules apply subschemas to the value: not, if/then/else,
 	// dependentSchemas.
 	Rules []*Rule
+	// Patterns keeps the undeclared properties whose names match a
+	// pattern of patternProperties; PatternFields are the declared
+	// properties whose names match one, with its subschema.
+	Patterns      *PatternProperties
+	PatternFields []FieldConstraint
 	// Alternatives come from oneOf or anyOf next to properties: a value
 	// must match exactly one (AlternativesOneOf) or at least one of them.
 	Alternatives      []*Alternative
@@ -217,6 +222,22 @@ type Field struct {
 	source *oas.Schema
 }
 
+// PatternProperties are the properties of a struct whose names match one
+// of Patterns, kept in the map field FieldName with values of type Value,
+// the type of the patterns' schema.
+type PatternProperties struct {
+	FieldName string
+	Value     *Ref
+	Patterns  []string
+}
+
+// PatternRule applies the subschema of a pattern of patternProperties to
+// the values of the keys that match it.
+type PatternRule struct {
+	Pattern    string
+	Constraint *Constraint
+}
+
 // Dependency is an entry of dependentRequired: when Property is present,
 // the Required properties must be too.
 type Dependency struct {
@@ -298,8 +319,10 @@ type Checks struct {
 	PropertyNames     []*Checks
 	DependentRequired []Dependency
 	// Rules apply subschemas to the value: not, if/then/else, contains,
-	// dependentSchemas.
-	Rules []*Rule
+	// dependentSchemas. Patterns apply patternProperties to the values of
+	// a map's matching keys.
+	Rules    []*Rule
+	Patterns []PatternRule
 
 	// Enum and Const are JSON literals.
 	Enum  []string
@@ -312,7 +335,7 @@ func (c *Checks) IsEmpty() bool {
 		c.MinLength == nil && c.MaxLength == nil && c.Pattern == "" && c.Format == "" &&
 		c.Minimum == "" && c.Maximum == "" && c.ExclusiveMinimum == "" && c.ExclusiveMaximum == "" &&
 		c.MultipleOf == "" && c.MinItems == nil && c.MaxItems == nil && !c.UniqueItems &&
-		c.MinProperties == nil && c.MaxProperties == nil && len(c.PropertyNames) == 0 && len(c.DependentRequired) == 0 && len(c.Rules) == 0)
+		c.MinProperties == nil && c.MaxProperties == nil && len(c.PropertyNames) == 0 && len(c.DependentRequired) == 0 && len(c.Rules) == 0 && len(c.Patterns) == 0)
 }
 
 // AllowsNull reports whether a value of r may be JSON null. A pointer

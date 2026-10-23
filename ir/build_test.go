@@ -167,7 +167,6 @@ components:
 		got = append(got, w.Location.Pointer+": "+w.Message)
 	}
 	want := []string{
-		"/components/schemas/B/patternProperties: patternProperties is not supported yet and is not reflected in the generated type",
 		"/components/schemas/B/properties/x/pattern: pattern is not a valid ECMA-262 regular expression and is not checked",
 		// C's not is checked; D is an enum, which does not apply it.
 		"/components/schemas/D/not: not is not checked on this kind of type yet",
@@ -180,7 +179,7 @@ components:
 			t.Errorf("warning %d = %q\nwant prefix %q", i, got[i], want[i])
 		}
 	}
-	if m.Warnings[0].Position.Line != 14 {
+	if m.Warnings[0].Position.Line != 12 {
 		t.Errorf("warning position = %v", m.Warnings[0].Position)
 	}
 	// Several types make a union rather than a warning.
@@ -592,6 +591,56 @@ components:
 	for _, want := range []string{
 		"/components/schemas/Mixed/not: not is not checked yet: anyOf and oneOf inside a subschema",
 		"/components/schemas/Choice/not: not is not checked on this kind of type yet",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no warning %q in:\n%s", want, all)
+		}
+	}
+}
+
+func TestPatternPropertiesModel(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Two:
+      type: object
+      properties: {a: {type: string}}
+      patternProperties:
+        "^s_": {type: string}
+        "^n_": {type: integer}
+    Bad:
+      type: object
+      properties: {a: {type: string}}
+      patternProperties:
+        "(?=unclosed": {type: string}
+    Dep:
+      type: object
+      properties: {a: {type: string}}
+      patternProperties:
+        "^x_": {type: string}
+      dependentRequired:
+        a: [x_b]
+`, Options{})
+	if two := typeNamed(t, m, "Two"); two.Patterns != nil {
+		t.Errorf("Two kept pattern properties of two types: %+v", two.Patterns)
+	}
+	if bad := typeNamed(t, m, "Bad"); bad.Patterns != nil {
+		t.Errorf("Bad kept properties of a pattern that does not compile")
+	}
+	// A name only a pattern keeps can be required.
+	if dep := typeNamed(t, m, "Dep"); dep.Patterns == nil || fmt.Sprint(dep.DependentRequired) != "[{a [x_b]}]" {
+		t.Errorf("Dep = %+v, %v", dep.Patterns, dep.DependentRequired)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Message)
+	}
+	all := strings.Join(warnings, "\n")
+	for _, want := range []string{
+		"patternProperties with different schemas for different patterns are not checked yet",
+		"the pattern is not a valid ECMA-262 regular expression; its properties are not checked",
 	} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no warning %q in:\n%s", want, all)

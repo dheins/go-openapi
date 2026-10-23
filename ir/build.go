@@ -438,6 +438,7 @@ func (b *builder) fillStruct(t *Type) {
 		// The 2020-12 way to close an object built with allOf.
 		t.Additional = &Additional{Forbidden: true}
 	}
+	b.fillPatterns(t, parts, fieldNames)
 	// Which properties can be checked depends on whether the others are kept.
 	t.DependentRequired = b.checkableDependencies(t)
 	// Subschemas are checked against the fields, which are known now.
@@ -859,6 +860,14 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 			r.Checks = &Checks{}
 		}
 		r.Checks.Rules = rules
+	}
+	if r.Kind == Map {
+		if patterns := b.mapPatterns(r.Elem, s); len(patterns) > 0 {
+			if r.Checks == nil {
+				r.Checks = &Checks{}
+			}
+			r.Checks.Patterns = patterns
+		}
 	}
 	return r
 }
@@ -1597,7 +1606,6 @@ func (b *builder) warnUnsupported(s *oas.Schema) {
 		}
 	}
 	const later = "is not supported yet and is not reflected in the generated type"
-	check(s.PatternProperties != nil, "patternProperties", "patternProperties "+later)
 	check(s.PrefixItems != nil, "prefixItems", "prefixItems "+later)
 	check(s.UnevaluatedItems != nil, "unevaluatedItems", "unevaluatedItems "+later)
 }
@@ -1610,7 +1618,8 @@ func (b *builder) warnRules(s *oas.Schema) {
 	for _, kw := range []struct {
 		present bool
 		keyword string
-	}{{s.Not != nil, "not"}, {s.If != nil, "if"}, {s.Contains != nil, "contains"}, {s.DependentSchemas != nil, "dependentSchemas"}} {
+	}{{s.Not != nil, "not"}, {s.If != nil, "if"}, {s.Contains != nil, "contains"}, {s.DependentSchemas != nil, "dependentSchemas"},
+		{s.PatternProperties != nil, "patternProperties"}} {
 		if kw.present {
 			b.warn(s, []string{kw.keyword}, fmt.Sprintf("%s "+unchecked, kw.keyword, what))
 		}

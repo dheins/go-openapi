@@ -95,6 +95,7 @@ position, for every schema feature it cannot represent; see
 | `allOf` | one struct with the properties of every member |
 | `format: date-time` / `date` / `byte` / `binary` | `time.Time` / `oapi.Date` / `[]byte` / `oapi.File` |
 | `additionalProperties: {schema}` | `AdditionalProperties map[string]T` |
+| `patternProperties` on an object | `PatternProperties map[string]T`, for undeclared properties whose names match |
 
 `oapi.Optional[T]` distinguishes an absent property from one set to its
 zero value; `oapi.Nullable[T]` is null when `Valid` is false:
@@ -112,7 +113,10 @@ pointer, and `Validate` checks the remaining constraints (lengths,
 patterns, bounds, formats, enums, unique items, property counts,
 `dependentRequired`, and `propertyNames` for string schemas, ...), and
 applies subschemas: `not`, `if`/`then`/`else`, `contains` with
-`minContains`/`maxContains`, and `dependentSchemas`. A subschema is
+`minContains`/`maxContains`, `dependentSchemas`, and `patternProperties`
+(to declared properties, kept ones and map keys whose names match; such
+names are not additional properties, so `additionalProperties: false`
+allows them). Patterns with different schemas are not applied yet. A subschema is
 checked against the value's Go type: required properties, constraints on
 properties and items, `allOf`, `$ref`, types (an integer check of a
 number, the JSON type of an untyped value), and these keywords nested.

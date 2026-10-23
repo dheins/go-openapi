@@ -546,3 +546,29 @@ components:
       type: string
       if: {pattern: "^A"}
       then: {maxLength: 3}
+    Extensions:
+      description: patternProperties next to additionalProperties false.
+      type: object
+      properties:
+        name: {type: string}
+        x-internal: {type: string}
+      patternProperties:
+        "^x-":
+          type: string
+          maxLength: 10
+      additionalProperties: false
+    HeaderMap:
+      description: patternProperties on a map.
+      type: object
+      additionalProperties: {type: string}
+      patternProperties:
+        "^X-": {minLength: 1}
+        "^Content-": {enum: [json, xml]}
+    Labelled:
+      description: Values of matching properties are objects.
+      type: object
+      properties:
+        id: {type: integer}
+      patternProperties:
+        "^l_":
+          $ref: "#/components/schemas/Label"

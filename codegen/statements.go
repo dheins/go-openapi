@@ -36,7 +36,8 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 	// Undeclared names the decoder drops are checked against
 	// propertyNames here; Validate checks those it keeps.
 	checkNames := a == nil && len(t.PropertyNames) > 0
-	if a != nil || checkNames {
+	pp := t.Patterns
+	if a != nil || checkNames || pp != nil {
 		w(1, "var unknown []oapi.NamedError")
 	}
 	w(1, "for obj.Next() {")
@@ -74,6 +75,18 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 		}
 	}
 	w(2, "default:")
+	if pp != nil {
+		// Names that match a pattern are not additional properties.
+		w(3, "if %s {", f.matchesPatterns(t.Name, pp.Patterns, "obj.Name()"))
+		w(4, "var value %s", f.goType(pp.Value))
+		w(4, "unknown = append(unknown, oapi.NamedError{Name: obj.Name(), Err: obj.Decode(&value, false, dir)})")
+		w(4, "if v.%s == nil {", pp.FieldName)
+		w(5, "v.%s = make(map[string]%s)", pp.FieldName, f.goType(pp.Value))
+		w(4, "}")
+		w(4, "v.%s[obj.Name()] = value", pp.FieldName)
+		w(4, "continue")
+		w(3, "}")
+	}
 	switch {
 	case a == nil:
 		w(3, "obj.Skip()")
@@ -116,7 +129,7 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 		// The union reads the whole object's text, which DecodeJSON has.
 		w(1, "errs.Nested(\"\", v.%s.DecodeJSON(data, dir))", iu.Name)
 	}
-	if a != nil || checkNames {
+	if a != nil || checkNames || pp != nil {
 		w(1, "oapi.AddNamed(&errs, unknown)")
 	}
 	w(1, "if err := errs.Err(); err != nil {")
@@ -241,6 +254,21 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 		v.dependencies(t)
 		v.declaredNames(t)
 		v.rules("m", `""`, &ir.Ref{Kind: ir.Named, Type: t}, t.Rules, 1)
+		for _, pf := range t.PatternFields {
+			v.constraint("m."+pf.Field.Name, pointerLiteral(pf.Field.JSONName), pf.Field.Type, pf.Constraint, 1)
+		}
+		if pp := t.Patterns; pp != nil {
+			inner := v.sub()
+			if len(t.PropertyNames) > 0 {
+				inner.line(2, "errs.Nested(oapi.Field(\"\", name), m.checkPropertyName(name))")
+			}
+			inner.ref("m."+pp.FieldName+"[name]", `oapi.Field("", name)`, pp.Value, "PatternValue", 2)
+			if inner.b.Len() > 0 {
+				v.line(1, "for _, name := range %s.Sorted(%s.Keys(m.%s)) {", f.imp("slices", "slices"), f.imp("maps", "maps"), pp.FieldName)
+				v.b.WriteString(inner.b.String())
+				v.line(1, "}")
+			}
+		}
 		if a := t.Additional; a != nil && !a.Forbidden {
 			inner := v.sub()
 			if len(t.PropertyNames) > 0 {
@@ -310,6 +338,9 @@ func hasIn(t *ir.Type, recv, name string) string {
 			}
 			return "true"
 		}
+	}
+	if pp := t.Patterns; pp != nil && pp.Matches(name) {
+		return fmt.Sprintf("oapi.HasKey(%s.%s, %q)", recv, pp.FieldName, name)
 	}
 	if a := t.Additional; a != nil && !a.Forbidden {
 		return fmt.Sprintf("oapi.HasKey(%s.%s, %q)", recv, a.FieldName, name)
@@ -444,6 +475,9 @@ func (v *validator) propertyCount(t *ir.Type) {
 	}
 	if a := t.Additional; a != nil && !a.Forbidden {
 		v.line(1, "count += len(m.%s)", a.FieldName)
+	}
+	if pp := t.Patterns; pp != nil {
+		v.line(1, "count += len(m.%s)", pp.FieldName)
 	}
 	v.counts(1, "count", `""`, t.MinProperties, t.MaxProperties, "property")
 }
@@ -599,6 +633,17 @@ func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 			inner.line(depth+1, "}(%s)))", key)
 		}
 		inner.ref(expr+"["+key+"]", fmt.Sprintf("oapi.Field(%s, %s)", path, key), r.Elem, hint+"Value", depth+1)
+		if c != nil {
+			for _, rule := range c.Patterns {
+				check := inner.sub()
+				check.constraint(expr+"["+key+"]", fmt.Sprintf("oapi.Field(%s, %s)", path, key), r.Elem, rule.Constraint, depth+2)
+				if check.b.Len() > 0 {
+					inner.line(depth+1, "if %s {", v.file.matchesPatterns(v.typeName, []string{rule.Pattern}, key))
+					inner.b.WriteString(check.b.String())
+					inner.line(depth+1, "}")
+				}
+			}
+		}
 		if inner.b.Len() > 0 {
 			v.line(depth, "for _, %s := range %s.Sorted(%s.Keys(%s)) {", key, v.file.imp("slices", "slices"), v.file.imp("maps", "maps"), expr)
 			v.b.WriteString(inner.b.String())
