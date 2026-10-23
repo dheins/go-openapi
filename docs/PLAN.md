@@ -1,8 +1,8 @@
 # go-openapi: plan
 
 A go-swagger–style framework for **OpenAPI 3.2**: load and validate specs,
-generate Go models and servers, and run them on a small runtime built on
-`net/http`.
+generate Go models, servers and clients, and run them on a small runtime
+built on `net/http`.
 
 ## Decisions
 
@@ -11,19 +11,19 @@ generate Go models and servers, and run them on a small runtime built on
 | Spec version | 3.2 is the canonical model. 3.1 loads directly; 3.0 is upgraded at load time. |
 | Swagger 2.0 | Not supported. A 2.0 → 3.2 converter is future scope. |
 | Spec model | Own `oas` package; no dependency on kin-openapi/libopenapi. |
-| v1 scope | Models + server. |
+| v1 scope | Models, server and client. |
 | Router | `net/http.ServeMux` (Go 1.22+ patterns). Generated servers are plain `http.Handler`s, so they mount in chi/echo/gin; middleware is `func(http.Handler) http.Handler`. A small `Router` interface allows adapters later. |
 | Go version | 1.27.3. |
 | JSON Schema validation | `santhosh-tekuri/jsonschema/v6` with the official OAS schemas embedded. |
 | Remote `$ref`s | Off by default; local files only unless a `loader.Fetcher` is supplied. |
 
-**Future scope:** client generation, codescan (Go source → spec), 2.0 → 3.2
-converter, webhook/callback handler generation, chi adapter.
+**Future scope:** codescan (Go source → spec), 2.0 → 3.2 converter,
+webhook/callback generation (next, built on the client), chi adapter.
 
 ## Layout
 
 ```
-cmd/goapi/       CLI: validate, generate model, generate server
+cmd/goapi/       CLI: validate, generate model, generate server, generate client
 oas/             Spec model (3.2): Document … Schema, OrderedMap, Extensions
 loader/          JSON/YAML parsing, version handling, 3.0 upgrade, $ref resolution
 validate/        Structural (official OAS schema) + semantic document validation
@@ -35,6 +35,8 @@ runtime/         Imported by generated servers
   server/        Config and options, parameter binding (simple and form
                  styles today), body reading, response writing, errors
   problem/       RFC 9457 problem details (also usable by handlers)
+  client/        Imported by generated clients: Config and options, request
+                 encoding, response decoding, security, errors
 ```
 
 ## Generated server shape
@@ -123,6 +125,29 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
 `parameter-unique`, `querystring`, `path-unique`, `server-variables`,
 `security-schemes`, `tags` (duplicates, missing/cyclic parents),
 `link-operation`, `discriminator-property`.
+
+### M5 – Clients ✅
+- [x] `runtime/client`: parameter encoding in every style, the bodies and
+  responses servers support, security requirements, typed errors
+- [x] `goapi generate client`: a `Client` with a method per operation,
+  sharing the `api` and `model` packages with the server (`-types`)
+- [x] End-to-end tests against the generated server; clients for the
+  petstore example and the OAI examples
+
+**How it went**
+- *Shape*: each operations package gets `NewXRequest` and `ReadXResponse`
+  per operation, from both generators, so a client package is only
+  `client.go`: `Client`, `Credentials` and the methods. Requests are
+  validated before sending by default; responses only on request.
+- *Fuzzing* (`FuzzParamRoundTrip`: a value the client encodes reads back
+  the same through the server's parameter parsers) found header list items
+  with quotes and commas merging; they are quoted now.
+- *The round trip* of every petserver operation found that parameters with
+  defaults were sent as zero values, that form querystrings were sent as
+  JSON, and that free-form multipart bodies were rejected.
+- *Not done*: retries, pagination and caching are left to `Doer`
+  middleware; required headers of non-file positional parts cannot be sent
+  ([features.md](../features.md)).
 
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).

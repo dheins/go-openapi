@@ -1,11 +1,11 @@
 # go-openapi
 
 A Go framework for [OpenAPI 3.2](https://spec.openapis.org/oas/v3.2.0):
-load and validate API descriptions, generate models and servers, and serve
-them on `net/http`. Inspired by go-swagger, rebuilt for OpenAPI 3.x and
+load and validate API descriptions, generate models, servers and clients,
+and serve them on `net/http`. Inspired by go-swagger, rebuilt for OpenAPI 3.x and
 JSON Schema 2020-12.
 
-> Version 0.1 (unreleased): validation, models and servers are complete;
+> Version 0.1 (unreleased): validation, models, servers and clients are complete;
 > see [docs/PLAN.md](docs/PLAN.md) for scope and status.
 
 ## Packages
@@ -19,6 +19,7 @@ JSON Schema 2020-12.
 - `oapi`: the small library generated models use (`Optional`, `Nullable`,
   `Date`, validation errors)
 - `runtime/server`, `runtime/problem`: the runtime of generated servers
+- `runtime/client`: the runtime of generated clients
 
 ```go
 spec, err := loader.Load("openapi.yaml")
@@ -38,6 +39,7 @@ goapi validate openapi.yaml
 goapi validate -format json -quiet openapi.yaml
 goapi generate model -out internal/models openapi.yaml
 goapi generate server -out internal/gen openapi.yaml   # server in gen, operations in gen/api, schemas in gen/model
+goapi generate client -out internal/petclient -types example.com/shop/internal/gen/api openapi.yaml   # a client sharing the server's types
 ```
 
 Generated models decode with JSON-pointer error paths and have a
@@ -94,6 +96,18 @@ func (a *auth) BearerAuth(ctx context.Context, token string, scopes []string) (c
 http.ListenAndServe(":8080", gen.NewServer(&petStore{}, &auth{}))
 ```
 
+A generated client has a method per operation, with the same request and
+response types; it validates requests before sending them and returns
+undeclared responses as typed errors:
+
+```go
+c, err := petclient.New(petclient.Credentials{APIKey: apiKey})
+resp, err := c.GetPet(ctx, &api.GetPetRequest{PetID: 7})
+if r, ok := resp.(api.GetPet200JSONResponse); ok {
+	fmt.Println(r.Body.Name)
+}
+```
+
 Generated servers log through `log/slog` (`server.WithLogger`,
 `server.WithAccessLog`), with no logging or telemetry dependency of their
 own; any slog handler works, and `server.WithObserver` hooks in tracing or
@@ -101,7 +115,7 @@ metrics.
 
 ## Documentation
 
-- [Guide](docs/guide.md): validation, models, servers, security, options
+- [Guide](docs/guide.md): validation, models, servers, clients, security, options
 - [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-enum-varnames`, `x-enum-descriptions`
 - [Example](examples/petstore): a complete server (`go run ./examples/petstore -key secret`)
 - [Benchmarks](docs/benchmarks.md)

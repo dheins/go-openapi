@@ -1,0 +1,61 @@
+{{- /*
+Templates for the client. Per operation "clientops" (NewXRequest and
+ReadXResponse) goes to the operations' package, by both the server and the
+client; "client" (Client, its Credentials and a method per operation) to
+the client package.
+*/ -}}
+
+{{define "clientops"}}
+{{clientOps .}}
+{{- end}}
+
+{{define "client"}}
+{{- if .ServerURL}}
+// DefaultServerURL is the URL of the document's first server. New sends
+// requests to it unless client.WithBaseURL says otherwise.
+const DefaultServerURL = {{quote .ServerURL}}
+{{- end}}
+{{- if .SecuritySchemes}}
+
+// Credentials are the credentials the client sends, one per security
+// scheme. A request uses the first of its operation's security
+// requirements whose credentials are all set; a field left nil is not set.
+type Credentials struct {
+{{- range .SecuritySchemes}}
+{{credentialDoc .}}
+	{{.Method}} {{credentialType .}}
+{{- end}}
+}
+{{- end}}
+
+// Client calls the operations of the document, with a method per
+// operation. It validates requests before sending them unless
+// client.WithoutRequestValidation says otherwise, and validates responses
+// with client.WithResponseValidation.
+type Client struct {
+	cfg *client.Config
+{{- if .SecuritySchemes}}
+	creds Credentials
+{{- end}}
+}
+
+// New returns a client{{if .SecuritySchemes}} sending creds{{end}}, configured by opts.{{if not .ServerURL}} The document
+// has no absolute server URL, so client.WithBaseURL is required.{{end}}
+func New({{if .SecuritySchemes}}creds Credentials, {{end}}opts ...client.Option) (*Client, error) {
+{{- if .ServerURL}}
+	cfg, err := client.NewConfig(append([]client.Option{client.WithBaseURL(DefaultServerURL)}, opts...)...)
+{{- else}}
+	cfg, err := client.NewConfig(opts...)
+{{- end}}
+	if err != nil {
+		return nil, err
+	}
+	return &Client{cfg: cfg{{if .SecuritySchemes}}, creds: creds{{end}}}, nil
+}
+{{- range .Operations}}
+{{- if not .Unsupported}}
+
+{{clientMethod .}}
+{{- end}}
+{{- end}}
+{{- end}}

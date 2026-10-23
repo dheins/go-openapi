@@ -1,10 +1,11 @@
 # goapi guide
 
-goapi validates OpenAPI 3.0, 3.1 and 3.2 documents and generates Go models
-and HTTP servers from them. This guide shows how to use each part; the
-[README](../README.md) has the short version, [extensions.md](extensions.md)
-lists the `x-go-*` extensions, and [the example](../examples/petstore) is a
-complete server.
+goapi validates OpenAPI 3.0, 3.1 and 3.2 documents and generates Go models,
+HTTP servers and clients from them. This guide shows how to use each part;
+the [README](../README.md) has the short version,
+[extensions.md](extensions.md) lists the `x-go-*` extensions, and
+[the example](../examples/petstore) is a complete server, with a client in
+its tests.
 
 - [Install](#install)
 - [Validate a document](#validate-a-document)
@@ -15,6 +16,7 @@ complete server.
 - [Errors](#errors)
 - [Security](#security)
 - [Server options](#server-options)
+- [Generate a client](#generate-a-client)
 - [Running in production](#running-in-production)
 - [Logging](#logging)
 - [Using the libraries directly](#using-the-libraries-directly)
@@ -26,7 +28,7 @@ go install github.com/dheins/go-openapi/cmd/goapi@latest
 ```
 
 Generated code imports `github.com/dheins/go-openapi/oapi` (models) and
-`github.com/dheins/go-openapi/runtime/...` (servers), so add the module to
+`github.com/dheins/go-openapi/runtime/...` (servers and clients), so add the module to
 your project with `go get github.com/dheins/go-openapi`. To pin the
 generator to the version in your `go.mod`, run it with
 `go run github.com/dheins/go-openapi/cmd/goapi` from a `go:generate` line:
@@ -538,6 +540,105 @@ credentials that are present and wrong are still rejected.
 | `server.WithObserver(o...)` | be told when each request starts and ends, with its status, error and panic |
 | `server.WithMux(m)` | route with something other than a new `http.ServeMux` |
 
+## Generate a client
+
+```sh
+goapi generate client -out internal/petclient openapi.yaml
+```
+
+This writes the client package (`client.go`) and the same `api` and
+`model` packages `generate server` writes, with the same `-operations`,
+`-models` and `-import` flags; the operations need a package of their own.
+A program that has a generated server already passes its operations
+package with `-types`, so only `client.go` is written and the server and
+client share their types:
+
+```sh
+goapi generate client -out internal/petclient -types example.com/shop/internal/gen/api openapi.yaml
+```
+
+The client has a method per operation, taking the request type the server
+receives and returning its response variants:
+
+```go
+c, err := petclient.New(petclient.Credentials{
+	APIKey: func(ctx context.Context) (string, error) { return os.Getenv("PET_KEY"), nil },
+})
+resp, err := c.GetPet(ctx, &api.GetPetRequest{PetID: 7})
+if err != nil {
+	return err // transport, invalid request, or undeclared response
+}
+switch r := resp.(type) {
+case api.GetPet200JSONResponse:
+	fmt.Println(r.Body.Name)
+case api.GetPet404Response:
+	fmt.Println("no such pet")
+}
+```
+
+A nil request sends no parameters or body. Optional fields that are not
+set are left out, and so are parameters with a default whose field is the
+zero value, so the server applies the default. A body with several media
+types is sent as the one `ContentType` names or, without it, as the first
+media type of the field that is set.
+
+`New` sends requests to `DefaultServerURL`, the first `servers` URL with
+its variables' defaults, when that URL is absolute; otherwise
+`client.WithBaseURL` is required.
+
+| Option | Effect |
+|---|---|
+| `client.WithBaseURL(url)` | send requests below another absolute URL |
+| `client.WithHTTPClient(hc)`, `client.WithDoer(d)` | send with another `*http.Client` or `client.Doer` (default `http.DefaultClient`) |
+| `client.WithMiddleware(mw...)` | wrap the `Doer`: retries, logging, signing, tracing; the first is outermost |
+| `client.WithHeader(name, value)` | add a header to every request that does not set it |
+| `client.WithoutRequestValidation()` | send requests without checking them first |
+| `client.WithResponseValidation()` | check response bodies and required headers against the document |
+| `client.WithMaxResponseBytes(n)` | response body limit (default 32 MiB) |
+
+`Credentials` has a field per security scheme, named like the
+`SecurityHandler` methods:
+
+| Scheme | Field |
+|---|---|
+| `apiKey` (header, query or cookie) | `func(ctx) (string, error)` returning the key |
+| `http` basic | `func(ctx) (username, password string, err error)` |
+| `http` bearer, `oauth2`, `openIdConnect` | `func(ctx) (string, error)` returning the token, sent as `Authorization: Bearer` |
+| other `http` schemes | `func(ctx) (string, error)` returning the credentials |
+| `mutualTLS` | `bool`: the `http.Client`'s transport has the client certificate |
+
+A request uses the first of its operation's security requirements whose
+fields are all set; an empty requirement sends no credentials. When none
+can be satisfied, the method returns `client.ErrNoCredentials` without
+sending anything. Credential functions run per request, so they can
+refresh tokens.
+
+Errors are typed:
+
+| Error | When |
+|---|---|
+| `*client.InvalidRequest` | the request breaks the document's constraints; its `Problem` lists every problem, as the server would |
+| `*client.UnexpectedResponse` | a status or media type the operation does not declare; it has the status, header, the start of the body, and the `*problem.Problem` of a problem+json body |
+| `*client.InvalidResponse` | a declared response whose body or headers do not decode, or, with response validation, do not validate |
+| `client.ErrNoCredentials` | no security requirement of the operation can be met |
+
+Other errors come from the `Doer`, wrapped with the method and URL.
+
+JSON Lines and server-sent event responses are read as they arrive:
+`Items` and `Events` are `iter.Seq2`s that close the body when the loop
+ends. A response whose stream is not ranged over keeps its connection, so
+range over it (and break to stop early). Every other response body is read
+and closed by the method.
+
+Each operation's client functions are also exported from its operations
+package, `api.NewGetPetRequest(ctx, cfg, req)` and
+`api.ReadGetPetResponse(cfg, resp)`, for sending requests your own way
+with a `*client.Config` from `client.NewConfig`.
+
+The client does not retry, paginate or cache; middleware does that.
+Required headers of positional parts that are not files cannot be sent yet
+([features.md](../features.md)).
+
 ## Running in production
 
 A generated server is an `http.Handler`; the `http.Server` around it is
@@ -675,6 +776,7 @@ pos := spec.Position(loc)                                   // line and column
 res, err := validate.File("openapi.yaml")
 model := ir.Build(res.Spec, ir.Options{Operations: true})   // Go-shaped model
 files, err := codegen.Server(model, codegen.Options{Package: "api"})
+// or codegen.Client, with OperationsPackage/OperationsImport or TypesPackage/TypesImport
 ```
 
 Every `$ref` in a loaded document has its `Resolved` field set (`Deref()`

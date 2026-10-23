@@ -9,6 +9,7 @@
 package main
 
 //go:generate go run github.com/dheins/go-openapi/cmd/goapi generate server -out gen openapi.yaml
+//go:generate go run github.com/dheins/go-openapi/cmd/goapi generate client -out gen/client -types github.com/dheins/go-openapi/examples/petstore/gen/api openapi.yaml
 
 import (
 	"context"

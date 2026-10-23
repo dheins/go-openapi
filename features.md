@@ -8,7 +8,6 @@ shipped in.
 
 ## Out of v1 scope
 
-- Client generation.
 - Codescan: generating a document from Go source annotations.
 - Swagger 2.0 → OpenAPI 3.2 converter (2.0 input is rejected today).
 
@@ -45,13 +44,23 @@ shipped in.
 - Arrays of objects and recursive types in form and multipart bodies and
   object parameters (nested objects and maps are supported). — later
 - Parameters and response headers with `content` other than JSON. — later
-- Callbacks, webhooks and links. — later
+- Callbacks, webhooks and links: sending webhooks and callbacks will
+  build on the generated client. — next
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
+
+## Clients
+
+- Required headers of positional parts whose items are not files
+  (`prefixEncoding` or `itemEncoding` headers on JSON parts): a generated
+  client has no field for them, so a server checking them rejects the
+  request. File parts carry theirs in `oapi.File.Header`. — later
+- Retries, pagination and caching helpers: left to `Doer` middleware
+  (`client.WithMiddleware`). — not planned
 
 ## Logging and telemetry
 
@@ -66,6 +75,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Client generation: `goapi generate client` and `runtime/client`,
+  sharing request and response types with the server. (42046b0, 2436777,
+  105e887)
 - [x] `dependentRequired` and `propertyNames` (string schemas) are checked,
   on structs, including their `allOf` members, and on maps. (50b65ed)
 - [x] `not`, `if`/`then`/`else`, `contains` (`minContains`, `maxContains`)

@@ -12,12 +12,6 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var listPetsLimitParam = server.Param{Name: "limit", Style: "form", Explode: true, Shape: server.Scalar}
-
-var listPetsAfterParam = server.Param{Name: "after", Style: "form", Explode: true, Shape: server.Scalar}
-
-var listPetsStatusParam = server.Param{Name: "status", Style: "form", Explode: false, Shape: server.Array}
-
 // HandleListPets returns the HTTP handler of ListPets.
 //
 // It decodes and validates the

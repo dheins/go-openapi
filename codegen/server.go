@@ -89,20 +89,15 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		if o.Unsupported != "" {
 			continue
 		}
-		base := strings.TrimSuffix(fileName(o.Name), ".go")
-		content, err := og.render("operation", o, func(f *fileGen) {
-			f.imp("net/http", "http")
-			f.imp(serverImport, "server")
-		})
-		if err != nil {
-			return nil, fmt.Errorf("generating operation %s: %w", o.Name, err)
+		if err := og.operationFiles(o); err != nil {
+			return nil, err
 		}
-		og.add(base+"_operation.go", content)
+		base := strings.TrimSuffix(fileName(o.Name), ".go")
 		handler := struct {
 			*ir.Operation
 			Secured bool
 		}{o, len(m.SecuritySchemes) > 0}
-		content, err = og.render("handler", handler, func(f *fileGen) {
+		content, err := og.render("handler", handler, func(f *fileGen) {
 			f.imp("net/http", "http")
 			f.imp(serverImport, "server")
 		})
@@ -111,6 +106,12 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		}
 		og.add(base+"_handler.go", content)
 	}
+	return packageFiles(gens, order), nil
+}
+
+// packageFiles returns the files of the package generators gens, in
+// order, those of a subpackage in its directory.
+func packageFiles(gens map[string]*generator, order []string) []File {
 	var files []File
 	for _, imp := range order {
 		pg := gens[imp]
@@ -121,7 +122,7 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 			files = append(files, f)
 		}
 	}
-	return files, nil
+	return files
 }
 
 // serverDocFile documents the server package when generated code is in
@@ -675,6 +676,9 @@ func (f *fileGen) bindParam(w func(int, string, ...any), o *ir.Operation, p *ir.
 
 // paramVar declares the server.Param describing how p is serialized.
 func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
+	if v, ok := f.gen.params[p]; ok {
+		return v
+	}
 	shape := "server.Scalar"
 	switch {
 	case p.Array:
@@ -700,7 +704,9 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 		b.WriteString(", EmptyIsAbsent: true")
 	}
 	b.WriteString("}")
-	return f.declareVar(lowerFirst(o.Name)+p.Field+"Param", b.String())
+	v := f.declareVar(lowerFirst(o.Name)+p.Field+"Param", b.String())
+	f.gen.params[p] = v
+	return v
 }
 
 // propertiesVar declares the property types of an object parameter.

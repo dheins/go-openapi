@@ -4,6 +4,28 @@
 
 ### Added
 
+- `goapi generate client` (`codegen.Client`): a client package with a
+  `Client` type, `New`, a `Credentials` struct with a field per security
+  scheme, a method per operation, and `DefaultServerURL` from the first
+  absolute server URL. It writes the same `api` and `model` packages as
+  `generate server`, or uses an existing operations package with
+  `-types`. Every operations package now has `NewXRequest` and
+  `ReadXResponse` per operation (in `<op>_client.go`), which build the
+  HTTP request, validating it first unless disabled, and read the declared
+  response variants. Parameters with a default are left out when zero, so
+  the server applies the default. The petstore example now generates a
+  client too, used in its tests.
+- `runtime/client`, the runtime of generated clients: `Config` and options
+  (base URL, `Doer` and middleware, headers, request and response
+  validation, a response size limit); requests with parameters in every
+  style and JSON, form, multipart, positional-part, XML, text and binary
+  bodies, encoded so that generated servers read them back; responses
+  matched by status and media type and decoded, JSON Lines and server-sent
+  events as they arrive; security requirements (`Authorize`, `APIKey`,
+  `Basic`, `Bearer`, `Authorization`); and `InvalidRequest`,
+  `UnexpectedResponse` and `InvalidResponse` errors. `server` gains
+  `MatchMediaType`, `EncodeParts` and `DecodePartsAs`, and `oapi`
+  `DecodeValue`.
 - `unevaluatedItems` is checked where it is plain: without `items`,
   `contains` or applicators that evaluate items, it applies to the items
   after `prefixItems`, as `items` would (`false` limits the length, a
