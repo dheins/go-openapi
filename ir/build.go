@@ -119,19 +119,23 @@ func (b *builder) fill(t *Type) {
 		t.Underlying = wrapNullable(b.use(inner, t.Name, t.Root))
 		return
 	}
-	b.warnUnsupported(s)
 	types, nullable := splitTypes(s)
 	t.NullableUse = nullable
 	switch {
 	case composesScalar(s):
+		b.warnRules(s)
 		b.fillComposed(t)
 	case b.fillScalarAlternatives(t, types):
+		b.warnRules(s)
 	case isUnion(s, types):
+		b.warnRules(s)
 		b.fillUnion(t, types)
 	case enumBase(s, types) != "":
 		b.warnUnionKeywords(s)
+		b.warnRules(s)
 		b.fillEnum(t, types)
 	case isObject(s, types) && len(b.subtypesOf(s)) > 0:
+		b.warnRules(s)
 		b.fillPolymorphic(t)
 	case isObject(s, types):
 		b.fillStruct(t)
@@ -185,7 +189,6 @@ func (b *builder) use(s *oas.Schema, hint string, root *Type) *Ref {
 		b.fill(t)
 		return namedRef(t)
 	}
-	b.warnUnsupported(s)
 	b.warnUnionKeywords(s)
 	r := b.inline(s, types, hint, root)
 	if nullable {
@@ -396,6 +399,14 @@ func (b *builder) fillStruct(t *Type) {
 		}
 	}
 
+	// Every allOf member's property names and dependencies apply.
+	for _, part := range parts {
+		names, deps := b.objectKeywords(part)
+		t.PropertyNames = append(t.PropertyNames, names...)
+		t.DependentRequired = append(t.DependentRequired, deps...)
+	}
+	b.checkDeclaredNames(t)
+
 	// Every allOf member's property counts apply; the strictest wins.
 	for _, part := range parts {
 		if n := part.MinProperties; n != nil && (t.MinProperties == nil || *n > *t.MinProperties) {
@@ -424,6 +435,13 @@ func (b *builder) fillStruct(t *Type) {
 	case s.UnevaluatedProperties != nil && s.UnevaluatedProperties.Bool != nil && !*s.UnevaluatedProperties.Bool:
 		// The 2020-12 way to close an object built with allOf.
 		t.Additional = &Additional{Forbidden: true}
+	}
+	b.fillPatterns(t, parts, fieldNames)
+	// Which properties can be checked depends on whether the others are kept.
+	t.DependentRequired = b.checkableDependencies(t)
+	// Subschemas are checked against the fields, which are known now.
+	for _, part := range parts {
+		t.Rules = append(t.Rules, b.rules(namedRef(t), part)...)
 	}
 	b.fillAlternatives(t, alternatives, oneOf, byName)
 
@@ -589,7 +607,7 @@ func (b *builder) extraChecks(fieldType *Ref, s *oas.Schema) (*Ref, bool) {
 		checks = arrayChecks(s)
 		leaf = &Ref{Kind: Slice, Elem: anyRef(nil)}
 	case inner.Kind == Map:
-		checks = mapChecks(s)
+		checks = b.withObjectKeywords(mapChecks(s), s)
 		leaf = &Ref{Kind: Map, Elem: anyRef(nil)}
 	default:
 		// Named types, booleans and any: only enum and const apply, which
@@ -777,10 +795,6 @@ func (b *builder) objectParts(top, s *oas.Schema, seen map[*oas.Schema]bool, uni
 			b.warn(s, []string{"allOf", fmt.Sprint(i)}, "allOf member is not an object schema and is not applied")
 			continue
 		}
-		if _, named := b.named[member]; !named {
-			// Named members report their own unsupported keywords.
-			b.warnUnsupported(member)
-		}
 		parts = append(parts, b.objectParts(top, member, seen, unions)...)
 	}
 	return parts
@@ -825,15 +839,41 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 	case "boolean":
 		r = &Ref{Kind: Builtin, Name: "bool", Checks: valueChecks(s)}
 	case "array":
-		r = &Ref{Kind: Slice, Elem: b.use(s.Items, hint+"Item", root), Checks: arrayChecks(s)}
+		if s.UnevaluatedItems != nil {
+			es, why := evaluatedItems(s)
+			if why != "" {
+				b.warn(s, []string{"unevaluatedItems"}, "unevaluatedItems is not checked yet: "+why)
+			} else {
+				s = es
+			}
+		}
+		if len(s.PrefixItems) > 0 {
+			r = b.tuple(s, hint, root)
+		} else {
+			r = &Ref{Kind: Slice, Elem: b.use(s.Items, hint+"Item", root), Checks: arrayChecks(s)}
+		}
 	case "object":
 		value := anyRef(nil)
 		if ap := s.AdditionalProperties; ap != nil && ap.Bool == nil {
 			value = b.use(ap, hint+"Value", root)
 		}
-		r = &Ref{Kind: Map, Elem: value, Checks: mapChecks(s)}
+		r = &Ref{Kind: Map, Elem: value, Checks: b.withObjectKeywords(mapChecks(s), s)}
 	default:
 		r = anyRef(valueChecks(s))
+	}
+	if rules := b.rules(r, s); len(rules) > 0 {
+		if r.Checks == nil {
+			r.Checks = &Checks{}
+		}
+		r.Checks.Rules = rules
+	}
+	if r.Kind == Map {
+		if patterns := b.mapPatterns(r.Elem, s); len(patterns) > 0 {
+			if r.Checks == nil {
+				r.Checks = &Checks{}
+			}
+			r.Checks.Patterns = patterns
+		}
 	}
 	return r
 }
@@ -1564,23 +1604,21 @@ func literalType(raw json.RawMessage) string {
 	return ""
 }
 
-// warnUnsupported reports keywords of s that the generated type ignores.
-func (b *builder) warnUnsupported(s *oas.Schema) {
-	check := func(present bool, keyword, what string) {
-		if present {
-			b.warn(s, []string{keyword}, what)
+// warnRules reports not, if/then/else, contains, dependentSchemas and
+// patternProperties on a schema whose type does not apply them: an enum,
+// union or composed type.
+func (b *builder) warnRules(s *oas.Schema) {
+	const unchecked = "is not checked on %s yet"
+	what := "this kind of type"
+	for _, kw := range []struct {
+		present bool
+		keyword string
+	}{{s.Not != nil, "not"}, {s.If != nil, "if"}, {s.Contains != nil, "contains"}, {s.DependentSchemas != nil, "dependentSchemas"},
+		{s.PatternProperties != nil, "patternProperties"}} {
+		if kw.present {
+			b.warn(s, []string{kw.keyword}, fmt.Sprintf("%s "+unchecked, kw.keyword, what))
 		}
 	}
-	const later = "is not supported yet and is not reflected in the generated type"
-	check(s.Not != nil, "not", "not "+later)
-	check(s.If != nil, "if", "if/then/else "+later)
-	check(s.PatternProperties != nil, "patternProperties", "patternProperties "+later)
-	check(s.PrefixItems != nil, "prefixItems", "prefixItems "+later)
-	check(s.Contains != nil, "contains", "contains "+later)
-	check(s.PropertyNames != nil, "propertyNames", "propertyNames "+later)
-	check(s.DependentSchemas != nil, "dependentSchemas", "dependentSchemas "+later)
-	check(s.DependentRequired != nil, "dependentRequired", "dependentRequired "+later)
-	check(s.UnevaluatedItems != nil, "unevaluatedItems", "unevaluatedItems "+later)
 }
 
 // warnUnionKeywords reports oneOf, anyOf and discriminator on a schema

@@ -87,6 +87,19 @@ type Type struct {
 	// MinProperties and MaxProperties bound the number of properties
 	// present, declared and additional.
 	MinProperties, MaxProperties *int
+	// PropertyNames are checks every property name must pass, from
+	// propertyNames (one per allOf member that has it), and
+	// DependentRequired the properties others require.
+	PropertyNames     []*Checks
+	DependentRequired []Dependency
+	// Rules apply subschemas to the value: not, if/then/else,
+	// dependentSchemas.
+	Rules []*Rule
+	// Patterns keeps the undeclared properties whose names match a
+	// pattern of patternProperties; PatternFields are the declared
+	// properties whose names match one, with its subschema.
+	Patterns      *PatternProperties
+	PatternFields []FieldConstraint
 	// Alternatives come from oneOf or anyOf next to properties: a value
 	// must match exactly one (AlternativesOneOf) or at least one of them.
 	Alternatives      []*Alternative
@@ -196,6 +209,10 @@ type Field struct {
 	// members defining the same property. Each has the shape of Type.
 	Extra []*Ref
 
+	// NameViolates means the property's name fails the struct's
+	// propertyNames, so a value that has the property is invalid.
+	NameViolates bool
+
 	// AlternativeOnly means the property is defined only by oneOf/anyOf
 	// alternatives: its constraints apply within them, so Validate does
 	// not check the field on its own.
@@ -203,6 +220,29 @@ type Field struct {
 
 	// source is the schema the field was built from.
 	source *oas.Schema
+}
+
+// PatternProperties are the properties of a struct whose names match one
+// of Patterns, kept in the map field FieldName with values of type Value,
+// the type of the patterns' schema.
+type PatternProperties struct {
+	FieldName string
+	Value     *Ref
+	Patterns  []string
+}
+
+// PatternRule applies the subschema of a pattern of patternProperties to
+// the values of the keys that match it.
+type PatternRule struct {
+	Pattern    string
+	Constraint *Constraint
+}
+
+// Dependency is an entry of dependentRequired: when Property is present,
+// the Required properties must be too.
+type Dependency struct {
+	Property string
+	Required []string
 }
 
 // Alternative is one member of a oneOf or anyOf next to properties: the
@@ -274,6 +314,20 @@ type Checks struct {
 	UniqueItems        bool
 
 	MinProperties, MaxProperties *int
+	// PropertyNames and DependentRequired apply to the keys of a map, as
+	// to the properties of a struct (see Type).
+	PropertyNames     []*Checks
+	DependentRequired []Dependency
+	// Rules apply subschemas to the value: not, if/then/else, contains,
+	// dependentSchemas. Patterns apply patternProperties to the values of
+	// a map's matching keys.
+	Rules    []*Rule
+	Patterns []PatternRule
+	// PrefixItems constrain the first items of a slice by position
+	// (prefixItems), RestItems the others (items), when the slice's item
+	// type does not describe them.
+	PrefixItems []*Constraint
+	RestItems   *Constraint
 
 	// Enum and Const are JSON literals.
 	Enum  []string
@@ -286,7 +340,7 @@ func (c *Checks) IsEmpty() bool {
 		c.MinLength == nil && c.MaxLength == nil && c.Pattern == "" && c.Format == "" &&
 		c.Minimum == "" && c.Maximum == "" && c.ExclusiveMinimum == "" && c.ExclusiveMaximum == "" &&
 		c.MultipleOf == "" && c.MinItems == nil && c.MaxItems == nil && !c.UniqueItems &&
-		c.MinProperties == nil && c.MaxProperties == nil)
+		c.MinProperties == nil && c.MaxProperties == nil && len(c.PropertyNames) == 0 && len(c.DependentRequired) == 0 && len(c.Rules) == 0 && len(c.Patterns) == 0 && len(c.PrefixItems) == 0 && c.RestItems == nil)
 }
 
 // AllowsNull reports whether a value of r may be JSON null. A pointer

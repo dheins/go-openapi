@@ -18,10 +18,14 @@ shipped in.
 
 ## Models
 
-- Keywords that produce a warning and are not reflected in types: `not`,
-  `if`/`then`/`else`, `patternProperties`, `prefixItems`, `contains`,
-  `propertyNames`, `dependentSchemas`, `dependentRequired`,
-  `unevaluatedItems`. — later
+- Keywords that produce a warning and are not checked:
+  `unevaluatedItems` next to `contains` or applicators that evaluate
+  items, `propertyNames` schemas that are not string schemas,
+  `patternProperties` whose patterns have different schemas on an object,
+  and subschemas (of `not`, `if`,
+  `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
+  `additionalProperties` or property counts of a struct; these keywords on
+  enums and unions. — later
 - Applying `default` values inside responses and to nested objects of
   parameters (defaults are applied to absent request properties and
   parameters today). — later
@@ -62,6 +66,19 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `dependentRequired` and `propertyNames` (string schemas) are checked,
+  on structs, including their `allOf` members, and on maps. (50b65ed)
+- [x] `not`, `if`/`then`/`else`, `contains` (`minContains`, `maxContains`)
+  and `dependentSchemas` are checked, with subschemas checked against the
+  value's Go type. (4dfcc72)
+- [x] `patternProperties`: undeclared matching properties are kept in a
+  typed `PatternProperties` map, declared ones and map keys are checked
+  against the pattern's subschema. (4bdb21c)
+- [x] `prefixItems`: positions are checked against their subschemas, with
+  `items` for the others; subschemas on values of any type are checked by
+  the value's JSON type. (d851ec1)
+- [x] `unevaluatedItems` where it is `items` for the items after
+  `prefixItems` (no `contains` or other applicators evaluating items).
 - [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
   schema without a type) and the multipart `encoding` object: per-part
   content types and required part headers, exposed as `oapi.File.Header`.

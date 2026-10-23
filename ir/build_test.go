@@ -157,15 +157,19 @@ components:
         "^y": {type: string}
     C:
       not: {type: string}
+    D:
+      type: string
+      enum: [a, b]
+      not: {const: a}
 `, Options{})
 	var got []string
 	for _, w := range m.Warnings {
 		got = append(got, w.Location.Pointer+": "+w.Message)
 	}
 	want := []string{
-		"/components/schemas/B/patternProperties: patternProperties is not supported yet and is not reflected in the generated type",
 		"/components/schemas/B/properties/x/pattern: pattern is not a valid ECMA-262 regular expression and is not checked",
-		"/components/schemas/C/not: not is not supported yet and is not reflected in the generated type",
+		// C's not is checked; D is an enum, which does not apply it.
+		"/components/schemas/D/not: not is not checked on this kind of type yet",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("warnings:\n%s", strings.Join(got, "\n"))
@@ -175,7 +179,7 @@ components:
 			t.Errorf("warning %d = %q\nwant prefix %q", i, got[i], want[i])
 		}
 	}
-	if m.Warnings[0].Position.Line != 14 {
+	if m.Warnings[0].Position.Line != 12 {
 		t.Errorf("warning position = %v", m.Warnings[0].Position)
 	}
 	// Several types make a union rather than a warning.
@@ -491,5 +495,209 @@ components:
 		if u := typeNamed(t, m, name); u.Kind != Union {
 			t.Errorf("%s = %+v, want a union", name, u)
 		}
+	}
+}
+
+func TestObjectKeywords(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Closed:
+      type: object
+      properties: {a: {type: string}, b: {type: string}}
+      propertyNames: {not: {const: a}}
+      dependentRequired: {a: [b, c], d: [a]}
+    Base:
+      type: object
+      properties: {a: {type: string}}
+      propertyNames: {maxLength: 3}
+    Derived:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          properties: {b: {type: string}}
+          propertyNames: {minLength: 1}
+          dependentRequired: {a: [b]}
+`, Options{})
+	closed := typeNamed(t, m, "Closed")
+	// Only the dependency between declared properties can be checked.
+	if fmt.Sprint(closed.DependentRequired) != "[{a [b]}]" || len(closed.PropertyNames) != 0 {
+		t.Errorf("Closed = %v, %v", closed.DependentRequired, closed.PropertyNames)
+	}
+	derived := typeNamed(t, m, "Derived")
+	if len(derived.PropertyNames) != 2 || fmt.Sprint(derived.DependentRequired) != "[{a [b]}]" {
+		t.Errorf("Derived = %v, %v", derived.DependentRequired, derived.PropertyNames)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Message)
+	}
+	all := strings.Join(warnings, "\n")
+	for _, want := range []string{
+		"propertyNames other than a string schema is not checked yet",
+		`the undeclared property "c" that "a" requires is not checked`,
+		`dependentRequired of the undeclared property "d" is not checked`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no warning %q in:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "propertyNames is not supported") || strings.Contains(all, "dependentRequired is not supported") {
+		t.Errorf("the keywords are still reported as unsupported:\n%s", all)
+	}
+}
+
+func TestSubschemaRules(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Short: {type: string, maxLength: 3}
+    Nested:
+      type: string
+      if:
+        not: {const: x}
+      then:
+        $ref: "#/components/schemas/Short"
+        minLength: 2
+    Untyped:
+      not: {type: [string, "null"]}
+    Mixed:
+      type: string
+      not:
+        anyOf: [{const: a}, {const: b}]
+    Choice:
+      type: string
+      enum: [a, b]
+      not: {const: a}
+`, Options{})
+	nested := typeNamed(t, m, "Nested")
+	rules := nested.Underlying.Checks.Rules
+	if len(rules) != 1 || rules[0].Kind != "if" || len(rules[0].Schema.Rules) != 1 || rules[0].Schema.Rules[0].Kind != "not" ||
+		len(rules[0].Then.AllOf) != 2 {
+		t.Errorf("Nested rules = %+v", rules)
+	}
+	// Strings and null match; values of the other dynamic types never do.
+	if r := typeNamed(t, m, "Untyped").Underlying.Checks.Rules; len(r) != 1 || r[0].Schema.NullFails {
+		t.Errorf("Untyped rules = %+v", r)
+	} else {
+		var cases []string
+		for _, d := range r[0].Schema.Dynamic {
+			cases = append(cases, fmt.Sprintf("%s:%t", d.GoType, d.Constraint.Never))
+		}
+		if got := strings.Join(cases, " "); got != "float64:true bool:true []any:true map[string]any:true" {
+			t.Errorf("Untyped cases = %s", got)
+		}
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Location.Pointer+": "+w.Message)
+	}
+	all := strings.Join(warnings, "\n")
+	for _, want := range []string{
+		"/components/schemas/Mixed/not: not is not checked yet: anyOf and oneOf inside a subschema",
+		"/components/schemas/Choice/not: not is not checked on this kind of type yet",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no warning %q in:\n%s", want, all)
+		}
+	}
+}
+
+func TestPatternPropertiesModel(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Two:
+      type: object
+      properties: {a: {type: string}}
+      patternProperties:
+        "^s_": {type: string}
+        "^n_": {type: integer}
+    Bad:
+      type: object
+      properties: {a: {type: string}}
+      patternProperties:
+        "(?=unclosed": {type: string}
+    Dep:
+      type: object
+      properties: {a: {type: string}}
+      patternProperties:
+        "^x_": {type: string}
+      dependentRequired:
+        a: [x_b]
+`, Options{})
+	if two := typeNamed(t, m, "Two"); two.Patterns != nil {
+		t.Errorf("Two kept pattern properties of two types: %+v", two.Patterns)
+	}
+	if bad := typeNamed(t, m, "Bad"); bad.Patterns != nil {
+		t.Errorf("Bad kept properties of a pattern that does not compile")
+	}
+	// A name only a pattern keeps can be required.
+	if dep := typeNamed(t, m, "Dep"); dep.Patterns == nil || fmt.Sprint(dep.DependentRequired) != "[{a [x_b]}]" {
+		t.Errorf("Dep = %+v, %v", dep.Patterns, dep.DependentRequired)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Message)
+	}
+	all := strings.Join(warnings, "\n")
+	for _, want := range []string{
+		"patternProperties with different schemas for different patterns are not checked yet",
+		"the pattern is not a valid ECMA-262 regular expression; its properties are not checked",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no warning %q in:\n%s", want, all)
+		}
+	}
+}
+
+func TestTuples(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Same:
+      type: array
+      prefixItems: [{type: string}, {type: string}]
+      items: {type: string}
+    Mixed:
+      type: array
+      prefixItems: [{type: string}, {type: integer}]
+      items: {type: string}
+    Open:
+      type: array
+      prefixItems: [{type: string}]
+    Inside:
+      type: array
+      items: {type: integer}
+      not:
+        prefixItems: [{const: 0}]
+`, Options{})
+	elem := func(name string) *Ref { return typeNamed(t, m, name).Underlying.Elem }
+	if e := elem("Same"); e.Kind != Builtin || e.Name != "string" {
+		t.Errorf("Same items = %+v", e)
+	}
+	// items do not describe the first position: any.
+	mixed := typeNamed(t, m, "Mixed").Underlying
+	if mixed.Elem.Kind != Any || len(mixed.Checks.PrefixItems) != 2 || mixed.Checks.RestItems == nil {
+		t.Errorf("Mixed = %+v %+v", mixed.Elem, mixed.Checks)
+	}
+	// Without items, the other items may be anything.
+	if e := elem("Open"); e.Kind != Any {
+		t.Errorf("Open items = %+v", e)
+	}
+	inside := typeNamed(t, m, "Inside").Underlying.Checks.Rules
+	if len(inside) != 1 || len(inside[0].Schema.PrefixItems) != 1 {
+		t.Errorf("Inside rules = %+v", inside)
+	}
+	for _, w := range m.Warnings {
+		t.Errorf("warning: %s", w.Message)
 	}
 }

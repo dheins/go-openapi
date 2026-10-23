@@ -4,6 +4,33 @@
 
 ### Added
 
+- `unevaluatedItems` is checked where it is plain: without `items`,
+  `contains` or applicators that evaluate items, it applies to the items
+  after `prefixItems`, as `items` would (`false` limits the length, a
+  schema types the items). Other uses are still reported.
+- `prefixItems`: each position is checked against its subschema, the
+  other items against `items`, and `items: false` limits the length. When
+  every position has one schema the items keep its type. Subschemas on
+  values of any type are checked by the value's JSON type, so `not`, `if`
+  and the others work on untyped values too.
+- `patternProperties`: a struct keeps its undeclared properties whose
+  names match a pattern in a `PatternProperties map[string]T` field, typed
+  by the pattern's schema, decoded, validated and encoded like additional
+  properties; declared properties and map keys whose names match are
+  checked against the pattern's subschema.
+- `not`, `if`/`then`/`else`, `contains` with `minContains` and
+  `maxContains`, and `dependentSchemas` are checked by `Validate` instead
+  of being warned about. Subschemas are checked against the value's Go
+  type, with required properties, constraints on properties and items,
+  `allOf`, `$ref`, types and these keywords nested; problems keep their
+  paths (`/lines: must contain at least 1 item matching contains, has 0`).
+- `dependentRequired` and `propertyNames` are checked instead of being
+  warned about: a present property's dependencies must be present
+  (`/billingAddress: required when "creditCard" is present`), and property
+  names must pass a `propertyNames` string schema (`/Bad_key: property
+  name: must match the pattern ...`), for structs, their `allOf` members
+  and maps. Names of undeclared properties a struct does not keep are
+  checked while decoding.
 - Multipart file parts written the OpenAPI 3.1 way: a string with a
   `contentMediaType`, or a property without a type, is an `oapi.File`
   (only in `multipart/form-data` bodies; elsewhere such a string stays a
@@ -82,6 +109,8 @@
 - Requires Go 1.27.3, whose `crypto/x509` distrusts compromised
   intermediate certificates (GO-2026-6809); the loader's `HTTPFetcher`
   verifies certificates with it.
+- `github.com/dlclark/regexp2`, which matches ECMA-262 patterns Go's
+  `regexp` cannot compile, is updated to v1.12.0.
 - Regenerate servers: multipart properties typed `string` or `any` because
   of a `contentMediaType` or a missing type become `oapi.File`.
 - Operations accepting media types with different schemas now accept all
@@ -101,6 +130,17 @@
   request bodies with a schema are decoded instead of being answered with
   415 next to JSON, or passed on as bytes when alone; `text/xml` with a
   schema is no longer a string.
+- Values that break `not`, `if`/`then`/`else`, `contains`,
+  `dependentSchemas`, `dependentRequired` or `propertyNames` used to pass
+  validation, with a warning at generation time; requests with them are
+  answered with 400 now. A `oneOf` member with `not` can make a value
+  match one member where it matched several.
+- Arrays with `prefixItems` whose positions have different schemas have
+  items of any type (`[]any`); with an `items` schema they were typed by
+  it, and decoding failed for positions of another type.
+- Properties whose names match a pattern of `patternProperties` are no
+  longer additional properties: `additionalProperties: false` allows them,
+  and objects that keep no additional properties keep them.
 - Documents, and the files they refer to, that repeat a key in a mapping
   no longer load: `goapi validate` and `goapi generate` report the key
   and where it is repeated.

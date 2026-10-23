@@ -69,10 +69,19 @@ func (f *fileGen) appendStmts(t *ir.Type) string {
 		w(1, "}")
 		fallible = true
 	}
+	// Undeclared properties: additional ones, then those matching a
+	// pattern of patternProperties.
+	var maps []string
 	if a := t.Additional; a != nil && !a.Forbidden {
-		w(1, "for _, name := range %s.Sorted(%s.Keys(m.%s)) {", f.imp("slices", "slices"), f.imp("maps", "maps"), a.FieldName)
+		maps = append(maps, a.FieldName)
+	}
+	if pp := t.Patterns; pp != nil {
+		maps = append(maps, pp.FieldName)
+	}
+	for _, field := range maps {
+		w(1, "for _, name := range %s.Sorted(%s.Keys(m.%s)) {", f.imp("slices", "slices"), f.imp("maps", "maps"), field)
 		w(2, "dst = append(oapi.AppendString(dst, name), ':')")
-		w(2, "if dst, err = oapi.AppendValue(dst, m.%s[name], dir); err != nil {", a.FieldName)
+		w(2, "if dst, err = oapi.AppendValue(dst, m.%s[name], dir); err != nil {", field)
 		w(3, "return nil, %s.Errorf(\"%%s: %%w\", name, err)", f.imp("fmt", "fmt"))
 		w(2, "}")
 		w(2, "dst = append(dst, ',')")

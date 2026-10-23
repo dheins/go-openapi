@@ -33,6 +33,11 @@ type {{.Name}} struct {
 	// {{.FieldName}} holds the properties that are not declared above.
 	{{.FieldName}} map[string]{{goType .Value}} `json:"-"`
 {{- end}}{{end}}
+{{- with .Patterns}}
+	// {{.FieldName}} holds the undeclared properties whose names match a
+	// pattern of patternProperties.
+	{{.FieldName}} map[string]{{goType .Value}} `json:"-"`
+{{- end}}
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -100,6 +105,7 @@ func (m {{.Name}}) Validate() error {
 	return errs.Err()
 }
 {{- alternativeMethods .}}
+{{- propertyNameMethod .}}
 {{- end}}
 
 {{define "union"}}

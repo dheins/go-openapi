@@ -318,7 +318,14 @@ func TestSealedWrappers(t *testing.T) {
 	if out, err := json.Marshal(NewLoose(LooseVariant2{Value: []any{1.0}})); err != nil || string(out) != `[1]` {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
-	assertMessages(t, json.Unmarshal([]byte(`5`), &l), "matches several variants (Integer, Variant2), but exactly one is allowed")
+	// 5 is an integer, which the second variant (not integer) rules out.
+	if err := json.Unmarshal([]byte(`5`), &l); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := l.Value().(LooseInteger); !ok || v != 5 {
+		t.Errorf("loose = %#v", l.Value())
+	}
+	assertMessages(t, NewLoose(LooseVariant2{Value: 5.0}).Validate(), "must not match the schema in not")
 }
 
 func TestUntaggedUnions(t *testing.T) {
@@ -785,4 +792,182 @@ func TestDecodeProblems(t *testing.T) {
 			t.Errorf("Animal %s:\ngot  %s\nwant %s", tt.in, got, tt.want)
 		}
 	}
+}
+
+func TestDependentRequiredAndPropertyNames(t *testing.T) {
+	decode := func(data string, v interface{ Validate() error }) error {
+		t.Helper()
+		if err := json.Unmarshal([]byte(data), v); err != nil {
+			return err
+		}
+		return v.Validate()
+	}
+	var p Payment
+	assertMessages(t, decode(`{"creditCard": "4111", "name": "Ann", "nickname": "A", "zip": "1"}`, &p),
+		`/billingAddress: required when "creditCard" is present`)
+	if err := decode(`{"creditCard": "4111", "billingAddress": "Main St"}`, &p); err != nil {
+		t.Errorf("valid payment: %v", err)
+	}
+	// Undeclared names are kept and checked; so is a declared name that
+	// propertyNames rules out, when it is there.
+	assertMessages(t, decode(`{"name": "Ann", "Legacy_ID": "7", "Bad_key": "x"}`, &p),
+		`/nickname: required when "name" is present`,
+		`/Legacy_ID: property name: must match the pattern ^[a-z][a-zA-Z]*$`,
+		`/Bad_key: property name: must match the pattern ^[a-z][a-zA-Z]*$`)
+
+	var d Dictionary
+	assertMessages(t, decode(`{"min": 1, "toolong": 2, "A": 3}`, &d),
+		`/max: required when "min" is present`,
+		`/A: property name: must match the pattern ^[a-z]+$`,
+		`/toolong: property name: length must be at most 5`)
+	var valid Dictionary
+	if err := decode(`{"min": 1, "max": 2}`, &valid); err != nil {
+		t.Errorf("valid dictionary: %v", err)
+	}
+
+	// Strict keeps no undeclared properties: their names are checked
+	// while decoding.
+	var s Strict
+	assertMessages(t, json.Unmarshal([]byte(`{"id": 1, "x": 2, "ok": 3}`), &s), `/x: property name: length must be at least 2`)
+}
+
+func TestSubschemaKeywords(t *testing.T) {
+	decode := func(data string, v interface{ Validate() error }) error {
+		t.Helper()
+		if err := json.Unmarshal([]byte(data), v); err != nil {
+			return err
+		}
+		return v.Validate()
+	}
+	// if/then/else: US addresses need a state and a five-digit code.
+	assertMessages(t, decode(`{"country": "US", "postalCode": "1234"}`, new(Shipment)),
+		"/state: required property is missing", "/postalCode: must match the pattern ^[0-9]{5}$")
+	assertMessages(t, decode(`{"country": "FR", "postalCode": "12"}`, new(Shipment)), "/postalCode: length must be at least 3")
+	if err := decode(`{"country": "US", "state": "NY", "postalCode": "10001"}`, new(Shipment)); err != nil {
+		t.Errorf("valid shipment: %v", err)
+	}
+	if err := decode(`{"postalCode": "12345678"}`, new(Shipment)); err != nil {
+		t.Errorf("shipment without country: %v", err)
+	}
+
+	// not: a ticket cannot be both cancelled and refunded.
+	assertMessages(t, decode(`{"cancelled": true, "refunded": false}`, new(Ticket)), "must not match the schema in not")
+	if err := decode(`{"cancelled": true}`, new(Ticket)); err != nil {
+		t.Errorf("valid ticket: %v", err)
+	}
+
+	// contains with minContains (default 1) and maxContains.
+	assertMessages(t, decode(`{"lines": [{"sku": "a"}], "flags": ["urgent", "urgent"]}`, new(Order)),
+		"/lines: must contain at least 1 item matching contains, has 0",
+		"/flags: must contain at most 1 item matching contains, has 2")
+	assertMessages(t, decode(`{"lines": [{"gift": true}, {"gift": true}, {"gift": true}]}`, new(Order)),
+		"/lines: must contain at most 2 items matching contains, has 3")
+	if err := decode(`{"lines": [{"gift": false}, {"gift": true}], "flags": []}`, new(Order)); err != nil {
+		t.Errorf("valid order: %v", err)
+	}
+
+	// dependentSchemas applies when the property is there.
+	assertMessages(t, decode(`{"creditCard": "4111"}`, new(Checkout)), "/billingAddress: required property is missing")
+	assertMessages(t, decode(`{"creditCard": "4111", "billingAddress": "x"}`, new(Checkout)), "/billingAddress: length must be at least 5")
+	if err := decode(`{"billingAddress": "x"}`, new(Checkout)); err != nil {
+		t.Errorf("checkout without a card: %v", err)
+	}
+
+	// On scalars: not, and if/then with an integer check of a number.
+	assertMessages(t, Rating(0).Validate(), "must not match the schema in not")
+	assertMessages(t, Rating(12.5).Validate(), "must be an integer")
+	if err := Rating(12).Validate(); err != nil {
+		t.Errorf("rating 12: %v", err)
+	}
+	if err := Rating(2.5).Validate(); err != nil {
+		t.Errorf("rating 2.5: %v", err)
+	}
+	assertMessages(t, Grade("Abcd").Validate(), "length must be at most 3")
+	if err := Grade("Bcdef").Validate(); err != nil {
+		t.Errorf("grade Bcdef: %v", err)
+	}
+}
+
+func TestPatternProperties(t *testing.T) {
+	// Names matching ^x- are kept and checked; others are not allowed.
+	var e Extensions
+	assertMessages(t, json.Unmarshal([]byte(`{"name": "n", "x-a": "b", "other": 1}`), &e), "/other: property is not allowed")
+	if err := json.Unmarshal([]byte(`{"name": "n", "x-a": "b", "x-internal": "i"}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.PatternProperties["x-a"] != "b" || e.XInternal.Value != "i" {
+		t.Errorf("extensions = %+v", e)
+	}
+	if out, err := json.Marshal(e); err != nil || string(out) != `{"name":"n","x-internal":"i","x-a":"b"}` {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+	e.PatternProperties["x-long"] = "0123456789a"
+	e.XInternal = oapi.Some("0123456789a")
+	// A declared property whose name matches is checked too.
+	assertMessages(t, e.Validate(), "/x-internal: length must be at most 10", "/x-long: length must be at most 10")
+
+	// On a map, each pattern's subschema applies to the keys it matches.
+	var h HeaderMap
+	if err := json.Unmarshal([]byte(`{"X-A": "", "Content-Type": "html", "Other": ""}`), &h); err != nil {
+		t.Fatal(err)
+	}
+	assertMessages(t, h.Validate(), `/Content-Type: must be one of "json", "xml"`, "/X-A: length must be at least 1")
+
+	// Matching values are typed, and validated as their type.
+	var l Labelled
+	if err := json.Unmarshal([]byte(`{"id": 1, "l_home": {"code": "ABC"}, "Other": 3}`), &l); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l.PatternProperties["l_home"]; !ok || len(l.PatternProperties) != 1 {
+		t.Errorf("labelled = %+v", l)
+	}
+	assertMessages(t, l.Validate(), "/l_home/code: length must be at most 2")
+	assertMessages(t, json.Unmarshal([]byte(`{"l_home": 3}`), &l), "/l_home: expected object, got number")
+}
+
+func TestPrefixItems(t *testing.T) {
+	decode := func(data string, v interface{ Validate() error }) error {
+		t.Helper()
+		if err := json.Unmarshal([]byte(data), v); err != nil {
+			return err
+		}
+		return v.Validate()
+	}
+	// Positions with different schemas: items of any type, checked by
+	// position; items: false allows no more.
+	assertMessages(t, decode(`[91, -181, 1]`, new(Point)),
+		"must have at most 2 items", "/0: must be at most 90", "/1: must be at least -180")
+	if err := decode(`[45.5, 10]`, new(Point)); err != nil {
+		t.Errorf("valid point: %v", err)
+	}
+	assertMessages(t, decode(`["", -1, "x", true]`, new(Pair)),
+		"/0: length must be at least 1", "/1: must be at least 0", "/2: must be of type boolean")
+	assertMessages(t, decode(`[null, 1.5]`, new(Pair)), "/0: must not be null", "/1: must be an integer")
+	if err := decode(`["a", 1, true, false]`, new(Pair)); err != nil {
+		t.Errorf("valid pair: %v", err)
+	}
+	// One schema for every position: typed items.
+	assertMessages(t, decode(`[1, 2, 3, 4]`, new(Triple)), "must have at most 3 items")
+	assertMessages(t, oapi.Decode([]byte(`["a"]`), new(Triple)), "/0: expected integer, got string")
+
+	// Subschemas on values of any type apply to the values of their type.
+	assertMessages(t, decode(`{"extra": {"secret": 1}, "note": "abcd"}`, new(Meta)),
+		"/extra: must not match the schema in not", "/note: length must be at most 3")
+	if err := decode(`{"extra": {"public": 1}, "note": 12345}`, new(Meta)); err != nil {
+		t.Errorf("valid meta: %v", err)
+	}
+}
+
+func TestUnevaluatedItems(t *testing.T) {
+	var o Ordered
+	if err := json.Unmarshal([]byte(`["a", 1, 2]`), &o); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing evaluates the third item, and unevaluatedItems is false.
+	assertMessages(t, o.Validate(), "must have at most 2 items")
+	if err := oapi.Decode([]byte(`["a", 1]`), &o); err != nil || o.Validate() != nil {
+		t.Errorf("valid ordered: %v, %v", err, o.Validate())
+	}
+	var f Flags
+	assertMessages(t, oapi.Decode([]byte(`[true, "no"]`), &f), "/1: expected boolean, got string")
 }

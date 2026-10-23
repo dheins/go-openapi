@@ -5,6 +5,7 @@ package petstore
 import (
 	"encoding/json"
 	"errors"
+	"math"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -78,6 +79,26 @@ func (u *Loose) DecodeJSON(data []byte, dir oapi.Direction) error {
 			if err := oapi.DecodeField(raw, &x, false, dir); err != nil {
 				return err
 			}
+			var errs oapi.ValidationErrors
+			if func() bool {
+				var errs oapi.ValidationErrors
+				switch x4 := x.(type) {
+				case nil:
+					errs.Add("", "must not be null")
+				case string, bool, []any, map[string]any:
+					errs.Add("", "must be of type integer")
+				case float64:
+					if f := float64(x4); f != math.Trunc(f) {
+						errs.Add("", "must be an integer")
+					}
+				}
+				return len(errs) == 0
+			}() {
+				errs.Add("", "must not match the schema in not")
+			}
+			if err := errs.Err(); err != nil {
+				return err
+			}
 			v.value = LooseVariant2{Value: x}
 			return nil
 		}},
@@ -113,11 +134,27 @@ func (u Loose) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 // Validate checks that a variant is set, and validates it.
 func (u Loose) Validate() error {
 	var errs oapi.ValidationErrors
-	switch u.value.(type) {
+	switch val := u.value.(type) {
 	case nil:
 		errs.Add("", "no variant is set")
 	case LooseInteger:
 	case LooseVariant2:
+		if func() bool {
+			var errs oapi.ValidationErrors
+			switch x3 := val.Value.(type) {
+			case nil:
+				errs.Add("", "must not be null")
+			case string, bool, []any, map[string]any:
+				errs.Add("", "must be of type integer")
+			case float64:
+				if f := float64(x3); f != math.Trunc(f) {
+					errs.Add("", "must be an integer")
+				}
+			}
+			return len(errs) == 0
+		}() {
+			errs.Add("", "must not match the schema in not")
+		}
 	}
 	return errs.Err()
 }

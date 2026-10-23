@@ -95,6 +95,7 @@ position, for every schema feature it cannot represent; see
 | `allOf` | one struct with the properties of every member |
 | `format: date-time` / `date` / `byte` / `binary` | `time.Time` / `oapi.Date` / `[]byte` / `oapi.File` |
 | `additionalProperties: {schema}` | `AdditionalProperties map[string]T` |
+| `patternProperties` on an object | `PatternProperties map[string]T`, for undeclared properties whose names match |
 
 `oapi.Optional[T]` distinguishes an absent property from one set to its
 zero value; `oapi.Nullable[T]` is null when `Valid` is false:
@@ -109,7 +110,31 @@ if name, ok := pet.Nickname.Get(); ok { ... }  // read
 
 `json.Unmarshal` into a generated type reports every problem with a JSON
 pointer, and `Validate` checks the remaining constraints (lengths,
-patterns, bounds, formats, enums, unique items, ...). Patterns are
+patterns, bounds, formats, enums, unique items, property counts,
+`dependentRequired`, and `propertyNames` for string schemas, ...), and
+applies subschemas: `not`, `if`/`then`/`else`, `contains` with
+`minContains`/`maxContains`, `dependentSchemas`, and `patternProperties`
+(to declared properties, kept ones and map keys whose names match; such
+names are not additional properties, so `additionalProperties: false`
+allows them). Patterns with different schemas are not applied yet.
+An array with `prefixItems` has items of the positions' type when every
+position (and `items`) has the same schema, and of any type otherwise;
+each position is then checked against its subschema and the other items
+against `items` (`items: false` allows no more). `unevaluatedItems` is
+`items` for the items after the schema's own `prefixItems`, when no
+`contains` or other applicator evaluates items; otherwise it is reported
+and not checked. Subschemas on values of
+any type apply to the values of their JSON type, as JSON Schema says:
+`minLength` to strings, `required` to objects, and so on. A subschema is
+checked against the value's Go type: required properties, constraints on
+properties and items, `allOf`, `$ref`, types (an integer check of a
+number, the JSON type of an untyped value), and these keywords nested.
+Subschemas with `anyOf`/`oneOf`, or `additionalProperties` and property
+counts of a struct, are not checked yet, with a warning.
+A property name that fails `propertyNames` is reported at the property
+(`/Bad_key: property name: must match the pattern ...`); names of
+undeclared properties the type does not keep are checked while decoding,
+since they are dropped then. Patterns are
 ECMA-262: those Go's `regexp` cannot compile (lookarounds,
 backreferences) are matched by a backtracking engine, with a 100 ms limit
 per match so that a crafted value cannot tie up the server.

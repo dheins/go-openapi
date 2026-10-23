@@ -439,3 +439,178 @@ components:
     Password:
       type: string
       pattern: "^(?=.*[0-9])(?=.*[A-Z]).{8,}$"
+    Payment:
+      description: dependentRequired and propertyNames on an object that keeps
+        additional properties.
+      type: object
+      properties:
+        name:
+          type: string
+        creditCard:
+          type: string
+        billingAddress:
+          type: string
+        Legacy_ID:
+          type: string
+      additionalProperties:
+        type: string
+      propertyNames:
+        pattern: "^[a-z][a-zA-Z]*$"
+      dependentRequired:
+        creditCard: [billingAddress]
+        name: [nickname]
+    Dictionary:
+      description: propertyNames and dependentRequired on a map.
+      type: object
+      additionalProperties:
+        type: integer
+      propertyNames:
+        maxLength: 5
+        pattern: "^[a-z]+$"
+      dependentRequired:
+        min: [max]
+    Strict:
+      description: Undeclared names are dropped, but checked first.
+      type: object
+      properties:
+        id:
+          type: integer
+      propertyNames:
+        minLength: 2
+    Shipment:
+      description: if/then/else on an object.
+      type: object
+      properties:
+        country: {type: string}
+        state: {type: string}
+        postalCode: {type: string}
+      if:
+        properties:
+          country: {const: US}
+        required: [country]
+      then:
+        required: [state]
+        properties:
+          postalCode: {pattern: "^[0-9]{5}$"}
+      else:
+        properties:
+          postalCode: {minLength: 3}
+    Ticket:
+      description: not with required.
+      type: object
+      properties:
+        cancelled: {type: boolean}
+        refunded: {type: boolean}
+      not:
+        required: [cancelled, refunded]
+    Order:
+      description: contains with minContains and maxContains.
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              sku: {type: string}
+              gift: {type: boolean}
+          contains:
+            properties:
+              gift: {const: true}
+            required: [gift]
+          maxContains: 2
+        flags:
+          type: array
+          items: {type: string}
+          contains: {const: urgent}
+          minContains: 0
+          maxContains: 1
+    Checkout:
+      description: dependentSchemas.
+      type: object
+      properties:
+        creditCard: {type: string}
+        billingAddress: {type: string}
+      dependentSchemas:
+        creditCard:
+          required: [billingAddress]
+          properties:
+            billingAddress: {minLength: 5}
+    Rating:
+      description: not and an integer check on a number.
+      type: number
+      not: {const: 0}
+      if: {minimum: 10}
+      then: {type: integer}
+    Grade:
+      type: string
+      if: {pattern: "^A"}
+      then: {maxLength: 3}
+    Extensions:
+      description: patternProperties next to additionalProperties false.
+      type: object
+      properties:
+        name: {type: string}
+        x-internal: {type: string}
+      patternProperties:
+        "^x-":
+          type: string
+          maxLength: 10
+      additionalProperties: false
+    HeaderMap:
+      description: patternProperties on a map.
+      type: object
+      additionalProperties: {type: string}
+      patternProperties:
+        "^X-": {minLength: 1}
+        "^Content-": {enum: [json, xml]}
+    Labelled:
+      description: Values of matching properties are objects.
+      type: object
+      properties:
+        id: {type: integer}
+      patternProperties:
+        "^l_":
+          $ref: "#/components/schemas/Label"
+    Point:
+      description: A tuple whose positions have different bounds.
+      type: array
+      prefixItems:
+        - {type: number, minimum: -90, maximum: 90}
+        - {type: number, minimum: -180, maximum: 180}
+      items: false
+    Pair:
+      type: array
+      prefixItems:
+        - {type: string, minLength: 1}
+        - {type: integer, minimum: 0}
+      items: {type: boolean}
+    Triple:
+      type: array
+      prefixItems: [{type: integer}, {type: integer}, {type: integer}]
+      items: false
+    Meta:
+      description: Subschemas on values of any type.
+      type: object
+      properties:
+        extra:
+          not:
+            type: object
+            required: [secret]
+        note:
+          if: {type: string}
+          then: {maxLength: 3}
+    Ordered:
+      description: unevaluatedItems after prefixItems.
+      type: array
+      prefixItems: [{type: string}, {type: integer}]
+      unevaluatedItems: false
+    Flags:
+      description: unevaluatedItems alone types the items.
+      type: array
+      unevaluatedItems: {type: boolean}
+    Tagged:
+      description: Not checked yet, with a warning.
+      type: array
+      contains: {const: x}
+      unevaluatedItems: {type: string}
