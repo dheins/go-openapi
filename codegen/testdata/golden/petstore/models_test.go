@@ -957,3 +957,17 @@ func TestPrefixItems(t *testing.T) {
 		t.Errorf("valid meta: %v", err)
 	}
 }
+
+func TestUnevaluatedItems(t *testing.T) {
+	var o Ordered
+	if err := json.Unmarshal([]byte(`["a", 1, 2]`), &o); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing evaluates the third item, and unevaluatedItems is false.
+	assertMessages(t, o.Validate(), "must have at most 2 items")
+	if err := oapi.Decode([]byte(`["a", 1]`), &o); err != nil || o.Validate() != nil {
+		t.Errorf("valid ordered: %v, %v", err, o.Validate())
+	}
+	var f Flags
+	assertMessages(t, oapi.Decode([]byte(`[true, "no"]`), &f), "/1: expected boolean, got string")
+}

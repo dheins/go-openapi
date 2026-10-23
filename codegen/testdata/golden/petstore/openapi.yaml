@@ -600,3 +600,17 @@ components:
         note:
           if: {type: string}
           then: {maxLength: 3}
+    Ordered:
+      description: unevaluatedItems after prefixItems.
+      type: array
+      prefixItems: [{type: string}, {type: integer}]
+      unevaluatedItems: false
+    Flags:
+      description: unevaluatedItems alone types the items.
+      type: array
+      unevaluatedItems: {type: boolean}
+    Tagged:
+      description: Not checked yet, with a warning.
+      type: array
+      contains: {const: x}
+      unevaluatedItems: {type: string}

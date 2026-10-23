@@ -215,8 +215,14 @@ func (b *builder) constraint(r *Ref, s *oas.Schema, seen map[*oas.Schema]bool) (
 	switch {
 	case len(s.AnyOf) > 0 || len(s.OneOf) > 0:
 		return nil, "anyOf and oneOf inside a subschema"
-	case s.UnevaluatedItems != nil || s.UnevaluatedProperties != nil:
-		return nil, "unevaluated keywords inside a subschema"
+	case s.UnevaluatedProperties != nil:
+		return nil, "unevaluatedProperties inside a subschema"
+	case s.UnevaluatedItems != nil:
+		es, why := evaluatedItems(s)
+		if why != "" {
+			return nil, why
+		}
+		s = es
 	case s.PatternProperties != nil || s.PropertyNames != nil || s.DependentRequired != nil:
 		return nil, "patternProperties, propertyNames and dependentRequired inside a subschema"
 	case s.DynamicRef != "":
@@ -462,4 +468,28 @@ func (b *builder) tuple(s *oas.Schema, hint string, root *Type) *Ref {
 		checks.RestItems = c
 	}
 	return &Ref{Kind: Slice, Elem: elem, Checks: nilIfEmpty(checks)}
+}
+
+// evaluatedItems returns s with unevaluatedItems written as the items it
+// applies to, when that is plain: without items, contains, or other
+// applicators that may evaluate items, the unevaluated items are those
+// after the schema's own prefixItems, so unevaluatedItems is items; with
+// items, every item is evaluated and it has no effect. Other cases are
+// not checked yet (why).
+func evaluatedItems(s *oas.Schema) (*oas.Schema, string) {
+	es := *s
+	es.UnevaluatedItems = nil
+	if s.Items != nil {
+		return &es, ""
+	}
+	if s.Contains != nil || len(s.AnyOf) > 0 || len(s.OneOf) > 0 || s.If != nil || s.Ref != "" || s.DynamicRef != "" {
+		return nil, "unevaluatedItems next to contains or applicators that may evaluate items"
+	}
+	for _, m := range s.AllOf {
+		if m := deref(m); m != nil && (m.Items != nil || m.PrefixItems != nil || m.Contains != nil || m.UnevaluatedItems != nil) {
+			return nil, "unevaluatedItems next to allOf members that evaluate items"
+		}
+	}
+	es.Items = s.UnevaluatedItems
+	return &es, ""
 }

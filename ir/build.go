@@ -119,7 +119,6 @@ func (b *builder) fill(t *Type) {
 		t.Underlying = wrapNullable(b.use(inner, t.Name, t.Root))
 		return
 	}
-	b.warnUnsupported(s)
 	types, nullable := splitTypes(s)
 	t.NullableUse = nullable
 	switch {
@@ -190,7 +189,6 @@ func (b *builder) use(s *oas.Schema, hint string, root *Type) *Ref {
 		b.fill(t)
 		return namedRef(t)
 	}
-	b.warnUnsupported(s)
 	b.warnUnionKeywords(s)
 	r := b.inline(s, types, hint, root)
 	if nullable {
@@ -797,10 +795,6 @@ func (b *builder) objectParts(top, s *oas.Schema, seen map[*oas.Schema]bool, uni
 			b.warn(s, []string{"allOf", fmt.Sprint(i)}, "allOf member is not an object schema and is not applied")
 			continue
 		}
-		if _, named := b.named[member]; !named {
-			// Named members report their own unsupported keywords.
-			b.warnUnsupported(member)
-		}
 		parts = append(parts, b.objectParts(top, member, seen, unions)...)
 	}
 	return parts
@@ -845,6 +839,14 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 	case "boolean":
 		r = &Ref{Kind: Builtin, Name: "bool", Checks: valueChecks(s)}
 	case "array":
+		if s.UnevaluatedItems != nil {
+			es, why := evaluatedItems(s)
+			if why != "" {
+				b.warn(s, []string{"unevaluatedItems"}, "unevaluatedItems is not checked yet: "+why)
+			} else {
+				s = es
+			}
+		}
 		if len(s.PrefixItems) > 0 {
 			r = b.tuple(s, hint, root)
 		} else {
@@ -1602,19 +1604,9 @@ func literalType(raw json.RawMessage) string {
 	return ""
 }
 
-// warnUnsupported reports keywords of s that the generated type ignores.
-func (b *builder) warnUnsupported(s *oas.Schema) {
-	check := func(present bool, keyword, what string) {
-		if present {
-			b.warn(s, []string{keyword}, what)
-		}
-	}
-	const later = "is not supported yet and is not reflected in the generated type"
-	check(s.UnevaluatedItems != nil, "unevaluatedItems", "unevaluatedItems "+later)
-}
-
-// warnRules reports not, if/then/else, contains and dependentSchemas on a
-// schema whose type does not apply them: an enum, union or composed type.
+// warnRules reports not, if/then/else, contains, dependentSchemas and
+// patternProperties on a schema whose type does not apply them: an enum,
+// union or composed type.
 func (b *builder) warnRules(s *oas.Schema) {
 	const unchecked = "is not checked on %s yet"
 	what := "this kind of type"

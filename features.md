@@ -19,7 +19,8 @@ shipped in.
 ## Models
 
 - Keywords that produce a warning and are not checked:
-  `unevaluatedItems`, `propertyNames` schemas that are not string schemas,
+  `unevaluatedItems` next to `contains` or applicators that evaluate
+  items, `propertyNames` schemas that are not string schemas,
   `patternProperties` whose patterns have different schemas on an object,
   and subschemas (of `not`, `if`,
   `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
@@ -75,7 +76,9 @@ Unreleased:
   against the pattern's subschema. (4bdb21c)
 - [x] `prefixItems`: positions are checked against their subschemas, with
   `items` for the others; subschemas on values of any type are checked by
-  the value's JSON type.
+  the value's JSON type. (d851ec1)
+- [x] `unevaluatedItems` where it is `items` for the items after
+  `prefixItems` (no `contains` or other applicators evaluating items).
 - [x] 3.1-style multipart file parts (a string with `contentMediaType`, or a
   schema without a type) and the multipart `encoding` object: per-part
   content types and required part headers, exposed as `oapi.File.Header`.

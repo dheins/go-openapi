@@ -4,6 +4,10 @@
 
 ### Added
 
+- `unevaluatedItems` is checked where it is plain: without `items`,
+  `contains` or applicators that evaluate items, it applies to the items
+  after `prefixItems`, as `items` would (`false` limits the length, a
+  schema types the items). Other uses are still reported.
 - `prefixItems`: each position is checked against its subschema, the
   other items against `items`, and `items: false` limits the length. When
   every position has one schema the items keep its type. Subschemas on

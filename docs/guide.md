@@ -120,7 +120,10 @@ allows them). Patterns with different schemas are not applied yet.
 An array with `prefixItems` has items of the positions' type when every
 position (and `items`) has the same schema, and of any type otherwise;
 each position is then checked against its subschema and the other items
-against `items` (`items: false` allows no more). Subschemas on values of
+against `items` (`items: false` allows no more). `unevaluatedItems` is
+`items` for the items after the schema's own `prefixItems`, when no
+`contains` or other applicator evaluates items; otherwise it is reported
+and not checked. Subschemas on values of
 any type apply to the values of their JSON type, as JSON Schema says:
 `minLength` to strings, `required` to objects, and so on. A subschema is
 checked against the value's Go type: required properties, constraints on
