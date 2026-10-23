@@ -43,6 +43,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "upload", Name: "Upload", Method: "POST", Path: "/upload"}, "/upload", api.HandleUpload(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "admin", Name: "Admin", Method: "GET", Path: "/admin"}, "/admin", api.HandleAdmin(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "secure", Name: "Secure", Method: "GET", Path: "/secure"}, "/secure", api.HandleSecure(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "subscribe", Name: "Subscribe", Method: "POST", Path: "/subscriptions"}, "/subscriptions", api.HandleSubscribe(cfg, h, sec))
 	cfg.ServeDocument(openAPIDocument)
 	return cfg.Handler()
 }

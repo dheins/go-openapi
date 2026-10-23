@@ -106,6 +106,20 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		}
 		og.add(base+"_handler.go", content)
 	}
+	if sent := sentOperations(m); len(sent) > 0 {
+		for _, o := range sent {
+			if err := og.operationFiles(o); err != nil {
+				return nil, err
+			}
+		}
+		content, err := g.render("sender", sent, func(f *fileGen) {
+			f.imp(clientImport, "client")
+		})
+		if err != nil {
+			return nil, fmt.Errorf("generating sender.go: %w", err)
+		}
+		g.add("sender.go", content)
+	}
 	return packageFiles(gens, order), nil
 }
 

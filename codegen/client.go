@@ -80,6 +80,11 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 				return nil, err
 			}
 		}
+		for _, o := range sentOperations(m) {
+			if err := og.operationFiles(o); err != nil {
+				return nil, err
+			}
+		}
 	}
 	content, err := g.render("client", m, func(f *fileGen) {
 		f.imp(clientImport, "client")
@@ -115,10 +120,71 @@ func (g *generator) operationFiles(o *ir.Operation) error {
 	return nil
 }
 
+// sentOperations returns the webhooks and callbacks of m that are
+// generated: those that are supported, of operations that are.
+func sentOperations(m *ir.Model) []*ir.Operation {
+	var ops []*ir.Operation
+	for _, o := range m.Webhooks {
+		if o.Unsupported == "" {
+			ops = append(ops, o)
+		}
+	}
+	for _, o := range m.Operations {
+		if o.Unsupported != "" {
+			continue
+		}
+		for _, c := range o.Callbacks {
+			if c.Unsupported == "" {
+				ops = append(ops, c)
+			}
+		}
+	}
+	return ops
+}
+
+// senderMethod returns the method of Sender that sends webhook or
+// callback o.
+func (f *fileGen) senderMethod(o *ir.Operation) string {
+	var b strings.Builder
+	w := func(depth int, format string, args ...any) {
+		b.WriteString(strings.Repeat("\t", depth))
+		fmt.Fprintf(&b, format, args...)
+		b.WriteByte('\n')
+	}
+	op := func(name string) string { return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, name) }
+	b.WriteString(wrapComment(fmt.Sprintf("%s sends %s to target. A nil req sends no parameters or body.", o.Name, opLabel(o))))
+	var lines []string
+	if o.Doc != "" {
+		lines = append(lines, "", o.Doc)
+	}
+	if o.Deprecated {
+		lines = append(lines, "", "Deprecated: the operation is marked as deprecated.")
+	}
+	if len(lines) > 0 {
+		b.WriteString(comment("", lines) + "\n")
+	}
+	w(0, "func (s *Sender) %s(ctx %s.Context, target string, req *%s) (%s, error) {", o.Name, f.imp("context", "context"), op(o.RequestType), op(o.ResponseType))
+	w(1, "if req == nil {")
+	w(2, "req = &%s{}", op(o.RequestType))
+	w(1, "}")
+	w(1, "hreq, err := %s(ctx, s.cfg, target, req)", op("New"+o.Name+"Request"))
+	w(1, "if err != nil {")
+	w(2, "return nil, err")
+	w(1, "}")
+	w(1, "resp, err := s.cfg.Do(hreq)")
+	w(1, "if err != nil {")
+	w(2, "return nil, err")
+	w(1, "}")
+	w(1, "return %s(s.cfg, resp)", op("Read"+o.Name+"Response"))
+	w(0, "}")
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 func (f *fileGen) clientFuncs() map[string]any {
 	return map[string]any{
 		"clientOps":      f.clientOps,
 		"clientMethod":   f.clientMethod,
+		"senderMethod":   f.senderMethod,
 		"credentialDoc":  credentialDoc,
 		"credentialType": f.credentialType,
 	}
@@ -136,6 +202,10 @@ func (f *fileGen) clientOps(o *ir.Operation) string {
 	}
 	f.newRequestFunc(w, o)
 	b.WriteString("\n")
+	if o.Kind == ir.Callback && o.Callback.Unsupported == "" {
+		f.callbackURLFunc(w, o)
+		b.WriteString("\n")
+	}
 	f.readResponseFunc(w, o)
 	return strings.TrimSuffix(b.String(), "\n")
 }
@@ -175,8 +245,13 @@ func guarded(w func(int, string, ...any), depth int, cond, stmt string) {
 }
 
 func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
-	w(0, "%s", strings.TrimSuffix(wrapComment(fmt.Sprintf("New%sRequest builds the HTTP request of %s, %s %s, to send with c.", o.Name, o.Name, o.Method, o.Path)), "\n"))
-	w(0, "func New%sRequest(ctx context.Context, c *client.Config, req *%s) (*http.Request, error) {", o.Name, o.RequestType)
+	if o.Kind != ir.PathOperation {
+		w(0, "%s", strings.TrimSuffix(wrapComment(fmt.Sprintf("New%sRequest builds the HTTP request of %s, to send with c to target, an absolute URL.", o.Name, opLabel(o))), "\n"))
+		w(0, "func New%sRequest(ctx context.Context, c *client.Config, target string, req *%s) (*http.Request, error) {", o.Name, o.RequestType)
+	} else {
+		w(0, "%s", strings.TrimSuffix(wrapComment(fmt.Sprintf("New%sRequest builds the HTTP request of %s, %s, to send with c.", o.Name, o.Name, opLabel(o))), "\n"))
+		w(0, "func New%sRequest(ctx context.Context, c *client.Config, req *%s) (*http.Request, error) {", o.Name, o.RequestType)
+	}
 	f.requestValidation(w, o)
 	w(1, "r := client.NewRequest(%q)", o.Method)
 	pathParams := map[string]*ir.Param{}
@@ -185,8 +260,9 @@ func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
 			pathParams[p.Name] = p
 		}
 	}
-	// The path template alternates text and {name} parameters.
-	for rest := o.Path; rest != ""; {
+	// The path template alternates text and {name} parameters; webhooks
+	// and callbacks have no path.
+	for rest := o.Path; o.Kind == ir.PathOperation && rest != ""; {
 		open := strings.Index(rest, "{")
 		end := strings.Index(rest, "}")
 		if open < 0 || end < open {
@@ -238,7 +314,68 @@ func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
 	if len(accept) > 0 {
 		w(1, "r.Accept(%s)", strings.Join(accept, ", "))
 	}
-	w(1, "return c.Build(ctx, r)")
+	if o.Kind != ir.PathOperation {
+		w(1, "return c.BuildTo(ctx, target, r)")
+	} else {
+		w(1, "return c.Build(ctx, r)")
+	}
+	w(0, "}")
+}
+
+// opLabel describes o in documentation: its method and path, or which
+// webhook or callback it is.
+func opLabel(o *ir.Operation) string {
+	switch o.Kind {
+	case ir.Webhook:
+		return fmt.Sprintf("the webhook %q (%s)", o.Webhook, o.Method)
+	case ir.Callback:
+		return fmt.Sprintf("the callback %q of %s (%s %s)", o.Callback.Name, o.Callback.Operation.Name, o.Method, o.Path)
+	}
+	return o.Method + " " + o.Path
+}
+
+// callbackURLFunc writes the function computing the URL of callback o
+// from the request of the operation declaring it.
+func (f *fileGen) callbackURLFunc(w func(int, string, ...any), o *ir.Operation) {
+	cb := o.Callback
+	parent := cb.Operation
+	doc := fmt.Sprintf("%sURL returns the URL of the callback %q of %s for the request req of %s: %s.",
+		o.Name, cb.Name, parent.Name, parent.Name, cb.Expression)
+	w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
+	w(0, "func %sURL(req *%s) (string, error) {", o.Name, parent.RequestType)
+	var terms []string
+	for i, p := range cb.Parts {
+		v := "v" + strconv.Itoa(i)
+		var cond, value, expr, call string
+		switch {
+		case p.Body:
+			field := parent.Body.Fields[0]
+			cond, value = present("req."+field.Name, field.Type)
+			expr = "$request.body"
+			if p.Pointer != "" {
+				expr += "#" + p.Pointer
+			}
+			call = fmt.Sprintf("client.BodyValue(%s, %q)", value, p.Pointer)
+		case p.Param != nil:
+			cond, value = present("req."+p.Param.Field, p.Param.Type)
+			expr = "$request." + p.Param.In + "." + p.Param.Name
+			call = fmt.Sprintf("client.ParamValue(%s)", value)
+		default:
+			terms = append(terms, strconv.Quote(p.Text))
+			continue
+		}
+		if cond != "" {
+			w(1, "if !(%s) {", cond)
+			w(2, "return \"\", client.MissingValue(%q)", expr)
+			w(1, "}")
+		}
+		w(1, "%s, err := %s", v, call)
+		w(1, "if err != nil {")
+		w(2, "return \"\", err")
+		w(1, "}")
+		terms = append(terms, v)
+	}
+	w(1, "return %s, nil", strings.Join(terms, " + "))
 	w(0, "}")
 }
 

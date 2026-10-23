@@ -538,6 +538,94 @@ paths:
       responses:
         "204":
           description: Allowed.
+  /subscriptions:
+    post:
+      operationId: subscribe
+      description: Asks for pet events, sent to the URL in the body, and pings, sent to the URL in X-Callback.
+      parameters:
+        - name: X-Callback
+          in: header
+          schema:
+            type: string
+            format: uri
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+      responses:
+        "201":
+          description: Subscribed.
+      callbacks:
+        petEvent:
+          "{$request.body#/url}/pets/{$method}":
+            post:
+              parameters:
+                - name: X-Event
+                  in: header
+                  required: true
+                  schema:
+                    type: string
+                    enum: [created, deleted]
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: "#/components/schemas/Pet"
+              responses:
+                "204":
+                  description: Received.
+                "410":
+                  description: Unsubscribed.
+        ping:
+          "{$request.header.X-Callback}":
+            get:
+              parameters:
+                - name: n
+                  in: query
+                  schema:
+                    type: integer
+                    minimum: 1
+              responses:
+                "200":
+                  description: Pong.
+                  content:
+                    text/plain:
+                      schema:
+                        type: string
+webhooks:
+  petAdopted:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pet, by]
+              properties:
+                pet:
+                  $ref: "#/components/schemas/Pet"
+                by:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Acknowledged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
 components:
   schemas:
     Scan:

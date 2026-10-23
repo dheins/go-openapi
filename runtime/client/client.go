@@ -54,15 +54,30 @@ type Option func(*Config)
 // NewConfig applies opts to the defaults: http.DefaultClient, request
 // validation, and DefaultMaxResponseBytes.
 func NewConfig(opts ...Option) (*Config, error) {
+	c, err := newConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	if c.BaseURL == nil {
+		return nil, errors.New("client: no base URL; use WithBaseURL")
+	}
+	return c, nil
+}
+
+// NewSenderConfig is NewConfig for sending webhooks and callbacks, which
+// go to the URL given with each request (BuildTo), so it needs no base
+// URL.
+func NewSenderConfig(opts ...Option) (*Config, error) {
+	return newConfig(opts)
+}
+
+func newConfig(opts []Option) (*Config, error) {
 	c := &Config{Doer: http.DefaultClient, Header: http.Header{}, ValidateRequests: true, MaxResponseBytes: DefaultMaxResponseBytes}
 	for _, o := range opts {
 		o(c)
 	}
 	if c.err != nil {
 		return nil, c.err
-	}
-	if c.BaseURL == nil {
-		return nil, errors.New("client: no base URL; use WithBaseURL")
 	}
 	// The first middleware is the outermost.
 	for i := len(c.middleware) - 1; i >= 0; i-- {
@@ -143,6 +158,9 @@ func (c *Config) Build(ctx context.Context, r *Request) (*http.Request, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
+	if c.BaseURL == nil {
+		return nil, errors.New("client: no base URL; use WithBaseURL")
+	}
 	u := *c.BaseURL
 	// The path's parameter values are escaped already.
 	escaped := strings.TrimSuffix(u.EscapedPath(), "/") + r.path.String()
@@ -156,6 +174,37 @@ func (c *Config) Build(ctx context.Context, r *Request) (*http.Request, error) {
 	} else {
 		u.RawQuery = r.query.Encode()
 	}
+	return r.httpRequest(ctx, &u)
+}
+
+// BuildTo turns r, a webhook or callback, into an HTTP request to target,
+// an absolute URL whose query r's query parameters are added to.
+func (c *Config) BuildTo(ctx context.Context, target string, r *Request) (*http.Request, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return nil, fmt.Errorf("client: target URL: %w", err)
+	}
+	if !u.IsAbs() || u.Host == "" {
+		return nil, fmt.Errorf("client: target URL %q is not absolute", target)
+	}
+	switch extra := r.query.Encode(); {
+	case r.rawQuery != "" && u.RawQuery != "":
+		u.RawQuery += "&" + r.rawQuery
+	case r.rawQuery != "":
+		u.RawQuery = r.rawQuery
+	case extra != "" && u.RawQuery != "":
+		u.RawQuery += "&" + extra
+	case extra != "":
+		u.RawQuery = extra
+	}
+	return r.httpRequest(ctx, u)
+}
+
+// httpRequest makes the HTTP request of r to u: its body and headers.
+func (r *Request) httpRequest(ctx context.Context, u *url.URL) (*http.Request, error) {
 	var body io.Reader
 	if r.body != nil {
 		body = bytes.NewReader(r.body)

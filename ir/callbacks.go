@@ -28,6 +28,9 @@ const (
 type CallbackURL struct {
 	// Name is the callback's name, and Expression its key as written.
 	Name, Expression string
+	// Operation is the operation declaring the callback, whose request
+	// the expressions refer to.
+	Operation *Operation
 	// Parts are the URL's text and the request values in it, in order.
 	Parts []URLPart
 	// Unsupported says why the URL cannot be computed from the request,
@@ -93,7 +96,7 @@ func (b *builder) callbacks(parent *Operation, op *oas.Operation, methods namesp
 					site.fallback += " " + method
 				}
 				o := b.operation(key, strings.ToUpper(method), pi, cop, methods, site)
-				o.Callback = &CallbackURL{Name: name, Expression: key, Parts: parts, Unsupported: why}
+				o.Callback = &CallbackURL{Name: name, Expression: key, Operation: parent, Parts: parts, Unsupported: why}
 				if why != "" {
 					b.warnOperation(o, fmt.Sprintf("the URL %q of callback %q: %s; it is not computed, so the sender passes it", key, name, why))
 				}

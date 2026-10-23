@@ -469,3 +469,22 @@ func (c *Client) Secure(ctx context.Context, req *api.SecureRequest) (api.Secure
 	}
 	return api.ReadSecureResponse(c.cfg, resp)
 }
+
+// Subscribe calls POST /subscriptions. A nil req sends no parameters or
+// body.
+//
+// Asks for pet events, sent to the URL in the body, and pings, sent to the URL in X-Callback.
+func (c *Client) Subscribe(ctx context.Context, req *api.SubscribeRequest) (api.SubscribeResponse, error) {
+	if req == nil {
+		req = &api.SubscribeRequest{}
+	}
+	hreq, err := api.NewSubscribeRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadSubscribeResponse(c.cfg, resp)
+}
