@@ -17,6 +17,7 @@ its tests.
 - [Security](#security)
 - [Server options](#server-options)
 - [Generate a client](#generate-a-client)
+- [Webhooks and callbacks](#webhooks-and-callbacks)
 - [Running in production](#running-in-production)
 - [Logging](#logging)
 - [Using the libraries directly](#using-the-libraries-directly)
@@ -638,6 +639,86 @@ with a `*client.Config` from `client.NewConfig`.
 The client does not retry, paginate or cache; middleware does that.
 Required headers of positional parts that are not files cannot be sent yet
 ([features.md](../features.md)).
+
+## Webhooks and callbacks
+
+Webhooks (`webhooks` in the document) and callbacks (`callbacks` of an
+operation) are requests the API sends rather than serves. Each one gets a
+request type, response variants and client functions in the operations
+package, as an operation does, named after its operationId or, without
+one, after the webhook or the operation and callback:
+
+| Declared as | Go name |
+|---|---|
+| webhook `petAdopted` | `PetAdoptedWebhook` (`api.PetAdoptedWebhookRequest`, …) |
+| callback `petEvent` of `subscribe` | `SubscribePetEventCallback` |
+
+The HTTP method is added to the name when a webhook or callback has
+several.
+
+### Sending them
+
+`generate server` adds a `Sender` to the server package, with a method per
+webhook and callback that sends it to a URL given with each request:
+
+```go
+s, err := gen.NewSender(client.WithHTTPClient(hc))
+resp, err := s.PetAdoptedWebhook(ctx, registeredURL, &api.PetAdoptedWebhookRequest{
+	Body: model.PetAdoptedWebhookRequestBody{Pet: pet, By: "ann"},
+})
+```
+
+A webhook goes to a URL its consumer registered out of band. A callback
+goes to the URL its key gives, a runtime expression over the request that
+asked for it. The callback's URL function computes it from that request,
+so a handler can keep it with the subscription:
+
+```go
+// callbacks: {petEvent: {"{$request.body#/url}/pets/{$method}": ...}}
+func (s *store) Subscribe(ctx context.Context, req *api.SubscribeRequest) (api.SubscribeResponse, error) {
+	target, err := api.SubscribePetEventCallbackURL(req) // the body's url + "/pets/POST"
+	if err != nil {
+		return nil, err
+	}
+	s.subscribers = append(s.subscribers, target)
+	return api.Subscribe201Response{}, nil
+}
+```
+
+URL functions handle `$method`, `$request.path.*`, `$request.query.*`,
+`$request.header.*` and `$request.body#/pointer`. Values are put in the
+URL as they are, since the value is often a whole URL. A callback whose
+key uses `$url`, `$statusCode` or `$response.*` gets no URL function, with
+a warning; compute its URL yourself.
+
+The sender is configured like a client, except that it has no base URL.
+It checks requests before sending them (`client.WithoutRequestValidation`
+turns that off), checks responses with `client.WithResponseValidation`,
+and returns the same errors. Responses the webhook does not declare are
+`*client.UnexpectedResponse`s. Retries, delivery queues and request
+signatures are `client.WithMiddleware`, and security requirements of
+webhooks and callbacks are not applied (a warning says so).
+
+### Receiving them
+
+A consumer receives webhooks and callbacks with the handlers both
+`generate server` and `generate client` write to the operations package.
+It implements `api.WebhookHandler` and `api.CallbackHandler`, which have a
+method per webhook and callback like `Handler` has per operation. It then
+routes each handler at the path it registered, or gave as the callback
+URL, with `server.Config.Handle`. That way receivers get the server's
+middleware, panic recovery, observers and logging:
+
+```go
+cfg := server.NewConfig(server.WithAccessLog(slog.LevelInfo))
+cfg.Handle(api.PetAdoptedWebhookOperation, "/hooks/adopted", api.HandlePetAdoptedWebhook(cfg, h))
+cfg.Handle(api.SubscribePetEventCallbackOperation, "/hooks/pets/POST", api.HandleSubscribePetEventCallback(cfg, h))
+http.ListenAndServe(":8080", cfg.Handler())
+```
+
+The handlers decode and check each request before calling the method,
+answer invalid ones with a 400 problem, and send the response variant
+the method returns.
 
 ## Running in production
 

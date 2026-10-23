@@ -17,8 +17,8 @@ built on `net/http`.
 | JSON Schema validation | `santhosh-tekuri/jsonschema/v6` with the official OAS schemas embedded. |
 | Remote `$ref`s | Off by default; local files only unless a `loader.Fetcher` is supplied. |
 
-**Future scope:** codescan (Go source → spec), 2.0 → 3.2 converter,
-webhook/callback generation (next, built on the client), chi adapter.
+**Future scope:** codescan (Go source → spec), 2.0 → 3.2 converter, chi
+adapter.
 
 ## Layout
 
@@ -148,6 +148,30 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
 - *Not done*: retries, pagination and caching are left to `Doer`
   middleware; required headers of non-file positional parts cannot be sent
   ([features.md](../features.md)).
+
+### M6 – Webhooks and callbacks ✅
+- [x] `ir`: webhooks and callbacks as operations of their own kind, with
+  callback URLs parsed into text and request values
+- [x] Sending: a `Sender` in the server package, built on the client
+  runtime, and a URL function per callback
+- [x] Receiving: `WebhookHandler` and `CallbackHandler`, with a handler and
+  a `server.Operation` per webhook and callback, from both generators
+- [x] Round trips of every webhook and callback of the fixture, from the
+  sender to the generated receivers
+
+**How it went**
+- *Reuse*: a webhook or callback is an operation without a route, so its
+  types, `NewXRequest` / `ReadXResponse` and handler come from the same
+  code as operations'. Only the target URL (`Config.BuildTo`) and the
+  interfaces the handlers call are new.
+- *Callback URLs* are typed functions of the declaring operation's request.
+  `FuzzCallbackURL` checks the expression parser.
+- *Receivers* are routed with `server.Config.Handle` at the path the
+  consumer chose, so they get middleware, recovery and observers like
+  operations.
+- *Not done*: security requirements of webhooks and callbacks (left to
+  client middleware), `$url`, `$statusCode` and `$response.*` in callback
+  URLs, and links ([features.md](../features.md)).
 
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
