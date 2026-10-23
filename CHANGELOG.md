@@ -12,7 +12,9 @@
   `-types`. Every operations package now has `NewXRequest` and
   `ReadXResponse` per operation (in `<op>_client.go`), which build the
   HTTP request, validating it first unless disabled, and read the declared
-  response variants.
+  response variants. Parameters with a default are left out when zero, so
+  the server applies the default. The petstore example now generates a
+  client too, used in its tests.
 - `runtime/client`, the runtime of generated clients: `Config` and options
   (base URL, `Doer` and middleware, headers, request and response
   validation, a response size limit); requests with parameters in every

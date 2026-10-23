@@ -3,8 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -266,6 +270,66 @@ func TestGenerateClient(t *testing.T) {
 	if code := run([]string{"generate", "client", "-out", out, "-operations", "", petserverDoc}, &stdout, &stderr); code != exitFailure ||
 		!strings.Contains(stderr.String(), "-operations or -types") {
 		t.Errorf("client without an operations package: exit code %d\nstderr: %s", code, &stderr)
+	}
+}
+
+// TestGenerateOAIExamples generates a server and a client sharing its
+// types for every OpenAPI 3 example of the OpenAPI Initiative, and vets
+// them.
+func TestGenerateOAIExamples(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the go command")
+	}
+	goCmd, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go command not found")
+	}
+	docs, err := filepath.Glob("../../testdata/oai/v3.*/*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inside the module, so that the generated code builds against it; a
+	// directory starting with "_" is left out of ./... patterns.
+	root, err := os.MkdirTemp(".", "_oai-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	const module = "github.com/dheins/go-openapi/cmd/goapi"
+	for _, doc := range docs {
+		name := strings.NewReplacer(".", "_", "-", "_").Replace(filepath.Base(filepath.Dir(doc)) + "_" + strings.TrimSuffix(filepath.Base(doc), ".yaml"))
+		out := filepath.Join(root, name)
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"generate", "server", "-out", filepath.Join(out, "server"), doc}, &stdout, &stderr); code != exitOK {
+			t.Errorf("%s: server: exit code %d\n%s", doc, code, &stderr)
+			continue
+		}
+		types := path.Join(module, filepath.ToSlash(out), "server", "api")
+		if code := run([]string{"generate", "client", "-out", filepath.Join(out, "client"), "-types", types, doc}, &stdout, &stderr); code != exitOK {
+			t.Errorf("%s: client: exit code %d\n%s", doc, code, &stderr)
+		}
+	}
+	// ./... patterns skip the directory, so its packages are listed.
+	var pkgs []string
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".go") && !slices.Contains(pkgs, "./"+filepath.ToSlash(filepath.Dir(p))) {
+			pkgs = append(pkgs, "./"+filepath.ToSlash(filepath.Dir(p)))
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A server, its api package and a client per document, at least.
+	if len(pkgs) < 3*len(docs) {
+		t.Fatalf("only %d packages generated for %d documents: %v", len(pkgs), len(docs), pkgs)
+	}
+	if vet, err := exec.Command(goCmd, append([]string{"vet"}, pkgs...)...).CombinedOutput(); err != nil {
+		t.Errorf("go vet: %v\n%s", err, vet)
 	}
 }
 

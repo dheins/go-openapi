@@ -22,7 +22,7 @@ var listPetsStatusParam = server.Param{Name: "status", Style: "form", Explode: f
 func NewListPetsRequest(ctx context.Context, c *client.Config, req *ListPetsRequest) (*http.Request, error) {
 	if c.ValidateRequests {
 		var b server.Binder
-		{
+		if !client.IsZero(req.Limit) {
 			var errs oapi.ValidationErrors
 			if req.Limit < 1 {
 				errs.Add("", "must be at least 1")
@@ -47,7 +47,9 @@ func NewListPetsRequest(ctx context.Context, c *client.Config, req *ListPetsRequ
 	}
 	r := client.NewRequest("GET")
 	r.Path("/pets")
-	r.QueryParam(listPetsLimitParam, req.Limit)
+	if !client.IsZero(req.Limit) {
+		r.QueryParam(listPetsLimitParam, req.Limit)
+	}
 	if req.After.Set {
 		r.QueryParam(listPetsAfterParam, req.After.Value)
 	}

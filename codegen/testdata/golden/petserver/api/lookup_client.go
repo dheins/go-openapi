@@ -30,7 +30,7 @@ func NewLookupRequest(ctx context.Context, c *client.Config, req *LookupRequest)
 	r := client.NewRequest("GET")
 	r.Path("/lookup")
 	if req.Criteria.Set {
-		r.QueryString(req.Criteria.Value)
+		r.QueryFields(req.Criteria.Value)
 	}
 	return c.Build(ctx, r)
 }

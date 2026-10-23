@@ -46,7 +46,7 @@ func NewListPetsRequest(ctx context.Context, c *client.Config, req *ListPetsRequ
 			}
 			b.Param("header", "X-Request-ID", errs.Err())
 		}
-		{
+		if !client.IsZero(req.Sort) {
 			var errs oapi.ValidationErrors
 			errs.Nested("", req.Sort.Validate())
 			b.Param("query", "sort", errs.Err())
@@ -66,7 +66,9 @@ func NewListPetsRequest(ctx context.Context, c *client.Config, req *ListPetsRequ
 	if req.XRequestID.Set {
 		r.HeaderParam(listPetsXRequestIDParam, req.XRequestID.Value)
 	}
-	r.QueryParam(listPetsSortParam, req.Sort)
+	if !client.IsZero(req.Sort) {
+		r.QueryParam(listPetsSortParam, req.Sort)
+	}
 	r.Accept("application/json")
 	return c.Build(ctx, r)
 }

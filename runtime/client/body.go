@@ -7,6 +7,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -79,42 +80,70 @@ func PartsBody[T any](r *Request, contentType string, items []T, p server.Parts)
 	r.body, r.contentType = data, ct
 }
 
-// MultipartBody sets the body to v, a struct, as multipart/form-data: a
-// part per property, files (properties of type file in obj) with their
-// name, content type and headers, others as text, or as JSON for objects,
-// with the first content type the property's encoding names. Absent
-// optional properties are left out.
+// MultipartBody sets the body to v, a struct or a map with string keys, as
+// multipart/form-data: a part per property, files (properties of type file
+// in obj, or oapi.File values) with their name, content type and headers,
+// others as text, or as JSON for objects, with the first content type the
+// property's encoding names. Absent optional properties are left out.
 func (r *Request) MultipartBody(v any, obj server.Property) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Pointer {
-		rv = rv.Elem()
-	}
-	if rv.Kind() != reflect.Struct {
-		r.fail(fmt.Errorf("body: a multipart body must be a struct, not %T", v))
-		return
-	}
-	for i := range rv.NumField() {
-		name, _, _ := strings.Cut(rv.Type().Field(i).Tag.Get("json"), ",")
-		if name == "" || name == "-" {
-			continue
-		}
-		prop := obj.Properties[name]
-		fv, present := presentValue(rv.Field(i))
+	write := func(name string, fv reflect.Value, prop server.Property) bool {
+		fv, present := presentValue(fv)
 		if !present {
-			continue
+			return true
 		}
 		var err error
-		if prop.Type == "file" {
+		if prop.Type == "file" || fv.Type() == fileType || (fv.Kind() == reflect.Slice && fv.Type().Elem() == fileType) {
 			err = writeFiles(mw, name, fv, prop)
 		} else {
 			err = writeValue(mw, name, fv, prop)
 		}
 		if err != nil {
 			r.fail(fmt.Errorf("body: %s: %w", name, err))
-			return
+			return false
 		}
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer {
+		rv = rv.Elem()
+	}
+	switch {
+	case rv.Kind() == reflect.Struct:
+		for i := range rv.NumField() {
+			name, _, _ := strings.Cut(rv.Type().Field(i).Tag.Get("json"), ",")
+			if name == "" || name == "-" {
+				continue
+			}
+			if !write(name, rv.Field(i), obj.Properties[name]) {
+				return
+			}
+		}
+	case rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String:
+		// Sorted, so that the same value gives the same body.
+		keys := rv.MapKeys()
+		slices.SortFunc(keys, func(a, b reflect.Value) int { return strings.Compare(a.String(), b.String()) })
+		for _, k := range keys {
+			prop, ok := obj.Properties[k.String()]
+			if !ok && obj.Additional != nil {
+				prop = *obj.Additional
+			}
+			fv := rv.MapIndex(k)
+			for fv.Kind() == reflect.Interface && !fv.IsNil() {
+				fv = fv.Elem()
+			}
+			// A null value has no part.
+			if fv.Kind() == reflect.Interface {
+				continue
+			}
+			if !write(k.String(), fv, prop) {
+				return
+			}
+		}
+	default:
+		r.fail(fmt.Errorf("body: a multipart body must be a struct or a map, not %T", v))
+		return
 	}
 	if err := mw.Close(); err != nil {
 		r.fail(err)

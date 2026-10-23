@@ -152,6 +152,17 @@ func present(expr string, r *ir.Ref) (string, string) {
 	return "", expr
 }
 
+// paramPresent is present for parameter p: a parameter with a default
+// holds no value when it is the zero value, so that the server applies
+// the default.
+func paramPresent(p *ir.Param) (string, string) {
+	cond, value := present("req."+p.Field, p.Type)
+	if cond == "" && p.Default != "" {
+		cond = "!client.IsZero(req." + p.Field + ")"
+	}
+	return cond, value
+}
+
 // guarded writes stmt under cond, if there is one.
 func guarded(w func(int, string, ...any), depth int, cond, stmt string) {
 	if cond == "" {
@@ -199,10 +210,10 @@ func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
 		if p.In == "path" {
 			continue
 		}
-		cond, value := present("req."+p.Field, p.Type)
+		cond, value := paramPresent(p)
 		var stmt string
 		switch {
-		case p.In == "querystring" && p.Content == "":
+		case p.In == "querystring" && p.Object:
 			stmt = fmt.Sprintf("r.QueryFields(%s)", value)
 		case p.In == "querystring":
 			stmt = fmt.Sprintf("r.QueryString(%s)", value)
@@ -235,21 +246,30 @@ func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
 // body, which report problems as the server would.
 func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation) {
 	var checks strings.Builder
-	add := func(expr string, r *ir.Ref, record string) {
+	// guard, if not "", is the condition under which the value is sent.
+	add := func(expr string, r *ir.Ref, guard, record string) {
 		stmts := f.validation(expr, r, 3)
 		if stmts == "" {
 			return
 		}
-		checks.WriteString("\t\t{\n\t\t\tvar errs oapi.ValidationErrors\n")
+		open := "\t\t{\n"
+		if guard != "" {
+			open = "\t\tif " + guard + " {\n"
+		}
+		checks.WriteString(open + "\t\t\tvar errs oapi.ValidationErrors\n")
 		checks.WriteString(stmts)
 		checks.WriteString("\t\t\t" + record + "\n\t\t}\n")
 	}
 	for _, p := range o.Params {
-		add("req."+p.Field, p.Type, fmt.Sprintf("b.Param(%q, %q, errs.Err())", p.In, p.Name))
+		guard := ""
+		if p.Default != "" && p.Type.Kind != ir.Optional && p.Type.Kind != ir.Pointer {
+			guard, _ = paramPresent(p)
+		}
+		add("req."+p.Field, p.Type, guard, fmt.Sprintf("b.Param(%q, %q, errs.Err())", p.In, p.Name))
 	}
 	if o.Body != nil {
 		for _, fd := range o.Body.Fields {
-			add("req."+fd.Name, fd.Type, "b.Body(errs.Err())")
+			add("req."+fd.Name, fd.Type, "", "b.Body(errs.Err())")
 		}
 	}
 	if checks.Len() == 0 {

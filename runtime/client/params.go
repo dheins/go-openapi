@@ -343,6 +343,12 @@ func (r *Request) QueryString(v any) {
 	r.rawQuery = url.QueryEscape(compact.String())
 }
 
+// IsZero reports whether v is the zero value of its type: for a parameter
+// with a default, that it is not given, so the server applies the default.
+func IsZero(v any) bool {
+	return v == nil || reflect.ValueOf(v).IsZero()
+}
+
 // scalar formats a parameter value as text.
 func scalar(v any) (string, error) {
 	return server.FormatScalar(v)

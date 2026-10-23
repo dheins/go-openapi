@@ -53,6 +53,13 @@ shipped in.
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
+## Clients
+
+- Required headers of positional parts whose items are not files
+  (`prefixEncoding` or `itemEncoding` headers on JSON parts): a generated
+  client has no field for them, so a server checking them rejects the
+  request. File parts carry theirs in `oapi.File.Header`. — later
+
 ## Logging and telemetry
 
 - Integrations with zap, OpenTelemetry or other vendors are not planned in

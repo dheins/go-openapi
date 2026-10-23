@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,7 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dheins/go-openapi/examples/petstore/gen/api"
+	petclient "github.com/dheins/go-openapi/examples/petstore/gen/client"
 	"github.com/dheins/go-openapi/examples/petstore/gen/model"
+	"github.com/dheins/go-openapi/oapi"
+	"github.com/dheins/go-openapi/runtime/client"
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
@@ -86,6 +91,70 @@ func TestPetstore(t *testing.T) {
 	}
 	if resp, body := send(t, srv, "GET", "/v1/openapi.json", "", ""); resp.StatusCode != 200 || !strings.Contains(body, `"title":"Petstore example"`) {
 		t.Errorf("document: %d %.60s", resp.StatusCode, body)
+	}
+}
+
+// TestPetstoreClient drives the server through the generated client.
+func TestPetstoreClient(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+	newClient := func(key string) *petclient.Client {
+		t.Helper()
+		var creds petclient.Credentials
+		if key != "" {
+			creds.APIKey = func(context.Context) (string, error) { return key, nil }
+		}
+		c, err := petclient.New(creds, client.WithBaseURL(srv.URL+"/v1"), client.WithHTTPClient(srv.Client()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	anon, c := newClient(""), newClient("secret")
+
+	rex := &api.CreatePetRequest{Body: model.Pet{Name: "Rex", Status: model.PetStatusAvailable}}
+	if _, err := anon.CreatePet(ctx, rex); !errors.Is(err, client.ErrNoCredentials) {
+		t.Fatalf("create without key: %v", err)
+	}
+	var unexpected *client.UnexpectedResponse
+	if _, err := newClient("wrong").CreatePet(ctx, rex); !errors.As(err, &unexpected) || unexpected.StatusCode != 401 {
+		t.Fatalf("create with a wrong key: %v", err)
+	}
+	for _, name := range []string{"Rex", "Tom", "Kit"} {
+		resp, err := c.CreatePet(ctx, &api.CreatePetRequest{Body: model.Pet{Name: name, Status: model.PetStatusAvailable}})
+		if created, ok := resp.(api.CreatePet201JSONResponse); err != nil || !ok || created.Body.Name != name || created.Body.ID == 0 {
+			t.Fatalf("create %s: %+v %v", name, resp, err)
+		}
+	}
+	resp, err := c.CreatePet(ctx, rex)
+	if conflict, ok := resp.(api.CreatePet409JSONResponse); err != nil || !ok || !strings.Contains(conflict.Body.Detail.Value, "already exists") {
+		t.Errorf("duplicate: %+v %v", resp, err)
+	}
+
+	list, err := anon.ListPets(ctx, &api.ListPetsRequest{Limit: 2})
+	page, ok := list.(api.ListPets200JSONResponse)
+	if err != nil || !ok || len(page.Body) != 2 || page.XNext.Value != 2 {
+		t.Fatalf("first page: %+v %v", list, err)
+	}
+	list, err = anon.ListPets(ctx, &api.ListPetsRequest{Limit: 2, After: page.XNext})
+	if page, ok := list.(api.ListPets200JSONResponse); err != nil || !ok || len(page.Body) != 1 || page.Body[0].Name != "Kit" || page.XNext.Set {
+		t.Fatalf("second page: %+v %v", list, err)
+	}
+	// An invalid request is reported before it is sent.
+	var invalid *client.InvalidRequest
+	if _, err := anon.ListPets(ctx, &api.ListPetsRequest{Status: oapi.Some([]model.PetStatus{"lost"})}); !errors.As(err, &invalid) {
+		t.Errorf("invalid status: %v", err)
+	}
+
+	if resp, err := c.DeletePet(ctx, &api.DeletePetRequest{PetID: 2}); err != nil || resp != (api.DeletePet204Response{}) {
+		t.Errorf("delete: %+v %v", resp, err)
+	}
+	got, err := anon.GetPet(ctx, &api.GetPetRequest{PetID: 2})
+	if missing, ok := got.(api.GetPet404JSONResponse); err != nil || !ok || !strings.Contains(missing.Body.Detail.Value, "no pet with id 2") {
+		t.Errorf("deleted pet: %+v %v", got, err)
+	}
+	if health, err := anon.GetHealth(ctx, nil); err != nil || health != (api.GetHealth200TextResponse{Body: "OK"}) {
+		t.Errorf("health: %+v %v", health, err)
 	}
 }
 

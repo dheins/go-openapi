@@ -90,6 +90,20 @@ func TestGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if c.opts.Operations {
+				// The client goes to the client subpackage, sharing the
+				// server's operations, as goapi generate client -types
+				// writes it.
+				pkg := "github.com/dheins/go-openapi/codegen/" + filepath.ToSlash(c.dir)
+				clientFiles, err := Client(model, Options{Package: "client", Source: opts.Source, Title: opts.Title,
+					TypesPackage: "api", TypesImport: pkg + "/api"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, f := range clientFiles {
+					files = append(files, File{Name: path.Join("client", f.Name), Content: f.Content})
+				}
+			}
 			var warnings bytes.Buffer
 			for _, w := range model.Warnings {
 				fmt.Fprintf(&warnings, "%d:%d: %s\n", w.Position.Line, w.Position.Column, w.Message)
@@ -105,13 +119,13 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// generatedFiles lists the files of dir and its api and model subpackages
+// generatedFiles lists the files of dir and its api, model and client subpackages
 // that the generator owns, slash-separated and relative to dir: every .go
 // file except tests, plus warnings.txt and openapi.json.
 func generatedFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	var names []string
-	for _, sub := range []string{"", "api", "model"} {
+	for _, sub := range []string{"", "api", "model", "client"} {
 		entries, err := os.ReadDir(filepath.Join(dir, sub))
 		if os.IsNotExist(err) && sub != "" {
 			continue
