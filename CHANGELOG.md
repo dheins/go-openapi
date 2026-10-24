@@ -11,6 +11,9 @@
   checks them against the official Swagger 2.0 schema first, and reports
   what has no OpenAPI 3 equivalent as `conversion` warnings
   (`loader.Spec.Notices`). `Spec.Bundle` returns the converted document.
+- `goapi convert` writes a Swagger 2.0 document as OpenAPI 3.1, in YAML or
+  JSON, with the objects of the other files it refers to copied in. The
+  `generate` commands print the conversion's warnings.
 - `ir` maps webhooks (`Model.Webhooks`) and callbacks
   (`Operation.Callbacks`) to operations, with their callback URLs parsed
   into text and request values (`$method`, `$request.path`, `.query`,
