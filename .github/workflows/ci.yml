@@ -68,6 +68,7 @@ jobs:
           done <<'TARGETS'
           loader FuzzLoadBytes
           validate FuzzSource
+          validate FuzzConvert20
           oapi FuzzDecode
           oapi FuzzDecodeScalar
           oapi FuzzEnsureProperty

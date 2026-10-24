@@ -2,6 +2,7 @@ package validate
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"reflect"
@@ -61,14 +62,51 @@ func validClean(t *testing.T, path string) *loader.Spec {
 	return res.Spec
 }
 
-func TestSwagger2Rejected(t *testing.T) {
-	res, err := File("../testdata/oai/v2.0/petstore.yaml")
+func TestSwagger2(t *testing.T) {
+	spec := validClean(t, "../testdata/oai/v2.0/petstore.yaml")
+	if spec.SourceVersion != "2.0" || spec.Document.OpenAPI != "3.1.0" {
+		t.Errorf("versions: source %q, document %q", spec.SourceVersion, spec.Document.OpenAPI)
+	}
+
+	// Conversion notices are warnings, at the 2.0 fields.
+	res, err := File("../loader/testdata/swagger2/kitchen.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.HasErrors() || !strings.Contains(res.Diagnostics[0].Message, "swagger 2.0") {
-		t.Errorf("diagnostics = %v", res.Diagnostics)
+	var got []string
+	for _, d := range res.Diagnostics {
+		got = append(got, fmt.Sprintf("%s %s %d:%d", d.Severity, d.Rule, d.Position.Line, d.Position.Column))
 	}
+	if want := "warning conversion 51:29,warning conversion 124:16"; strings.Join(got, ",") != want {
+		t.Errorf("diagnostics = %v, want %s", res.Diagnostics, want)
+	}
+
+	// Structural errors are reported against the 2.0 schema, before
+	// conversion.
+	res, err = Source(mustParse(t, `swagger: "2.0"
+info: {title: t, version: v}
+paths:
+  /a:
+    post:
+      parameters:
+        - {name: b, in: body}
+      responses: {"204": {description: ok}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.HasErrors() || res.Diagnostics[0].Rule != RuleStructure || res.Diagnostics[0].Position.Line != 7 {
+		t.Errorf("invalid 2.0: %v", res.Diagnostics)
+	}
+}
+
+func mustParse(t *testing.T, doc string) *loader.Source {
+	t.Helper()
+	src, err := loader.ParseBytes([]byte(doc), "file:///mem/swagger.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return src
 }
 
 // want describes an expected diagnostic.

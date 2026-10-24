@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/dheins/go-openapi/ir"
-	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/validate"
 )
 
@@ -78,11 +77,9 @@ func TestGolden(t *testing.T) {
 				pkg := "github.com/dheins/go-openapi/codegen/" + filepath.ToSlash(c.dir)
 				opts.OperationsPackage, opts.OperationsImport = "api", pkg+"/api"
 				opts.ModelsPackage, opts.ModelsImport = "model", pkg+"/model"
-				src, err := loader.Parse(filepath.Join(c.dir, "openapi.yaml"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if opts.Document, err = src.JSON(); err != nil {
+				// As goapi generate server embeds it: a Swagger 2.0
+				// document as converted.
+				if opts.Document, err = res.Spec.Bundle(); err != nil {
 					t.Fatal(err)
 				}
 			}

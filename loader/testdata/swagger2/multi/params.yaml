@@ -1,0 +1,17 @@
+id:
+  name: id
+  in: path
+  required: true
+  type: integer
+  format: int64
+body:
+  name: pet
+  in: body
+  required: true
+  schema:
+    $ref: "common.yaml#/definitions/Pet"
+photo:
+  name: photo
+  in: formData
+  required: true
+  type: file

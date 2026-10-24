@@ -1,0 +1,35 @@
+swagger: "2.0"
+info:
+  title: Multi-file
+  version: "1.0"
+basePath: /v1
+consumes: [application/json]
+paths:
+  /pets:
+    $ref: "paths.yaml#/pets"
+  /pets/{id}:
+    get:
+      operationId: getPet
+      parameters:
+        - $ref: "params.yaml#/id"
+      responses:
+        "200":
+          $ref: "common.yaml#/responses/PetResponse"
+    put:
+      operationId: putPet
+      parameters:
+        - $ref: "params.yaml#/id"
+        - $ref: "params.yaml#/body"
+      responses:
+        "204":
+          description: Updated.
+  /pets/{id}/photo:
+    post:
+      operationId: uploadPhoto
+      consumes: [multipart/form-data]
+      parameters:
+        - $ref: "params.yaml#/id"
+        - $ref: "params.yaml#/photo"
+      responses:
+        "204":
+          description: Stored.

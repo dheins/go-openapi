@@ -1,0 +1,16 @@
+pets:
+  get:
+    operationId: listPets
+    parameters:
+      - name: tags
+        in: query
+        type: array
+        items:
+          type: string
+    responses:
+      "200":
+        description: The pets.
+        schema:
+          type: array
+          items:
+            $ref: "common.yaml#/definitions/Pet"

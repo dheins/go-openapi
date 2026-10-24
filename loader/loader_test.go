@@ -95,7 +95,8 @@ func TestLoadVersions(t *testing.T) {
 		input   string
 		wantErr error
 	}{
-		{"swagger 2.0", `{"swagger": "2.0"}`, ErrSwagger2},
+		{"swagger 2.0", `{"swagger": "2.0", "info": {"title": "t", "version": "v"}, "paths": {}}`, nil},
+		{"swagger 1.2", `{"swagger": "1.2"}`, ErrUnsupportedVersion},
 		{"unknown version", `{"openapi": "4.0.0"}`, ErrUnsupportedVersion},
 		{"missing version", `{"info": {}}`, ErrUnsupportedVersion},
 		{"json 3.1", `{"openapi": "3.1.1", "info": {"title": "t", "version": "v"}}`, nil},
@@ -147,6 +148,41 @@ func TestUpgrade30(t *testing.T) {
 	min := items.Get.Parameters[0].Schema
 	if min.ExclusiveMinimum != "1" || min.Minimum != "" {
 		t.Errorf("exclusiveMinimum: true not upgraded: min=%q exMin=%q", min.Minimum, min.ExclusiveMinimum)
+	}
+}
+
+func TestUpgrade30NamesLikeExtensions(t *testing.T) {
+	// Properties and headers may be named x-...; they are not extensions.
+	spec, err := LoadBytes([]byte(`openapi: 3.0.3
+info: {title: t, version: v}
+paths:
+  /a:
+    get:
+      responses:
+        "200":
+          description: ok
+          headers:
+            x-next: {schema: {type: string, nullable: true}}
+components:
+  schemas:
+    x-thing:
+      type: object
+      properties:
+        x-flag: {type: boolean, nullable: true}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	thing, _ := spec.Document.Components.Schemas.Get("x-thing")
+	flag, _ := thing.Properties.Get("x-flag")
+	if !flag.Type.Has("null") {
+		t.Errorf("property x-flag not upgraded: %v", flag.Type)
+	}
+	a, _ := spec.Document.Paths.Items.Get("/a")
+	ok, _ := a.Get.Responses.Items.Get("200")
+	next, _ := ok.Headers.Get("x-next")
+	if !next.Schema.Type.Has("null") {
+		t.Errorf("header x-next not upgraded: %v", next.Schema.Type)
 	}
 }
 

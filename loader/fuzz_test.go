@@ -35,7 +35,7 @@ func addSeeds(f *testing.F, patterns ...string) {
 // FuzzLoadBytes checks that any input either fails cleanly or loads, and
 // that a loaded document marshals and loads again.
 func FuzzLoadBytes(f *testing.F) {
-	addSeeds(f, "testdata/*.yaml", "../testdata/oai/v3.*/*.json")
+	addSeeds(f, "testdata/*.yaml", "../testdata/oai/v3.*/*.json", "testdata/swagger2/kitchen.yaml", "../testdata/oai/v2.0/*.yaml")
 	f.Fuzz(func(t *testing.T, data []byte) {
 		spec, err := LoadBytes(data, WithFetcher(noFetch), WithBaseURI("file:///fuzz/openapi.yaml"))
 		if err != nil {

@@ -35,6 +35,7 @@ func (s Severity) String() string {
 // Rule names reported in Diagnostic.Rule.
 const (
 	RuleStructure         = "structure"
+	RuleConversion        = "conversion"
 	RuleReference         = "reference"
 	RuleOperationID       = "operation-id-unique"
 	RulePathParameters    = "path-parameters"
@@ -135,6 +136,9 @@ func Source(src *loader.Source, opts ...loader.Option) (*Result, error) {
 		return res, nil
 	}
 	res.Spec = spec
+	for _, n := range spec.Notices {
+		res.Diagnostics = append(res.Diagnostics, Diagnostic{Severity: Warning, Rule: RuleConversion, Message: n.Message, Location: n.Location, Position: n.Position})
+	}
 
 	diags, err = semantic(spec)
 	if err != nil {
@@ -145,7 +149,7 @@ func Source(src *loader.Source, opts ...loader.Option) (*Result, error) {
 }
 
 // structural validates the whole document against the official schema of
-// its declared version, before any 3.0 upgrade.
+// its declared version, before any 3.0 upgrade or 2.0 conversion.
 func structural(src *loader.Source) ([]Diagnostic, error) {
 	at := func(ptr, msg string) Diagnostic {
 		loc := loader.Location{URI: src.URI(), Pointer: ptr}
@@ -153,7 +157,7 @@ func structural(src *loader.Source) ([]Diagnostic, error) {
 	}
 	ver, ok := versionOf(src.Version())
 	if !ok {
-		// The loader reports unsupported and Swagger 2.0 documents.
+		// The loader reports unsupported versions.
 		err := src.CheckVersion()
 		if err == nil {
 			err = fmt.Errorf("%w: %q", loader.ErrUnsupportedVersion, src.Version())

@@ -13,7 +13,8 @@ import (
 	"github.com/dheins/go-openapi/oas"
 )
 
-// Bundle returns the document as written (a 3.0 document stays 3.0) as a
+// Bundle returns the document as written (a 3.0 document stays 3.0; a
+// Swagger 2.0 document is returned as converted to 3.1) as a
 // single JSON document: the objects references lead to in other files
 // are copied into it, and every reference that leaves the root file, or
 // that is written in a copied object, is rewritten as a JSON pointer into
@@ -127,7 +128,12 @@ func (b *bundler) collectParts() error {
 		}) {
 			continue
 		}
-		tree, err := parseTree(f.JSON)
+		data := f.JSON
+		if f.converted != nil {
+			// A bundle of a 2.0 document is a 3.1 document.
+			data = f.converted
+		}
+		tree, err := parseTree(data)
 		if err != nil {
 			return err
 		}
