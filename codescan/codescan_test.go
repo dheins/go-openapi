@@ -68,6 +68,38 @@ func TestGolden(t *testing.T) {
 	}
 }
 
+// TestScannedGolden checks that the document of codegen's scanned golden
+// case is what scanning its annotated service gives, so the generated
+// server and client there test scanned documents.
+func TestScannedGolden(t *testing.T) {
+	res, err := Scan(Options{Dir: "..", Patterns: []string{"./codegen/testdata/golden/scanned/service"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range res.Diagnostics {
+		t.Errorf("diagnostic: %s", d)
+	}
+	data, err := json.Marshal(res.Document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := toYAML(t, data)
+	golden := "../codegen/testdata/golden/scanned/openapi.yaml"
+	if *update {
+		if err := os.WriteFile(golden, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n")), got) {
+		t.Errorf("%s is not the scan of its service (run go test ./codescan -update, then go test ./codegen -update)", golden)
+	}
+}
+
 func toYAML(t *testing.T, data []byte) []byte {
 	t.Helper()
 	var n yaml.Node

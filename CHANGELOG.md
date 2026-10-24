@@ -14,6 +14,9 @@
   types whose tagged fields are the parameters and body; package comments
   give the info, servers, security schemes, security and tags. A
   document using QUERY or other methods only 3.2 has is 3.2.0.
+- `goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]` writes
+  the document of Go packages, after validating it; annotation errors are
+  printed with their positions and nothing is written.
 - Swagger 2.0 documents are read: the loader converts them to OpenAPI 3.1
   as it loads them (`Spec.SourceVersion` is "2.0"), including the objects
   other 2.0 files hold, so `goapi validate` and every `generate` command

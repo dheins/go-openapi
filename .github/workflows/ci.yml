@@ -80,6 +80,8 @@ jobs:
           runtime/server FuzzObjectJSON
           runtime/server FuzzXMLToJSON
           ir FuzzCallbackURL
+          codescan FuzzParseTag
+          codescan FuzzDirectives
           runtime/client FuzzParamRoundTrip
           codegen/testdata/golden/petstore FuzzModels
           TARGETS
