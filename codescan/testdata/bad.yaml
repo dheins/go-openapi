@@ -1,0 +1,49 @@
+# testdata/bad/bad.go:6:2: error: field A: minLength: "-1" is not a count
+# testdata/bad/bad.go:7:2: error: field B: maximum: "high" is not a number
+# testdata/bad/bad.go:8:2: error: field C: readOnly takes no value
+# testdata/bad/bad.go:9:2: error: field D: unknown key "color"
+# testdata/bad/bad.go:10:2: error: field E: default: "abc" is not JSON
+# testdata/bad/bad.go:11:2: error: field F: pattern needs a value
+# testdata/bad/bad.go:14:1: error: goapi:schema takes at most a name
+# testdata/bad/bad.go:18:1: error: unknown directive goapi:frobnicate on a type
+# testdata/bad/bad.go:19:6: warning: goapi:enum: Empty has no constants
+# testdata/bad/bad.go:26:1: error: unterminated quote in "schema \"unterminated"
+openapi: 3.1.0
+info:
+  title: github.com/dheins/go-openapi/codescan/testdata/bad
+  version: 0.0.0
+components:
+  schemas:
+    Tags:
+      properties:
+        a:
+          type: string
+        b:
+          type: integer
+          format: int64
+        c:
+          type: string
+        d:
+          type: string
+        e:
+          type: integer
+          format: int64
+        f:
+          type: string
+      type: object
+      required:
+        - a
+        - b
+        - c
+        - d
+        - e
+        - f
+    Uses:
+      properties:
+        e:
+          $ref: '#/components/schemas/Empty'
+      type: object
+      required:
+        - e
+    Empty:
+      type: string

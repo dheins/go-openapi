@@ -1,0 +1,343 @@
+# testdata/service/service.go:25:2: warning: field Unused of the request type has no goapi tag with in=; it is left out
+openapi: 3.2.0
+info:
+  title: Pet service
+  description: Pets, as Go code describes them.
+  version: 1.2.0
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: http://localhost:8080/v1
+paths:
+  /pets:
+    get:
+      tags:
+        - pets
+      summary: List pets
+      description: |-
+        ListPets lists the pets.
+
+        It returns a page at a time.
+      operationId: listPets
+      parameters:
+        - name: limit
+          in: query
+          description: Limit is how many pets to return.
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            format: int32
+            default: 20
+        - name: tags
+          in: query
+          description: Tags filters by tag.
+          explode: false
+          schema:
+            items:
+              type: string
+            type: array
+        - name: X-Trace
+          in: header
+          description: Trace is a request id.
+          schema:
+            type: string
+            format: uuid
+        - name: session
+          in: cookie
+          description: Session is the session cookie.
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK.
+          headers:
+            X-Total:
+              required: true
+              schema:
+                type: integer
+                format: int64
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Pet'
+                type: array
+        default:
+          description: An error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+        - {}
+    post:
+      description: CreatePet adds a pet; a plain handler, with its types in directives.
+      operationId: addPet
+      requestBody:
+        description: Pet is the new pet.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pet'
+          application/xml:
+            schema:
+              $ref: '#/components/schemas/Pet'
+        required: true
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        4XX:
+          description: Client error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      deprecated: true
+    additionalOperations:
+      PURGE:
+        description: Purge removes old pets, with a method of 3.2's additionalOperations.
+        operationId: purge
+        responses:
+          "204":
+            description: No Content.
+        security:
+          - apiKey: []
+            bearer: []
+  /pets/{id}:
+    get:
+      tags:
+        - pets
+      description: GetPet returns a pet.
+      operationId: getPet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            format: int64
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        "404":
+          description: Not Found.
+      security:
+        - bearer: []
+        - oauth:
+            - read
+  /pets/{id}/photo:
+    get:
+      description: GetPhoto returns a pet's photo.
+      operationId: getPhoto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            format: int64
+      responses:
+        "200":
+          description: OK.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+    put:
+      description: PutPhoto stores a pet's photo.
+      operationId: putPhoto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: note
+          in: query
+          schema:
+            type: string
+            maxLength: 10
+      requestBody:
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+        required: true
+      responses:
+        "204":
+          description: No Content.
+components:
+  schemas:
+    Pet:
+      properties:
+        id:
+          type: integer
+          format: int64
+          readOnly: true
+        name:
+          type: string
+          maxLength: 50
+          minLength: 1
+          examples:
+            - Rex
+        kind:
+          $ref: '#/components/schemas/Kind'
+          default: dog
+        tag:
+          type: string
+        nickname:
+          type:
+            - string
+            - "null"
+        owner:
+          $ref: '#/components/schemas/Owner'
+        tags:
+          items:
+            type: string
+          type: array
+          maxItems: 10
+          uniqueItems: true
+        scores:
+          additionalProperties:
+            type: number
+          type: object
+        born:
+          type: string
+          format: date
+        seen:
+          type: string
+          format: date-time
+        photo:
+          type: string
+          contentEncoding: base64
+        weight:
+          type: string
+        age:
+          type: integer
+          maximum: 40
+          minimum: 0
+          format: int32
+        extra: {}
+        anything: {}
+        parent:
+          $ref: '#/components/schemas/Pet'
+        friends:
+          items:
+            $ref: '#/components/schemas/PetID'
+          type: array
+          maxItems: 2
+          minItems: 2
+        address:
+          type: string
+        note:
+          type:
+            - string
+            - "null"
+          pattern: ^[a-z;]*$
+        created:
+          type: string
+          format: date-time
+        by:
+          type: string
+        meta:
+          $ref: '#/components/schemas/Meta'
+        label:
+          type: string
+      type: object
+      required:
+        - id
+        - name
+        - kind
+        - nickname
+        - seen
+        - weight
+        - age
+        - friends
+        - note
+        - created
+        - meta
+    Kind:
+      type: string
+    Owner:
+      properties:
+        name:
+          type: string
+        other:
+          $ref: '#/components/schemas/SharedOwner'
+        level:
+          $ref: '#/components/schemas/Level'
+      type: object
+      required:
+        - name
+        - level
+    SharedOwner:
+      properties:
+        email:
+          type: string
+          format: email
+      type: object
+      required:
+        - email
+    Level:
+      type: integer
+      format: int64
+    PetID:
+      type: integer
+      format: int64
+    Meta:
+      properties:
+        version:
+          type: integer
+          format: int64
+      type: object
+      required:
+        - version
+    Problem:
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+          format: int64
+      type: object
+      required:
+        - title
+        - status
+      description: Problem is an error.
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      name: X-API-Key
+      in: header
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    oauth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.example.com/token
+          scopes:
+            read: read
+            write: write
+security:
+  - apiKey: []
+tags:
+  - name: pets
+    description: Everything about pets

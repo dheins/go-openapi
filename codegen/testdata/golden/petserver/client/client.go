@@ -473,6 +473,27 @@ func (c *Client) Secure(ctx context.Context, req *api.SecureRequest) (api.Secure
 	return api.ReadSecureResponse(c.cfg, resp)
 }
 
+// Public calls GET /public. A nil req sends no parameters or body.
+//
+// Open to anyone, though other operations are secured.
+func (c *Client) Public(ctx context.Context, req *api.PublicRequest) (api.PublicResponse, error) {
+	if req == nil {
+		req = &api.PublicRequest{}
+	}
+	hreq, err := api.NewPublicRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Authorize(ctx, hreq, []client.Requirement{{}}); err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPublicResponse(c.cfg, resp)
+}
+
 // Subscribe calls POST /subscriptions. A nil req sends no parameters or
 // body.
 //

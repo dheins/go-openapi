@@ -90,6 +90,10 @@ func (s *store) DeletePet(_ context.Context, req *api.DeletePetRequest) (api.Del
 	return api.DeletePet204Response{}, nil
 }
 
+func (s *store) Public(context.Context, *api.PublicRequest) (api.PublicResponse, error) {
+	return api.Public204Response{}, nil
+}
+
 func (s *store) Subscribe(_ context.Context, req *api.SubscribeRequest) (api.SubscribeResponse, error) {
 	s.seen["Subscribe"] = req
 	return api.Subscribe201Response{}, nil

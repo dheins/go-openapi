@@ -20,6 +20,7 @@ JSON Schema 2020-12; Swagger 2.0 documents are converted as they are read.
   `Date`, validation errors)
 - `runtime/server`, `runtime/problem`: the runtime of generated servers
 - `runtime/client`: the runtime of generated clients
+- `codescan`: generates a document from Go types and `//goapi:` directives
 
 ```go
 spec, err := loader.Load("openapi.yaml")
@@ -38,6 +39,7 @@ go install github.com/dheins/go-openapi/cmd/goapi@latest
 goapi validate openapi.yaml
 goapi validate -format json -quiet openapi.yaml
 goapi convert -out openapi.yaml swagger.yaml          # Swagger 2.0 to OpenAPI 3.1
+goapi scan -out openapi.yaml ./...                    # a document from annotated Go code
 goapi generate model -out internal/models openapi.yaml
 goapi generate server -out internal/gen openapi.yaml   # server in gen, operations in gen/api, schemas in gen/model
 goapi generate client -out internal/petclient -types example.com/shop/internal/gen/api openapi.yaml   # a client sharing the server's types
@@ -127,7 +129,7 @@ metrics.
 
 ## Documentation
 
-- [Guide](docs/guide.md): validation, models, servers, clients, webhooks and callbacks, security, options
+- [Guide](docs/guide.md): validation, models, servers, clients, webhooks and callbacks, documents from Go code, security, options
 - [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-enum-varnames`, `x-enum-descriptions`
 - [Example](examples/petstore): a complete server (`go run ./examples/petstore -key secret`)
 - [Benchmarks](docs/benchmarks.md)

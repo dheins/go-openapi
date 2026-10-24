@@ -17,12 +17,12 @@ built on `net/http`.
 | JSON Schema validation | `santhosh-tekuri/jsonschema/v6` with the official OAS schemas embedded. |
 | Remote `$ref`s | Off by default; local files only unless a `loader.Fetcher` is supplied. |
 
-**Future scope:** codescan (Go source → spec), chi adapter.
+**Future scope:** chi adapter.
 
 ## Layout
 
 ```
-cmd/goapi/       CLI: validate, generate model, generate server, generate client, convert
+cmd/goapi/       CLI: validate, generate model, generate server, generate client, convert, scan
 oas/             Spec model (3.2): Document … Schema, OrderedMap, Extensions
 loader/          JSON/YAML parsing, version handling, 3.0 upgrade, 2.0 conversion, $ref resolution
 validate/        Structural (official OAS schema) + semantic document validation
@@ -195,6 +195,31 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   a schema. The OAI 2.0 petstore found that the 3.0 upgrade skipped
   headers and properties named `x-…`.
 - *Not done*: converting to 3.2.0 ([features.md](../features.md)).
+
+### M8 – Documents from Go code ✅
+- [x] `codescan`: Go packages loaded with `go list` and type-checked from
+  source (the standard library only), types mapped to schemas as
+  `encoding/json` encodes them, keywords from a `goapi` struct tag
+- [x] Operations, security and document metadata from `//goapi:`
+  directives, with positioned diagnostics
+- [x] `goapi scan`, validating what it writes
+- [x] A round trip: the scan of an annotated service drives a generated
+  server and client in the scanned golden case
+
+**How it went**
+- *Syntax*: goapi's own, not go-swagger's: `//goapi:` directives (which
+  `go/doc` already leaves out of doc text) and one struct tag of JSON
+  Schema keyword names, so nothing new has to be learned for the schema
+  part.
+- *Types*: scanned packages are type-checked in dependency order and
+  imported as checked, so a type has one identity across them; their
+  dependencies come from the export data `go list -export` builds.
+- *Version*: documents are 3.1.0 unless they use what only 3.2 has;
+  validating the scanner's own output found `additionalOperations` in a
+  3.1 document.
+- *Found on the way*: a generated server did not compile when an
+  operation's only security requirement was anonymous.
+- *Not done*: see [features.md](../features.md).
 
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).

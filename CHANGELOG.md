@@ -7,6 +7,19 @@
 - Generated clients implement `api.Handler`, which `generate client` now
   writes too, so code using an API can take the interface and be given
   the client or, in tests, a fake.
+- `codescan`: generating an OpenAPI 3.1 document from Go source. Go types
+  become schemas as `encoding/json` encodes them, with the module's
+  `oapi` types understood, doc comments as descriptions, JSON Schema
+  keywords from a `goapi:"…"` struct tag, and `//goapi:schema` and
+  `//goapi:enum` directives; problems are reported at their positions.
+  Operations come from `//goapi:operation`, `//goapi:request`,
+  `//goapi:response` and `//goapi:security` on functions, with request
+  types whose tagged fields are the parameters and body; package comments
+  give the info, servers, security schemes, security and tags. A
+  document using QUERY or other methods only 3.2 has is 3.2.0.
+- `goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]` writes
+  the document of Go packages, after validating it; annotation errors are
+  printed with their positions and nothing is written.
 - Swagger 2.0 documents are read: the loader converts them to OpenAPI 3.1
   as it loads them (`Spec.SourceVersion` is "2.0"), including the objects
   other 2.0 files hold, so `goapi validate` and every `generate` command
@@ -146,6 +159,9 @@
 
 ### Fixed
 
+- A generated server did not compile when an operation's only security
+  requirement was the anonymous one (`security: [{}]`): its handler
+  imported `context` without using it.
 - The 3.0 upgrade skipped properties, headers and component schemas named
   `x-…`, taking them for extensions, so their `nullable`, exclusive bounds
   and `example` stayed 3.0.

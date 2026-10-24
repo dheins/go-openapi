@@ -7,6 +7,7 @@
 //	goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
 //	goapi generate client [-out dir] [-package name] [-types import] file
 //	goapi convert [-out file] [-format yaml|json] file
+//	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
 //	goapi version
 package main
 
@@ -45,6 +46,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runGenerate(args[1:], stdout, stderr)
 	case "convert":
 		return runConvert(args[1:], stdout, stderr)
+	case "scan":
+		return runScan(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
 		fmt.Fprintln(stdout, "goapi", version())
 		return exitOK
@@ -76,6 +79,7 @@ Usage:
   goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
   goapi generate client [-out dir] [-package name] [-types import] file
   goapi convert [-out file] [-format yaml|json] file
+  goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
   goapi version
 
 Commands:
@@ -84,6 +88,7 @@ Commands:
   generate server   generate the types and an HTTP server for a document
   generate client   generate the types and an HTTP client for a document
   convert           write a Swagger 2.0 document as OpenAPI 3.1
+  scan              write the document that goapi directives in Go code describe
   version           print the version of goapi
 `)
 }

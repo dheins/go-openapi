@@ -1,0 +1,109 @@
+package service
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/dheins/go-openapi/codescan/testdata/models"
+	"github.com/dheins/go-openapi/oapi"
+)
+
+// Server implements the pet service.
+type Server struct{}
+
+// ListPetsRequest holds the inputs of ListPets.
+type ListPetsRequest struct {
+	// Limit is how many pets to return.
+	Limit int32 `goapi:"in=query;name=limit;minimum=1;maximum=100;default=20"`
+	// Tags filters by tag.
+	Tags []string `goapi:"in=query;name=tags;explode=false"`
+	// Trace is a request id.
+	Trace string `goapi:"in=header;name=X-Trace;format=uuid"`
+	// Session is the session cookie.
+	Session string `goapi:"in=cookie;name=session;required"`
+	ignored string
+	Unused  string
+}
+
+// PetList is a page of pets with the total in a header.
+type PetList struct {
+	Total int64        `goapi:"in=header;name=X-Total;required"`
+	Pets  []models.Pet `goapi:"in=body"`
+}
+
+// Problem is an error.
+type Problem struct {
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+}
+
+// ListPets lists the pets.
+//
+// It returns a page at a time.
+//
+//goapi:operation GET /pets tags=pets summary="List pets"
+//goapi:response 200 PetList
+//goapi:response default Problem application/problem+json description="An error."
+//goapi:security -
+func (s *Server) ListPets(ctx context.Context, req *ListPetsRequest) (*PetList, error) {
+	return nil, nil
+}
+
+// GetPetRequest holds the inputs of GetPet.
+type GetPetRequest struct {
+	ID int64 `goapi:"in=path;name=id;minimum=1"`
+}
+
+// GetPet returns a pet.
+//
+//goapi:operation GET /pets/{id} tags=pets
+//goapi:response 200 models.Pet
+//goapi:response 404
+//goapi:security bearer
+//goapi:security oauth:read
+func (s *Server) GetPet(ctx context.Context, req GetPetRequest) (models.Pet, error) {
+	return models.Pet{}, nil
+}
+
+// CreatePetRequest holds the inputs of CreatePet.
+type CreatePetRequest struct {
+	// Pet is the new pet.
+	Pet models.Pet `goapi:"in=body;mediaType=application/json|application/xml"`
+}
+
+// CreatePet adds a pet; a plain handler, with its types in directives.
+//
+// Deprecated: use the bulk endpoint.
+//
+//goapi:operation POST /pets id=addPet
+//goapi:request CreatePetRequest
+//goapi:response 201 models.Pet
+//goapi:response 4XX Problem application/problem+json
+func CreatePet(w http.ResponseWriter, r *http.Request) {}
+
+// PhotoRequest holds the inputs of photo operations.
+type PhotoRequest struct {
+	ID    int64                 `goapi:"in=path;name=id"`
+	Photo []byte                `goapi:"in=body;mediaType=image/png"`
+	Note  oapi.Optional[string] `goapi:"in=query;name=note;maxLength=10"`
+}
+
+// PutPhoto stores a pet's photo.
+//
+//goapi:operation PUT /pets/{id}/photo
+//goapi:response 204
+func (s *Server) PutPhoto(ctx context.Context, req *PhotoRequest) error { return nil }
+
+// GetPhoto returns a pet's photo.
+//
+//goapi:operation GET /pets/{id}/photo
+//goapi:request GetPetRequest
+//goapi:response 200 []byte image/png
+func (s *Server) GetPhoto(w http.ResponseWriter, r *http.Request) {}
+
+// Purge removes old pets, with a method of 3.2's additionalOperations.
+//
+//goapi:operation PURGE /pets
+//goapi:response 204
+//goapi:security apiKey bearer
+func (s *Server) Purge(ctx context.Context) error { return nil }
