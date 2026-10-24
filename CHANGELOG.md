@@ -193,6 +193,9 @@
 
 ### Fixed
 
+- Multipart parts of declared properties that are not files were left out
+  when they had a file name, which browsers' `FormData` gives every `Blob`
+  part; they are read as the property's value.
 - A generated server did not compile when an operation's only security
   requirement was the anonymous one (`security: [{}]`): its handler
   imported `context` without using it.
