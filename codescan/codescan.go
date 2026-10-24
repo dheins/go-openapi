@@ -24,8 +24,13 @@ import (
 	"github.com/dheins/go-openapi/oas"
 )
 
-// Version is the "openapi" value of scanned documents.
-const Version = "3.1.0"
+// Version is the "openapi" value of scanned documents, and Version32 that
+// of documents using what only 3.2 has: the QUERY method, other methods
+// (additionalOperations), and tag summaries and parents.
+const (
+	Version   = "3.1.0"
+	Version32 = "3.2.0"
+)
 
 // Options configures a scan.
 type Options struct {
@@ -100,21 +105,30 @@ func Scan(opts Options) (*Result, error) {
 		schemas: &oas.OrderedMap[*oas.Schema]{},
 		names:   map[string]string{},
 		taken:   map[string]bool{},
+		schemes: map[string]bool{},
 	}
 	if s.pkgs, err = load(s.fset, absDir, patterns); err != nil {
 		return nil, err
 	}
 	s.index()
-	for _, td := range s.roots {
-		s.schemaOf(td.obj.Type())
-	}
 	title := "API"
 	if len(s.pkgs) > 0 {
 		title = s.pkgs[len(s.pkgs)-1].path
 	}
 	doc := &oas.Document{OpenAPI: Version, Info: &oas.Info{Title: title, Version: "0.0.0"}}
+	s.documentDirectives(doc)
+	s.operations(doc)
+	if s.uses32 {
+		doc.OpenAPI = Version32
+	}
+	for _, td := range s.roots {
+		s.schemaOf(td.obj.Type())
+	}
 	if s.schemas.Len() > 0 {
-		doc.Components = &oas.Components{Schemas: s.schemas}
+		if doc.Components == nil {
+			doc.Components = &oas.Components{}
+		}
+		doc.Components.Schemas = s.schemas
 	}
 	slices.SortStableFunc(s.diags, func(a, b Diagnostic) int {
 		return cmp.Or(strings.Compare(a.Position.Filename, b.Position.Filename), a.Position.Line-b.Position.Line, a.Position.Column-b.Position.Column)
@@ -132,7 +146,17 @@ type scanner struct {
 	// position of their name, for their comments.
 	fields map[token.Pos]*ast.Field
 	// roots are the types //goapi:schema puts in the document.
-	roots   []*typeDecl
+	roots []*typeDecl
+	// funcs are the functions with goapi directives, and packageDocs the
+	// package comments with some.
+	funcs       []*funcDecl
+	packageDocs []*packageDoc
+	// schemes are the declared security schemes, and schemeUses the
+	// names requirements use.
+	schemes    map[string]bool
+	schemeUses []schemeUse
+	// uses32 says that the document uses what only 3.2 has.
+	uses32  bool
 	schemas *oas.OrderedMap[*oas.Schema]
 	// names are the component names of the named types mapped so far, by
 	// type, and taken the names in use.
@@ -163,18 +187,33 @@ type typeDecl struct {
 }
 
 func (s *scanner) report(pos token.Pos, sev Severity, format string, args ...any) {
+	s.diags = append(s.diags, Diagnostic{Position: s.position(pos), Severity: sev, Message: fmt.Sprintf(format, args...)})
+}
+
+// position returns the position of pos, relative to the scanned
+// directory when it is in it.
+func (s *scanner) position(pos token.Pos) token.Position {
 	p := s.fset.Position(pos)
 	if rel, err := filepath.Rel(s.dir, p.Filename); err == nil && !strings.HasPrefix(rel, "..") {
 		p.Filename = filepath.ToSlash(rel)
 	}
-	s.diags = append(s.diags, Diagnostic{Position: p, Severity: sev, Message: fmt.Sprintf(format, args...)})
+	return p
 }
 
+// where describes pos in a message.
+func (s *scanner) where(pos token.Pos) string { return s.position(pos).String() }
+
 // index records the declarations of the scanned packages: their types,
-// with their directives, and their struct fields.
+// with their directives, their struct fields, and the functions and
+// package comments with directives.
 func (s *scanner) index() {
 	for _, p := range s.pkgs {
 		for _, f := range p.files {
+			if ds, err := directives(f.Doc); err != nil {
+				s.posErr(err)
+			} else if len(ds) > 0 {
+				s.packageDocs = append(s.packageDocs, &packageDoc{pkg: p, ds: ds})
+			}
 			ast.Inspect(f, func(n ast.Node) bool {
 				if st, ok := n.(*ast.StructType); ok {
 					for _, fd := range st.Fields.List {
@@ -186,6 +225,14 @@ func (s *scanner) index() {
 				return true
 			})
 			for _, decl := range f.Decls {
+				if fn, ok := decl.(*ast.FuncDecl); ok {
+					if ds, err := directives(fn.Doc); err != nil {
+						s.posErr(err)
+					} else if len(ds) > 0 {
+						s.funcs = append(s.funcs, &funcDecl{pkg: p, decl: fn, ds: ds})
+					}
+					continue
+				}
 				gen, ok := decl.(*ast.GenDecl)
 				if !ok || gen.Tok != token.TYPE {
 					continue

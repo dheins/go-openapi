@@ -1,0 +1,68 @@
+# testdata/badops/badops.go:5:1: error: goapi:info is given twice, first at testdata/badops/badops.go:4:1
+# testdata/badops/badops.go:6:1: error: goapi:securityScheme: unknown type "magic"
+# testdata/badops/badops.go:7:1: error: goapi:securityScheme: an apiKey scheme needs name= and in=header, query or cookie
+# testdata/badops/badops.go:8:1: error: unknown directive goapi:frobnicate in a package comment
+# testdata/badops/badops.go:13:2: error: field ID: a path parameter is always required
+# testdata/badops/badops.go:14:2: error: path parameter "other" is not in the path /x/{id}/{gone}
+# testdata/badops/badops.go:15:2: error: field Where: in=bogus is not a parameter location
+# testdata/badops/badops.go:16:2: error: field None: the goapi tag of a request field needs in=path, query, header, cookie or body
+# testdata/badops/badops.go:18:2: error: field B: the request type has two in=body fields
+# testdata/badops/badops.go:19:2: error: field M: mediaType is for in=body
+# testdata/badops/badops.go:20:2: error: field E: explode is true or false, not "maybe"
+# testdata/badops/badops.go:25:2: error: field Q: a response field is in=header or in=body, not "query"
+# testdata/badops/badops.go:28:1: error: goapi:response without goapi:operation
+# testdata/badops/badops.go:32:1: error: goapi:operation is given twice
+# testdata/badops/badops.go:36:1: error: goapi:operation: "FETCH!" is not an HTTP method
+# testdata/badops/badops.go:40:1: error: goapi:operation: the path "nopath" does not start with /
+# testdata/badops/badops.go:44:1: error: goapi:operation: unknown key "color"
+# testdata/badops/badops.go:44:1: error: the path parameter "gone" of /x/{id}/{gone} has no request field
+# testdata/badops/badops.go:47:1: error: goapi:response: "600" is not a status code, range (4XX) or default
+# testdata/badops/badops.go:48:1: error: goapi:response: 200 is declared twice
+# testdata/badops/badops.go:49:1: error: goapi:response: "nosuchtype" is not a type
+# testdata/badops/badops.go:50:1: error: goapi:security: no goapi:securityScheme declares "nobody"
+# testdata/badops/badops.go:51:1: error: unknown directive goapi:wiggle on a function
+# testdata/badops/badops.go:54:1: error: goapi:operation GET /quiet declares no goapi:response
+# testdata/badops/badops.go:61:1: error: operationId "same" is already used at testdata/badops/badops.go:57:1
+# testdata/badops/badops.go:65:1: error: GET /dup is declared twice
+openapi: 3.1.0
+info:
+  title: Bad
+  version: "1"
+paths:
+  /x/{id}/{gone}:
+    get:
+      operationId: many
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: M
+          in: query
+          schema:
+            type: string
+        - name: E
+          in: query
+          explode: false
+          schema:
+            type: boolean
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+              contentEncoding: base64
+        required: true
+      responses:
+        "200":
+          description: OK.
+      security:
+        - nobody: []
+  /dup:
+    get:
+      operationId: same
+      responses:
+        "200":
+          description: OK.

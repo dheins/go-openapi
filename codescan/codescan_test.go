@@ -19,9 +19,10 @@ import (
 var update = flag.Bool("update", false, "rewrite the expected documents in testdata")
 
 // TestGolden scans each fixture package and compares the document, with
-// the diagnostics, to testdata/<name>.yaml; every document must be valid.
+// the diagnostics, to testdata/<name>.yaml; the document of a scan
+// without errors must be valid.
 func TestGolden(t *testing.T) {
-	for _, name := range []string{"models", "bad"} {
+	for _, name := range []string{"models", "bad", "service", "badops"} {
 		t.Run(name, func(t *testing.T) {
 			res, err := Scan(Options{Patterns: []string{"./testdata/" + name}})
 			if err != nil {
@@ -47,6 +48,11 @@ func TestGolden(t *testing.T) {
 				t.Errorf("the document differs from %s (run go test ./codescan -update and review the diff)", golden)
 			}
 
+			// A scan with errors has reported its problems; its document
+			// need not be valid.
+			if res.HasErrors() {
+				return
+			}
 			src, err := loader.ParseBytes(data, "file:///scan/openapi.json")
 			if err != nil {
 				t.Fatal(err)
