@@ -95,7 +95,8 @@ func TestLoadVersions(t *testing.T) {
 		input   string
 		wantErr error
 	}{
-		{"swagger 2.0", `{"swagger": "2.0"}`, ErrSwagger2},
+		{"swagger 2.0", `{"swagger": "2.0", "info": {"title": "t", "version": "v"}, "paths": {}}`, nil},
+		{"swagger 1.2", `{"swagger": "1.2"}`, ErrUnsupportedVersion},
 		{"unknown version", `{"openapi": "4.0.0"}`, ErrUnsupportedVersion},
 		{"missing version", `{"info": {}}`, ErrUnsupportedVersion},
 		{"json 3.1", `{"openapi": "3.1.1", "info": {"title": "t", "version": "v"}}`, nil},

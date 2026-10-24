@@ -220,7 +220,7 @@ components:
   schemas:
     Pet:
       type: object
-      required: [name]
+      required: [name, kind]
       discriminator:
         propertyName: kind
       properties:

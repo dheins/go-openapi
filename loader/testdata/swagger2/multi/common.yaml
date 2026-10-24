@@ -1,0 +1,25 @@
+definitions:
+  Pet:
+    type: object
+    required: [name]
+    properties:
+      name:
+        type: string
+      tag:
+        type: string
+        x-nullable: true
+      owner:
+        $ref: "#/definitions/Owner"
+  Owner:
+    type: object
+    properties:
+      name:
+        type: string
+responses:
+  PetResponse:
+    description: A pet.
+    headers:
+      X-Rate:
+        type: integer
+    schema:
+      $ref: "#/definitions/Pet"

@@ -24,8 +24,10 @@ var schemaFiles embed.FS
 
 // Official schemas published at https://spec.openapis.org. "schema"
 // validates documents without looking inside Schema Objects; "schema-base"
-// also validates Schema Objects against the OpenAPI dialect.
+// also validates Schema Objects against the OpenAPI dialect. The Swagger
+// 2.0 schema is the one archived in the OpenAPI Initiative's repository.
 const (
+	swagger20Schema = "http://swagger.io/v2/schema.json"
 	oas30Schema     = "https://spec.openapis.org/oas/3.0/schema/2024-10-18"
 	oas31Schema     = "https://spec.openapis.org/oas/3.1/schema/2026-08-03"
 	oas31SchemaBase = "https://spec.openapis.org/oas/3.1/schema-base/2026-08-03"
@@ -47,6 +49,15 @@ type version struct {
 }
 
 var versions = map[string]version{
+	"2.0": {
+		schema: swagger20Schema,
+		defs:   "definitions",
+		// A body parameter is decoded as the request body it becomes.
+		fragmentDefs: map[string]string{
+			"Schema": "schema", "Parameter": "nonBodyParameter", "RequestBody": "bodyParameter",
+			"Response": "response", "Header": "header", "PathItem": "pathItem",
+		},
+	},
 	"3.0": {
 		schema: oas30Schema,
 		defs:   "definitions",
@@ -121,6 +132,8 @@ func newValidator() (*validator, error) {
 		if id == "" {
 			return fmt.Errorf("%s: schema has no $id", path)
 		}
+		// The Swagger 2.0 schema's id ends in an empty fragment.
+		id = strings.TrimSuffix(id, "#")
 		for _, key := range []string{"$defs", "definitions"} {
 			if defs, ok := obj[key].(map[string]any); ok {
 				v.defs[id] = defs

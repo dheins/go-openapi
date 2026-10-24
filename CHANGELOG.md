@@ -4,6 +4,13 @@
 
 ### Added
 
+- Swagger 2.0 documents are read: the loader converts them to OpenAPI 3.1
+  as it loads them (`Spec.SourceVersion` is "2.0"), including the objects
+  other 2.0 files hold, so `goapi validate` and every `generate` command
+  accept them. Diagnostics point into the 2.0 files. `goapi validate`
+  checks them against the official Swagger 2.0 schema first, and reports
+  what has no OpenAPI 3 equivalent as `conversion` warnings
+  (`loader.Spec.Notices`). `Spec.Bundle` returns the converted document.
 - `ir` maps webhooks (`Model.Webhooks`) and callbacks
   (`Operation.Callbacks`) to operations, with their callback URLs parsed
   into text and request values (`$method`, `$request.path`, `.query`,
@@ -147,6 +154,8 @@
 
 ### Changed
 
+- `loader.ErrSwagger2` is removed, since 2.0 documents load, and
+  `Source.Version` returns "2.0" for them.
 - Requires Go 1.27.3, whose `crypto/x509` distrusts compromised
   intermediate certificates (GO-2026-6809); the loader's `HTTPFetcher`
   verifies certificates with it.

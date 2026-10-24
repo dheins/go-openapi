@@ -6,53 +6,80 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/dheins/go-openapi/oas"
 )
 
 // convertedVersion is the "openapi" value given to converted Swagger 2.0
 // documents, as to upgraded 3.0 ones.
 const convertedVersion = upgradedVersion
 
-// conversionWarning is something a Swagger 2.0 document says that the
-// converted document cannot, at the node that says it.
-type conversionWarning struct {
-	Line, Column int
-	Message      string
-}
-
-// convert20 rewrites the Swagger 2.0 document n into its OpenAPI 3.1
-// equivalent, in place. Nodes that are moved keep their positions, and
-// nodes it creates take the position of the 2.0 field they come from, so
-// diagnostics point into the 2.0 document. Only references within the
-// document are rewritten; it returns what could not be converted.
-func convert20(n *yaml.Node) []conversionWarning {
-	n = resolveAlias(n)
-	if n == nil || n.Kind != yaml.MappingNode {
-		return nil
-	}
-	c := &converter{seen: map[*yaml.Node]bool{}, forms: map[string]*yaml.Node{}, bodies: map[string]*yaml.Node{}}
-	c.document(n)
-	return c.warnings
-}
-
-// converter holds what conversion of one document needs to know across
-// its parts.
+// converter rewrites Swagger 2.0 content into its OpenAPI 3.1 equivalent,
+// in place: the root document (document), then the objects of other files
+// that references lead to (fragment). Nodes that are moved keep their
+// positions, and nodes it creates take the position of the 2.0 field they
+// come from, so diagnostics point into the 2.0 files. Only the root is
+// restructured, so only its references are rewritten; other files are
+// read as written.
 type converter struct {
-	warnings []conversionWarning
-	seen     map[*yaml.Node]bool
-	// consumes and produces are the document's default media types.
+	// notices are what could not be converted.
+	notices []Notice
+	seen    map[*yaml.Node]bool
+	// root is the URI of the root document, and uri that of the file
+	// being converted.
+	root, uri string
+	// lookup returns the node ref leads to from the file at base, or nil;
+	// it is how references to other files are followed.
+	lookup func(base, ref string) *yaml.Node
+	// consumes and produces are the root's default media types.
 	consumes, produces []string
-	// forms are the formData parameters of #/parameters, inlined into the
-	// bodies that refer to them, and bodies its body parameters, which
-	// become request bodies (or are inlined for other media types).
+	// forms are the formData parameters of the root's #/parameters,
+	// inlined into the bodies that refer to them, and bodies its body
+	// parameters, which become request bodies (or are inlined for other
+	// media types).
 	forms, bodies map[string]*yaml.Node
 }
 
+func newConverter(lookup func(base, ref string) *yaml.Node) *converter {
+	return &converter{seen: map[*yaml.Node]bool{}, lookup: lookup, forms: map[string]*yaml.Node{}, bodies: map[string]*yaml.Node{}}
+}
+
 func (c *converter) warn(at *yaml.Node, format string, args ...any) {
-	line, col := 0, 0
+	var pos Position
 	if at != nil {
-		line, col = at.Line, at.Column
+		pos = Position{Line: at.Line, Column: at.Column}
 	}
-	c.warnings = append(c.warnings, conversionWarning{Line: line, Column: col, Message: fmt.Sprintf(format, args...)})
+	c.notices = append(c.notices, Notice{Location: Location{URI: c.uri}, Position: pos, Message: fmt.Sprintf(format, args...)})
+}
+
+// inRoot reports whether the root document is being converted.
+func (c *converter) inRoot() bool { return c.uri == c.root }
+
+// fragment converts n, an object of the file at uri that a reference
+// leads to, as the model type of as.
+func (c *converter) fragment(n *yaml.Node, as any, uri string) {
+	saved := c.uri
+	c.uri = uri
+	defer func() { c.uri = saved }()
+	switch as.(type) {
+	case *oas.Schema:
+		c.schema(n)
+	case *oas.Parameter:
+		c.parameter(n)
+	case *oas.RequestBody:
+		// A body parameter of another file, which the root refers to.
+		if in := mappingValue(n, "in"); in != nil && in.Value == "body" && !c.visited(n) {
+			*n = *c.requestBody(copyNode(n), c.consumes)
+		}
+	case *oas.Response:
+		c.response(n, c.produces)
+	case *oas.Header:
+		c.header(n)
+	case *oas.PathItem:
+		c.pathItem(n)
+	case *oas.SecurityScheme:
+		c.securityScheme(n)
+	}
 }
 
 // visited reports whether n is nil or was converted already, and marks it.
@@ -140,7 +167,13 @@ func copyNode(n *yaml.Node) *yaml.Node {
 	return &cp
 }
 
-func (c *converter) document(n *yaml.Node) {
+// document converts n, the root document at uri.
+func (c *converter) document(n *yaml.Node, uri string) {
+	c.root, c.uri = uri, uri
+	n = resolveAlias(n)
+	if n == nil || n.Kind != yaml.MappingNode {
+		return
+	}
 	c.consumes = stringsOf(removeKey(n, "consumes"))
 	c.produces = stringsOf(removeKey(n, "produces"))
 
@@ -274,7 +307,7 @@ func (c *converter) pathItem(n *yaml.Node) {
 	shared := removeKey(n, "parameters")
 	var kept, moved []*yaml.Node
 	eachItem(shared, func(p *yaml.Node) {
-		if kind := c.paramKind(p); kind == "body" || kind == "formData" {
+		if kind, _ := c.paramKind(p); kind == "body" || kind == "formData" {
 			moved = append(moved, p)
 		} else {
 			kept = append(kept, p)
@@ -296,29 +329,41 @@ func (c *converter) pathItem(n *yaml.Node) {
 
 // paramKind returns where the parameter (or the one its $ref names) is:
 // body, formData, or another location.
-func (c *converter) paramKind(p *yaml.Node) string {
-	if ref := mappingValue(p, "$ref"); ref != nil {
-		name, ok := strings.CutPrefix(ref.Value, "#/parameters/")
-		switch {
-		case !ok:
-			return "ref"
-		case c.bodies[name] != nil:
-			return "body"
-		case c.forms[name] != nil:
-			return "formData"
+//
+// A reference to a body or form field also returns the parameter it leads
+// to; one into another file is followed with lookup.
+func (c *converter) paramKind(p *yaml.Node) (string, *yaml.Node) {
+	ref := mappingValue(p, "$ref")
+	if ref == nil {
+		if in := mappingValue(p, "in"); in != nil {
+			return in.Value, nil
 		}
-		return "ref"
+		return "", nil
 	}
-	if in := mappingValue(p, "in"); in != nil {
-		return in.Value
+	if name, ok := strings.CutPrefix(ref.Value, "#/parameters/"); ok && c.inRoot() {
+		switch {
+		case c.bodies[name] != nil:
+			return "body", c.bodies[name]
+		case c.forms[name] != nil:
+			return "formData", c.forms[name]
+		}
+		return "ref", nil
 	}
-	return ""
+	if c.lookup == nil {
+		return "ref", nil
+	}
+	target := resolveAlias(c.lookup(c.uri, ref.Value))
+	if in := mappingValue(target, "in"); in != nil && (in.Value == "body" || in.Value == "formData") {
+		return in.Value, target
+	}
+	return "ref", nil
 }
 
-// parameterOrRef converts a parameter, or rewrites its reference.
+// parameterOrRef converts a parameter, or rewrites its reference into the
+// root's parameters.
 func (c *converter) parameterOrRef(p *yaml.Node) *yaml.Node {
 	if ref := mappingValue(p, "$ref"); ref != nil {
-		if name, ok := strings.CutPrefix(ref.Value, "#/parameters/"); ok {
+		if name, ok := strings.CutPrefix(ref.Value, "#/parameters/"); ok && c.inRoot() {
 			ref.Value = "#/components/parameters/" + name
 		}
 		return p
@@ -344,21 +389,23 @@ func (c *converter) operation(op *yaml.Node, inherited []*yaml.Node) {
 
 	place := keyIndex(op, "parameters")
 	params := removeKey(op, "parameters")
-	var body *yaml.Node
+	// body is the body parameter, and bodyTarget the one it refers to.
+	var body, bodyTarget *yaml.Node
 	var forms []*yaml.Node
 	var others []*yaml.Node
 	own := map[string]bool{}
 	collect := func(p *yaml.Node, inheritedParam bool) {
-		switch c.paramKind(p) {
+		kind, target := c.paramKind(p)
+		switch kind {
 		case "body":
 			if inheritedParam && body != nil {
 				return
 			}
-			body = p
+			body, bodyTarget = p, target
 		case "formData":
 			form := p
-			if ref := mappingValue(p, "$ref"); ref != nil {
-				form = copyNode(c.forms[strings.TrimPrefix(ref.Value, "#/parameters/")])
+			if target != nil {
+				form = copyNode(target)
 			}
 			name := ""
 			if v := mappingValue(form, "name"); v != nil {
@@ -391,14 +438,27 @@ func (c *converter) operation(op *yaml.Node, inherited []*yaml.Node) {
 		fallthrough
 	case body != nil:
 		ref := mappingValue(body, "$ref")
+		name, local := "", false
+		if ref != nil {
+			name, local = strings.CutPrefix(ref.Value, "#/parameters/")
+			local = local && c.inRoot()
+		}
+		same := slices.Equal(mediaTypes(consumes), mediaTypes(c.consumes))
 		switch {
 		case ref == nil:
 			rb = c.requestBody(body, consumes)
-		case slices.Equal(mediaTypes(consumes), mediaTypes(c.consumes)):
-			rb = mapping(body, str("$ref", ref), str("#/components/requestBodies/"+strings.TrimPrefix(ref.Value, "#/parameters/"), ref))
-		default:
+		case local && same:
+			rb = mapping(body, str("$ref", ref), str("#/components/requestBodies/"+name, ref))
+		case local:
 			// The shared body has the document's media types, not these.
-			rb = c.requestBody(c.bodies[strings.TrimPrefix(ref.Value, "#/parameters/")], consumes)
+			rb = c.requestBody(bodyTarget, consumes)
+		default:
+			// A body of another file is converted where it is, with the
+			// document's media types, since other operations may share it.
+			if !same {
+				c.warn(ref, "the body in another file is sent as the document's media types, not the operation's")
+			}
+			rb = mapping(body, str("$ref", ref), str(ref.Value, ref))
 		}
 	case len(forms) > 0:
 		rb = c.formBody(forms, consumes)
@@ -431,9 +491,15 @@ func (c *converter) requestBody(p *yaml.Node, consumes []string) *yaml.Node {
 	}
 	schema := resolveAlias(mappingValue(p, "schema"))
 	c.schema(schema)
-	content := mapping(schema)
+	content := mapping(p)
 	for _, mt := range mediaTypes(consumes) {
-		content.Content = append(content.Content, str(mt, schema), mapping(schema, str("schema", schema), schema))
+		media := mapping(p)
+		// The 2.0 schema requires one, but the loader reads invalid
+		// documents too.
+		if schema != nil {
+			media = mapping(schema, str("schema", schema), schema)
+		}
+		content.Content = append(content.Content, str(mt, p), media)
 	}
 	rb.Content = append(rb.Content, str("content", p), content)
 	if r := mappingValue(p, "required"); r != nil {
@@ -619,7 +685,7 @@ func (c *converter) response(r *yaml.Node, produces []string) {
 		return
 	}
 	if ref := mappingValue(r, "$ref"); ref != nil {
-		if name, ok := strings.CutPrefix(ref.Value, "#/responses/"); ok {
+		if name, ok := strings.CutPrefix(ref.Value, "#/responses/"); ok && c.inRoot() {
 			ref.Value = "#/components/responses/" + name
 		}
 		return
