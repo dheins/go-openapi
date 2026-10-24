@@ -84,6 +84,9 @@ func Build(spec *loader.Spec, opts Options) *Model {
 	b.breakCycles()
 	b.sealUnions()
 	b.groupByRoot()
+	if opts.Operations && opts.Select != nil {
+		b.applySelection(opts.Select)
+	}
 	return b.model
 }
 

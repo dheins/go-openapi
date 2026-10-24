@@ -635,6 +635,23 @@ case api.GetPet404Response:
 }
 ```
 
+A client of only some of the operations takes path patterns and tags:
+
+```sh
+goapi generate client -out internal/petclient -paths '/pets,/pets/**' -tags store \
+	-exclude-paths '/pets/*/photo' openapi.yaml
+```
+
+An operation is generated when its path matches one of `-paths` or it has
+one of `-tags` (or when neither is given), unless it matches
+`-exclude-paths` or has one of `-exclude-tags`. Patterns are
+comma-separated and matched segment by segment: `*` is one segment, `**`
+any number of them, and `/pets/{id}` matches that template. Callbacks go
+with their operation, and webhooks are selected by their tags. Only the
+schemas and security schemes the chosen operations use are generated.
+Names are those of the whole document, so with `-types` a client of some
+operations uses the operations package of a server of all of them.
+
 A nil request sends no parameters or body. Optional fields that are not
 set are left out, and so are parameters with a default whose field is the
 zero value, so the server applies the default. A body with several media

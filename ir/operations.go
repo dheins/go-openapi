@@ -29,6 +29,8 @@ type Operation struct {
 	Doc        string
 	Deprecated bool
 	Location   loader.Location
+	// Tags are the operation's tags, as written.
+	Tags []string
 
 	Params    []*Param
 	Body      *Body
@@ -313,7 +315,7 @@ func (b *builder) register(mux *http.ServeMux, o *Operation) {
 }
 
 func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Operation, methods namespace, site opSite) *Operation {
-	o := &Operation{Method: method, Path: path, ID: op.OperationID, Deprecated: op.Deprecated, Kind: site.kind}
+	o := &Operation{Method: method, Path: path, ID: op.OperationID, Deprecated: op.Deprecated, Kind: site.kind, Tags: op.Tags}
 	o.Location, _ = b.spec.Location(op)
 	o.Doc = strings.TrimSpace(strings.Join(nonEmpty(op.Summary, op.Description), "\n\n"))
 
