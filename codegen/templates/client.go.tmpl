@@ -39,6 +39,9 @@ type Client struct {
 {{- end}}
 }
 
+// Client has a method per operation, as the server's handlers do.
+var _ {{opType "Handler"}} = (*Client)(nil)
+
 // New returns a client{{if .SecuritySchemes}} sending creds{{end}}, configured by opts.{{if not .ServerURL}} The document
 // has no absolute server URL, so client.WithBaseURL is required.{{end}}
 func New({{if .SecuritySchemes}}creds Credentials, {{end}}opts ...client.Option) (*Client, error) {

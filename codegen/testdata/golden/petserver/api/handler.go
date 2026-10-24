@@ -8,7 +8,9 @@ import (
 
 // Handler is implemented by the application, with one method per
 // operation. The server decodes and validates each request before calling
-// it. The context carries the *http.Request (see server.HTTPRequest).
+// it. The context carries the *http.Request (see server.HTTPRequest). A
+// generated client implements it too, so code using an API can be given
+// the client or, in tests, a fake.
 //
 // A method returns one of the operation's response types, or an error: a
 // *problem.Problem is sent as it is, anything else is logged and answered

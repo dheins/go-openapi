@@ -72,6 +72,13 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 		if og != mg {
 			og.add("doc.go", og.operationsDocFile())
 		}
+		// The interfaces the client's methods implement, as in a server's
+		// operations package.
+		content, err := og.render("interfaces", m, nil)
+		if err != nil {
+			return nil, fmt.Errorf("generating handler.go: %w", err)
+		}
+		og.add("handler.go", content)
 		for _, o := range m.Operations {
 			if o.Unsupported != "" {
 				continue

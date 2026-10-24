@@ -4,6 +4,9 @@
 
 ### Added
 
+- Generated clients implement `api.Handler`, which `generate client` now
+  writes too, so code using an API can take the interface and be given
+  the client or, in tests, a fake.
 - `ir` maps webhooks (`Model.Webhooks`) and callbacks
   (`Operation.Callbacks`) to operations, with their callback URLs parsed
   into text and request values (`$method`, `$request.path`, `.query`,

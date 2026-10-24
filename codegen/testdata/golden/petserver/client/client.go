@@ -37,6 +37,9 @@ type Client struct {
 	creds Credentials
 }
 
+// Client has a method per operation, as the server's handlers do.
+var _ api.Handler = (*Client)(nil)
+
 // New returns a client sending creds, configured by opts.
 func New(creds Credentials, opts ...client.Option) (*Client, error) {
 	cfg, err := client.NewConfig(append([]client.Option{client.WithBaseURL(DefaultServerURL)}, opts...)...)
