@@ -17,6 +17,9 @@ type Options struct {
 	// Operations also maps the operations of the document's paths, and the
 	// schemas they use, for server generation.
 	Operations bool
+	// Select, with Operations, keeps only the operations it selects, and
+	// the types and security schemes they use.
+	Select *Selection
 }
 
 // Model is the set of Go types for a document's schemas.
