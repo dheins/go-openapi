@@ -3,6 +3,7 @@ package codegen
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -122,13 +123,14 @@ func (g *tsGen) requestType(o *ir.Operation) (string, bool) {
 	var b strings.Builder
 	b.WriteString("{\n")
 	optional := true
+	keys := paramKeys(o)
 	for _, p := range o.Params {
 		b.WriteString(tsDoc("  ", paramText(p), p.Deprecated))
 		q := "?"
 		if p.Required && p.Default == "" {
 			q, optional = "", false
 		}
-		fmt.Fprintf(&b, "  %s%s: %s;\n", tsCamel(p.Field), q, g.tsType(p.Type))
+		fmt.Fprintf(&b, "  %s%s: %s;\n", tsKey(keys[p]), q, g.tsType(p.Type))
 	}
 	media := tsMedia(o)
 	if len(media) > 0 {
@@ -191,6 +193,7 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 	}
 	var variants []string
 	for _, r := range responses {
+		headerKeys := headerKeys(r)
 		var fields []string
 		if r.Code != 0 {
 			fields = append(fields, fmt.Sprintf("status: %d", r.Code))
@@ -222,7 +225,7 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 				if h.Required {
 					q = ""
 				}
-				hs = append(hs, fmt.Sprintf("%s%s: %s", tsCamel(h.Field), q, g.tsType(h.Type)))
+				hs = append(hs, fmt.Sprintf("%s%s: %s", tsKey(headerKeys[h]), q, g.tsType(h.Type)))
 			}
 			fields = append(fields, "headers: { "+strings.Join(hs, "; ")+" }")
 		}
@@ -260,6 +263,7 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 	}
 
 	var params []string
+	keys := paramKeys(o)
 	for _, p := range o.Params {
 		shape := "scalar"
 		switch {
@@ -269,7 +273,7 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 			shape = "object"
 		}
 		s := fmt.Sprintf("{ key: %s, name: %s, in: %q, style: %s, explode: %t, shape: %q",
-			jsString(tsCamel(p.Field)), jsString(p.Name), p.In, jsString(p.Style), p.Explode, shape)
+			jsString(keys[p]), jsString(p.Name), p.In, jsString(p.Style), p.Explode, shape)
 		if p.Content != "" && !(p.In == "querystring" && p.Object) {
 			s += ", json: true"
 		}
@@ -309,9 +313,10 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 			s += ", withContentType: true"
 		}
 		if len(r.Headers) > 0 {
+			headerKeys := headerKeys(r)
 			var hs []string
 			for _, h := range r.Headers {
-				hdr := fmt.Sprintf("{ key: %s, name: %s", jsString(tsCamel(h.Field)), jsString(h.Name))
+				hdr := fmt.Sprintf("{ key: %s, name: %s", jsString(headerKeys[h]), jsString(h.Name))
 				if h.Required {
 					hdr += ", required: true"
 				}
@@ -348,6 +353,66 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		spec += fmt.Sprintf("  security: [%s],\n", strings.Join(reqs, ", "))
 	}
 	return spec + "}", true
+}
+
+// paramKeys returns the request properties of the parameters of o: their
+// names in camel case (X-Request-ID is xRequestID), unique among the
+// operation's, and apart from the body's and contentType.
+func paramKeys(o *ir.Operation) map[*ir.Param]string {
+	taken := map[string]bool{"contentType": true}
+	for _, m := range tsMedia(o) {
+		taken[tsCamel(m.Field.Name)] = true
+	}
+	keys := map[*ir.Param]string{}
+	for _, p := range o.Params {
+		keys[p] = uniqueKey(camelName(p.Name), taken)
+	}
+	return keys
+}
+
+// headerKeys returns the properties of the headers of r, as paramKeys.
+func headerKeys(r *ir.Response) map[*ir.Header]string {
+	taken := map[string]bool{}
+	keys := map[*ir.Header]string{}
+	for _, h := range r.Headers {
+		keys[h] = uniqueKey(camelName(h.Name), taken)
+	}
+	return keys
+}
+
+func uniqueKey(key string, taken map[string]bool) string {
+	unique := key
+	for i := 2; taken[unique]; i++ {
+		unique = key + strconv.Itoa(i)
+	}
+	taken[unique] = true
+	return unique
+}
+
+// camelName turns a name of the document into camel case: its words,
+// separated by anything but letters and digits, joined, the first in
+// lower case and the others capitalized; petId stays petId.
+func camelName(name string) string {
+	words := strings.FieldsFunc(name, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	var b strings.Builder
+	for i, w := range words {
+		runes := []rune(w)
+		switch {
+		case i == 0 && (len(words) > 1 || strings.ToUpper(w) == w):
+			// X-Request-ID is xRequestID; ID alone is id.
+			runes = []rune(strings.ToLower(w))
+		case i == 0:
+			runes[0] = unicode.ToLower(runes[0])
+		default:
+			runes[0] = unicode.ToUpper(runes[0])
+		}
+		b.WriteString(string(runes))
+	}
+	key := b.String()
+	if key == "" || unicode.IsDigit([]rune(key)[0]) {
+		key = "_" + key
+	}
+	return key
 }
 
 // tsCamel turns a Go name into a TypeScript property or method name:

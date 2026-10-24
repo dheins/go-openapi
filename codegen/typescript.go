@@ -155,6 +155,10 @@ func (g *tsGen) models() string {
 	if len(imports) > 0 {
 		head += fmt.Sprintf("import { %s } from \"./runtime.ts\";\n", strings.Join(imports, ", "))
 	}
+	if body == "" {
+		// Still a module, which index.ts re-exports.
+		body = "export {};\n"
+	}
 	return head + body
 }
 

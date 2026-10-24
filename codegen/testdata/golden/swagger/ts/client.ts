@@ -18,7 +18,7 @@ export interface Credentials {
 /** The inputs of listPets. */
 export interface ListPetsRequest {
   tags?: string[];
-  iDs?: number[];
+  ids?: number[];
   fields?: string[];
   /** The server's default is 20. */
   limit?: number;
@@ -32,7 +32,7 @@ export type ListPetsResponse =
 const listPetsSpec: OperationSpec = {
   method: "GET",
   path: "/pets",
-  params: [{ key: "tags", name: "tags", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "iDs", name: "ids", in: "query", style: "form", explode: true, shape: "array", schema: { kind: "array", items: { kind: "integer" } } }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "xRequestID", name: "X-Request-ID", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string" } }],
+  params: [{ key: "tags", name: "tags", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "ids", name: "ids", in: "query", style: "form", explode: true, shape: "array", schema: { kind: "array", items: { kind: "integer" } } }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "xRequestID", name: "X-Request-ID", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string" } }],
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: $ref(() => $m.PetSchema) }, headers: [{ key: "xTotal", name: "X-Total", schema: { kind: "integer" } }] }],
 };
 

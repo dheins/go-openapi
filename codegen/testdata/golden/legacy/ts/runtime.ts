@@ -391,6 +391,7 @@ export interface ClientOptions {
 /** Options of one call. */
 export interface CallOptions {
   signal?: AbortSignal;
+  /** Headers of this call, over those the client and operation set. */
   headers?: Record<string, string>;
 }
 
@@ -779,7 +780,10 @@ function buildBody(op: OperationSpec, req: Values, b: Built): void {
               form.append(k, item, name);
             }
           } else if (isObject(item) || Array.isArray(item)) {
-            form.append(k, new Blob([JSON.stringify(item)], { type: "application/json" }));
+            // As a string: FormData names every Blob part a file, and a
+            // server reads files apart from fields. The value is JSON,
+            // which objects in multipart bodies are by default.
+            form.append(k, JSON.stringify(item));
           } else if (item !== null) {
             form.append(k, text(item));
           }
@@ -911,10 +915,14 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
   if (accept.length > 0) {
     b.headers.set("Accept", accept.join(", "));
   }
-  for (const [k, v] of Object.entries({ ...cfg.headers, ...call.headers })) {
+  for (const [k, v] of Object.entries(cfg.headers)) {
     if (!b.headers.has(k)) {
       b.headers.set(k, v);
     }
+  }
+  // A call's own headers win, so it can ask for another media type.
+  for (const [k, v] of Object.entries(call.headers ?? {})) {
+    b.headers.set(k, v);
   }
   if (b.cookies.length > 0) {
     // Browsers do not let scripts set Cookie; elsewhere it is sent.

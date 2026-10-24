@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dheins/go-openapi/ir"
+	"github.com/dheins/go-openapi/validate"
 )
 
 // tsVersion is the TypeScript compiler the tests type-check with when
@@ -67,6 +70,47 @@ func TestTypeScript(t *testing.T) {
 				t.Errorf("node --test: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+// TestTypeScriptOAIExamples generates the TypeScript client of every
+// example of the OpenAPI Initiative, Swagger 2.0 included, and
+// type-checks it.
+func TestTypeScriptOAIExamples(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs tsc")
+	}
+	docs, err := filepath.Glob("../testdata/oai/v*/*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsc := tscCommand(t)
+	root := t.TempDir()
+	var all []string
+	for _, doc := range docs {
+		res, err := validate.File(doc)
+		if err != nil || res.HasErrors() {
+			t.Fatalf("%s: %v %v", doc, err, res.Diagnostics)
+		}
+		files, _, err := TypeScript(ir.Build(res.Spec, ir.Options{Operations: true}), TSOptions{Source: filepath.Base(doc)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(root, filepath.Base(filepath.Dir(doc))+"-"+strings.TrimSuffix(filepath.Base(doc), ".yaml"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			name := filepath.Join(dir, f.Name)
+			if err := os.WriteFile(name, f.Content, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			all = append(all, name)
+		}
+	}
+	args := append(append(tsc[1:], tscFlags...), all...)
+	if out, err := exec.Command(tsc[0], args...).CombinedOutput(); err != nil {
+		t.Errorf("tsc: %v\n%s", err, out)
 	}
 }
 

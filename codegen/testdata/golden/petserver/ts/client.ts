@@ -59,7 +59,7 @@ const createPetSpec: OperationSpec = {
 
 /** The inputs of getPet. */
 export interface GetPetRequest {
-  petID: number;
+  petId: number;
   session?: string;
 }
 
@@ -71,13 +71,13 @@ export type GetPetResponse =
 const getPetSpec: OperationSpec = {
   method: "GET",
   path: "/pets/{petId}",
-  params: [{ key: "petID", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "session", name: "session", in: "cookie", style: "form", explode: true, shape: "scalar", schema: { kind: "string" } }],
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "session", name: "session", in: "cookie", style: "form", explode: true, shape: "scalar", schema: { kind: "string" } }],
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.PetSchema) }, { status: "404" }],
 };
 
 /** The inputs of deletePet. */
 export interface DeletePetRequest {
-  petID: number;
+  petId: number;
 }
 
 /** The responses of deletePet. */
@@ -87,13 +87,13 @@ export type DeletePetResponse =
 const deletePetSpec: OperationSpec = {
   method: "DELETE",
   path: "/pets/{petId}",
-  params: [{ key: "petID", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
   responses: [{ status: "204" }],
 };
 
 /** The inputs of copyPet. */
 export interface CopyPetRequest {
-  petID: number;
+  petId: number;
   destination: string;
 }
 
@@ -104,7 +104,7 @@ export type CopyPetResponse =
 const copyPetSpec: OperationSpec = {
   method: "COPY",
   path: "/pets/{petId}",
-  params: [{ key: "petID", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "destination", name: "Destination", in: "header", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "string" } }],
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "destination", name: "Destination", in: "header", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "string" } }],
   responses: [{ status: "201", mediaType: "application/json", kind: "json", schema: $ref(() => $m.PetSchema) }],
 };
 
@@ -144,7 +144,7 @@ const searchPetsSpec: OperationSpec = {
 
 /** The inputs of getReports. */
 export interface GetReportsRequest {
-  iDs: number[];
+  ids: number[];
   filter?: $m.Filter;
   fields?: string[];
   q?: string;
@@ -160,7 +160,7 @@ export type GetReportsResponse =
 const getReportsSpec: OperationSpec = {
   method: "GET",
   path: "/reports/{ids}",
-  params: [{ key: "iDs", name: "ids", in: "path", style: "matrix", explode: true, shape: "array", required: true, schema: { kind: "array", items: { kind: "integer" } } }, { key: "filter", name: "filter", in: "query", style: "deepObject", explode: true, shape: "object", schema: $ref(() => $m.FilterSchema) }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "q", name: "q", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "string" } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer" } }, { key: "xMeta", name: "X-Meta", in: "header", style: "", explode: false, shape: "scalar", json: true, schema: $ref(() => $m.FilterSchema) }, { key: "prefs", name: "prefs", in: "cookie", style: "form", explode: true, shape: "object", schema: $ref(() => $m.PrefsSchema) }],
+  params: [{ key: "ids", name: "ids", in: "path", style: "matrix", explode: true, shape: "array", required: true, schema: { kind: "array", items: { kind: "integer" } } }, { key: "filter", name: "filter", in: "query", style: "deepObject", explode: true, shape: "object", schema: $ref(() => $m.FilterSchema) }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "q", name: "q", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "string" } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer" } }, { key: "xMeta", name: "X-Meta", in: "header", style: "", explode: false, shape: "scalar", json: true, schema: $ref(() => $m.FilterSchema) }, { key: "prefs", name: "prefs", in: "cookie", style: "form", explode: true, shape: "object", schema: $ref(() => $m.PrefsSchema) }],
   responses: [{ status: "204" }],
 };
 
@@ -182,7 +182,7 @@ const lookupSpec: OperationSpec = {
 
 /** The inputs of getPhoto. */
 export interface GetPhotoRequest {
-  petID: number;
+  petId: number;
 }
 
 /** The responses of getPhoto. */
@@ -192,13 +192,13 @@ export type GetPhotoResponse =
 const getPhotoSpec: OperationSpec = {
   method: "GET",
   path: "/pets/{petId}/photo",
-  params: [{ key: "petID", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
   responses: [{ status: "200", mediaType: "image/*", kind: "binary" }],
 };
 
 /** The inputs of uploadPhoto. */
 export interface UploadPhotoRequest {
-  petID: number;
+  petId: number;
   body: $m.UploadPhotoRequestBody;
 }
 
@@ -209,14 +209,14 @@ export type UploadPhotoResponse =
 const uploadPhotoSpec: OperationSpec = {
   method: "PUT",
   path: "/pets/{petId}/photo",
-  params: [{ key: "petID", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
   body: { required: true, media: [{ mediaType: "multipart/form-data", kind: "multipart", key: "body", schema: $ref(() => $m.UploadPhotoRequestBodySchema) }] },
   responses: [{ status: "204" }],
 };
 
 /** The inputs of uploadRecords. */
 export interface UploadRecordsRequest {
-  petID: number;
+  petId: number;
   body: $m.UploadRecordsRequestBody;
 }
 
@@ -227,7 +227,7 @@ export type UploadRecordsResponse =
 const uploadRecordsSpec: OperationSpec = {
   method: "POST",
   path: "/pets/{petId}/records",
-  params: [{ key: "petID", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
   body: { required: true, media: [{ mediaType: "multipart/form-data", kind: "multipart", key: "body", schema: $ref(() => $m.UploadRecordsRequestBodySchema) }] },
   responses: [{ status: "204" }],
 };
@@ -257,7 +257,7 @@ const importPetSpec: OperationSpec = {
 
 /** The inputs of getCard. */
 export interface GetCardRequest {
-  petID: number;
+  petId: number;
 }
 
 /** The responses of getCard. */
@@ -267,7 +267,7 @@ export type GetCardResponse =
 const getCardSpec: OperationSpec = {
   method: "GET",
   path: "/pets/{petId}/card",
-  params: [{ key: "petID", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.CardSchema) }],
 };
 
