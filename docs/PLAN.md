@@ -221,6 +221,27 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   operation's only security requirement was anonymous.
 - *Not done*: see [features.md](../features.md).
 
+### M9 – Nested fields ✅
+- [x] Arrays of objects and recursive types in form and multipart bodies,
+  deepObject parameters and form querystrings, read and written by both
+  runtimes with indexed brackets (`a[0][b]=x`)
+- [x] Recursive shapes: `server.Property.Ref`, built by a function in the
+  generated code
+- [x] Raw and client round trips in the petserver fixture
+
+**How it went**
+- *Format*: OpenAPI leaves arrays of objects in forms undefined; indexed
+  brackets are what the qs library, PHP, Rails and Stripe write, and
+  extend the `a[0]=x` the server already read. Multipart follows the
+  specification: one JSON part per item.
+- *Recursion*: a literal cannot refer to itself, and package-level
+  variables that refer to each other are an initialization cycle, so a
+  recursive shape is built by a function whose locals point at each other.
+  Trees without recursion render as before, so no golden changed.
+- *Fuzzing*: `FuzzFieldsRoundTrip` checks that what the client writes the
+  server reads back the same; map keys with brackets cannot be fields.
+- *Not done*: arrays of arrays, and `a[][b]` ([features.md](../features.md)).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

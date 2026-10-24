@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
@@ -220,18 +221,20 @@ func writeValue(mw *multipart.Writer, name string, v reflect.Value, prop server.
 	if err != nil {
 		return err
 	}
-	values := []string{textOf(data)}
+	items := []json.RawMessage{data}
 	if len(data) > 0 && data[0] == '[' {
-		if values, err = arrayValues(data); err != nil {
+		// One part per item, as an array is sent in multipart bodies.
+		if err := json.Unmarshal(data, &items); err != nil {
 			return err
 		}
 	}
-	ct := "text/plain; charset=utf-8"
-	if len(data) > 0 && data[0] == '{' {
-		ct = "application/json"
-	}
-	ct = declaredType(prop, ct)
-	for _, val := range values {
+	for _, item := range items {
+		val := textOf(item)
+		ct := "text/plain; charset=utf-8"
+		if len(item) > 0 && item[0] == '{' {
+			ct = "application/json"
+		}
+		ct = declaredType(prop, ct)
 		h := textproto.MIMEHeader{}
 		h.Set("Content-Disposition", fmt.Sprintf("form-data; name=%q", name))
 		h.Set("Content-Type", ct)

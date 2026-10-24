@@ -538,6 +538,83 @@ paths:
       responses:
         "204":
           description: Allowed.
+  /orders:
+    post:
+      operationId: createOrder
+      description: An order as a form, its lines as an array of objects.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Order"
+      responses:
+        "201":
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+    get:
+      operationId: findOrders
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            $ref: "#/components/schemas/Order"
+      responses:
+        "200":
+          description: The filter as read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+  /orders/{id}/lines:
+    put:
+      operationId: putLines
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OrderLine"
+                receipt:
+                  type: string
+                  format: binary
+      responses:
+        "204":
+          description: Stored.
+  /trees:
+    post:
+      operationId: plantTree
+      description: A recursive type as a form.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Tree"
+      responses:
+        "200":
+          description: The tree as read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tree"
   /public:
     get:
       operationId: public
@@ -637,6 +714,44 @@ webhooks:
                     type: boolean
 components:
   schemas:
+    Order:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderLine"
+        notes:
+          type: object
+          additionalProperties:
+            type: string
+    OrderLine:
+      type: object
+      required: [sku, qty]
+      properties:
+        sku:
+          type: string
+        qty:
+          type: integer
+          minimum: 1
+        tags:
+          type: array
+          items:
+            type: string
+    Tree:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tree"
     Scan:
       type: string
       contentMediaType: image/png

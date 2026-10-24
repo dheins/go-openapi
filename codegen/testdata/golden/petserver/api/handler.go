@@ -74,6 +74,18 @@ type Handler interface {
 	Admin(ctx context.Context, req *AdminRequest) (AdminResponse, error)
 	// Secure handles GET /secure.
 	Secure(ctx context.Context, req *SecureRequest) (SecureResponse, error)
+	// FindOrders handles GET /orders.
+	FindOrders(ctx context.Context, req *FindOrdersRequest) (FindOrdersResponse, error)
+	// CreateOrder handles POST /orders.
+	//
+	// An order as a form, its lines as an array of objects.
+	CreateOrder(ctx context.Context, req *CreateOrderRequest) (CreateOrderResponse, error)
+	// PutLines handles PUT /orders/{id}/lines.
+	PutLines(ctx context.Context, req *PutLinesRequest) (PutLinesResponse, error)
+	// PlantTree handles POST /trees.
+	//
+	// A recursive type as a form.
+	PlantTree(ctx context.Context, req *PlantTreeRequest) (PlantTreeResponse, error)
 	// Public handles GET /public.
 	//
 	// Open to anyone, though other operations are secured.

@@ -106,10 +106,12 @@ type Param struct {
 	Explode bool
 	Content string
 	// Array and Object give the shape of the value; an object has
-	// Properties, and Additional gives the type of any others.
+	// Properties, and Additional gives the type of any others. Shape
+	// names the object's shape when a property inside refers to it.
 	Array, Object   bool
 	Properties      []ParamProperty
 	Additional      *ParamProperty
+	Shape           string
 	AllowEmptyValue bool
 	// Elem is the type of the value, or of each item for an array.
 	Elem *Ref
@@ -136,6 +138,11 @@ type ParamProperty struct {
 	ContentTypes []string
 	// Headers are the headers a multipart part must carry.
 	Headers []string
+	// Shape names this property's shape, an object a property inside it
+	// refers to: the name of its type. Ref is set instead of Type,
+	// Properties and Additional on a property that has the shape of an
+	// enclosing one, the shape it names, as a recursive type does.
+	Shape, Ref string
 }
 
 // Body is the request body of an operation.
@@ -168,9 +175,11 @@ type BodyMedia struct {
 	// Kind is json, xml, form, multipart, text or binary.
 	Kind string
 	// Properties are the object properties, for form and multipart, and
-	// Additional the type of any others.
+	// Additional the type of any others; Shape names the object's shape
+	// when a property inside refers to it.
 	Properties []ParamProperty
 	Additional *ParamProperty
+	Shape      string
 	// XML describes the document, for xml, and Parts the parts, for parts.
 	XML   *XMLNode
 	Parts *Parts
@@ -467,6 +476,10 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 		if why := checkStyle(param); why != "" {
 			return nil, why
 		}
+		if param.Object && param.Style != "deepObject" && param.In != "querystring" && hasNested(param.Properties, param.Additional) {
+			// Only brackets can write them: a[0][b]=1.
+			return nil, fmt.Sprintf("parameter %q: arrays of objects and recursive types need the deepObject style", p.Name)
+		}
 		if param.Additional != nil && param.Explode && param.Style == "form" {
 			// Each property is a parameter of its own, so the names of
 			// others are not known.
@@ -521,59 +534,84 @@ func checkStyle(p *Param) string {
 // objectParam reports whether ref is an object an object parameter can
 // carry (see objectProperties), and if so records its properties on p.
 func (b *builder) objectParam(p *Param, ref *Ref) bool {
-	props, additional, ok := objectProperties(ref, false)
+	obj, ok := objectProperties(ref, false)
 	if ok {
-		p.Object, p.Properties, p.Additional = true, props, additional
+		p.Object, p.Properties, p.Additional, p.Shape = true, obj.Properties, obj.Additional, obj.Shape
 	}
 	return ok
 }
 
-// objectProperties returns the properties of an object whose values are
-// primitive values, arrays of them, or such objects in turn, and the type
-// of its additional properties if it allows typed ones. With files,
+// objectProperties describes an object whose values are primitive
+// values, objects of them in turn, or arrays of either: its properties,
+// and the type of its additional properties if it allows typed ones. A
+// recursive type refers to its own shape (ParamProperty.Ref). With files,
 // oapi.File values (type "file") are allowed at the top level too.
-// Recursive types and arrays of objects cannot be written as fields.
-func objectProperties(ref *Ref, files bool) ([]ParamProperty, *ParamProperty, bool) {
-	return objectShape(ref, files, map[*Type]bool{})
+// Arrays of arrays cannot be written as fields.
+func objectProperties(ref *Ref, files bool) (ParamProperty, bool) {
+	return objectShape(ref, files, map[*Type]*bool{})
 }
 
-func objectShape(ref *Ref, files bool, seen map[*Type]bool) ([]ParamProperty, *ParamProperty, bool) {
+// objectShape describes the object ref; seen holds the types being
+// described, enclosing it, and whether a property refers back to them.
+func objectShape(ref *Ref, files bool, seen map[*Type]*bool) (ParamProperty, bool) {
 	for ref.Kind == Named && ref.Type.Kind == Alias {
 		ref = ref.Type.Underlying
 	}
 	switch {
 	case ref.Kind == Map:
 		additional, ok := valueShape(ref.Elem, false, seen)
-		return nil, &additional, ok
-	case ref.Kind != Named || ref.Type.Kind != Struct || seen[ref.Type]:
-		return nil, nil, false
+		return ParamProperty{Type: "object", Additional: &additional}, ok
+	case ref.Kind != Named || ref.Type.Kind != Struct:
+		return ParamProperty{}, false
 	}
 	t := ref.Type
-	seen[t] = true
+	if referenced, ok := seen[t]; ok {
+		*referenced = true
+		return ParamProperty{Ref: t.Name}, true
+	}
+	referenced := false
+	seen[t] = &referenced
 	defer delete(seen, t)
-	var props []ParamProperty
+	obj := ParamProperty{Type: "object"}
 	for _, f := range t.Fields {
 		prop, ok := valueShape(f.Type, files, seen)
 		if !ok {
-			return nil, nil, false
+			return ParamProperty{}, false
 		}
 		prop.Name = f.JSONName
-		props = append(props, prop)
+		obj.Properties = append(obj.Properties, prop)
 	}
-	var additional *ParamProperty
 	if a := t.Additional; a != nil && !a.Forbidden && a.Value != nil {
 		shape, ok := valueShape(a.Value, false, seen)
 		if !ok {
-			return nil, nil, false
+			return ParamProperty{}, false
 		}
-		additional = &shape
+		obj.Additional = &shape
 	}
-	return props, additional, true
+	if referenced {
+		obj.Shape = t.Name
+	}
+	return obj, true
+}
+
+// hasNested reports whether an object with props and additional ones
+// holds arrays of objects or a recursive type, which only bracketed
+// fields can write.
+func hasNested(props []ParamProperty, additional *ParamProperty) bool {
+	if additional != nil {
+		props = append(slices.Clone(props), *additional)
+	}
+	for _, p := range props {
+		if p.Ref != "" || p.Shape != "" || (p.Array && p.Type == "object") || hasNested(p.Properties, p.Additional) {
+			return true
+		}
+	}
+	return false
 }
 
 // valueShape describes a property value of type r, or reports that it
 // cannot be written as fields.
-func valueShape(r *Ref, files bool, seen map[*Type]bool) (ParamProperty, bool) {
+func valueShape(r *Ref, files bool, seen map[*Type]*bool) (ParamProperty, bool) {
 	for r.Kind == Optional || r.Kind == Nullable || r.Kind == Pointer {
 		r = r.Elem
 	}
@@ -589,14 +627,13 @@ func valueShape(r *Ref, files bool, seen map[*Type]bool) (ParamProperty, bool) {
 		prop.Type = jsonType(r)
 	case r.Kind == Any:
 		prop.Type = "any"
-	case prop.Array:
-		return prop, false
 	default:
-		props, additional, ok := objectShape(r, false, seen)
+		obj, ok := objectShape(r, false, seen)
 		if !ok {
 			return prop, false
 		}
-		prop.Type, prop.Properties, prop.Additional = "object", props, additional
+		obj.Array = prop.Array
+		prop = obj
 	}
 	return prop, true
 }
@@ -771,16 +808,17 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			media.XML = node
 		}
 		if kind == "form" || kind == "multipart" {
-			props, additional, ok := objectProperties(field.Value, kind == "multipart")
+			obj, ok := objectProperties(field.Value, kind == "multipart")
+			props, additional := obj.Properties, obj.Additional
 			if !ok {
-				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects of primitive values, arrays of them or objects of them; %s is answered with 415", kind, mt))
+				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects whose values are primitive values, objects or arrays of them, not arrays of arrays; %s is answered with 415", kind, mt))
 				rejected = append(rejected, mt)
 				continue
 			}
 			if kind == "multipart" {
 				b.partEncodings(m.Deref(), props)
 			}
-			media.Properties, media.Additional = props, additional
+			media.Properties, media.Additional, media.Shape = props, additional, obj.Shape
 		}
 		if i < 0 {
 			if len(groups) > 0 {

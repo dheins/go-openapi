@@ -508,7 +508,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			validate(4)
 			w(3, "}")
 		case "form", "multipart":
-			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional))
+			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional, m.Shape))
 			if m.Kind == "form" {
 				w(3, "if fields, err := server.FormFields(body); err != nil {")
 				w(4, "b.Body(err)")
@@ -604,31 +604,74 @@ func xmlNodeLiteral(n *ir.XMLNode) string {
 	return b.String()
 }
 
-// objectProperty renders an object with the given properties, and type
-// of additional ones, as a server.Property.
-func objectProperty(props []ir.ParamProperty, additional *ir.ParamProperty) string {
-	return "server.Property" + propertyFields(ir.ParamProperty{Type: "object", Properties: props, Additional: additional})
+// objectProperty renders an object with the given properties, type of
+// additional ones and shape name as a server.Property. A tree with named
+// shapes, which properties inside it refer to, is built by a function:
+// each shape is a *server.Property that its references point to, which
+// a literal cannot express.
+func objectProperty(props []ir.ParamProperty, additional *ir.ParamProperty, shape string) string {
+	r := &shapes{defs: map[string]string{}}
+	root := ir.ParamProperty{Type: "object", Properties: props, Additional: additional, Shape: shape}
+	lit := "server.Property" + r.fields(root)
+	if len(r.names) == 0 {
+		return lit
+	}
+	var b strings.Builder
+	b.WriteString("func() server.Property {\n")
+	for _, name := range r.names {
+		fmt.Fprintf(&b, "%s := &server.Property{}\n", shapeVar(name))
+	}
+	for _, name := range r.names {
+		fmt.Fprintf(&b, "*%s = server.Property%s\n", shapeVar(name), r.defs[name])
+	}
+	fmt.Fprintf(&b, "return %s\n}()", lit)
+	return b.String()
 }
 
-// propertyFields renders the braced fields of a server.Property literal.
-func propertyFields(prop ir.ParamProperty) string {
+// shapes collects the named shapes of a property tree as it is rendered.
+type shapes struct {
+	names []string
+	defs  map[string]string
+}
+
+func shapeVar(name string) string { return lowerFirst(name) + "Shape" }
+
+// fields renders the braced fields of a server.Property literal. A
+// property with a named shape refers to it, and the shape is rendered
+// once, as its definition.
+func (r *shapes) fields(prop ir.ParamProperty) string {
+	name := prop.Ref
+	if prop.Shape != "" {
+		name = prop.Shape
+		if _, done := r.defs[name]; !done {
+			r.names = append(r.names, name)
+			r.defs[name] = ""
+			shape := prop
+			shape.Shape, shape.Array, shape.ContentTypes, shape.Headers = "", false, nil, nil
+			r.defs[name] = r.fields(shape)
+		}
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "{Type: %q", prop.Type)
+	if name != "" {
+		fmt.Fprintf(&b, "{Ref: %s", shapeVar(name))
+	} else {
+		fmt.Fprintf(&b, "{Type: %q", prop.Type)
+	}
 	if prop.Array {
 		b.WriteString(", Array: true")
 	}
-	if prop.Type == "object" && len(prop.Properties) > 0 {
+	if name == "" && prop.Type == "object" && len(prop.Properties) > 0 {
 		b.WriteString(", Properties: map[string]server.Property{")
 		for i, p := range prop.Properties {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			fmt.Fprintf(&b, "%q: %s", p.Name, propertyFields(p))
+			fmt.Fprintf(&b, "%q: %s", p.Name, r.fields(p))
 		}
 		b.WriteString("}")
 	}
-	if prop.Additional != nil {
-		fmt.Fprintf(&b, ", Additional: &server.Property%s", propertyFields(*prop.Additional))
+	if name == "" && prop.Additional != nil {
+		fmt.Fprintf(&b, ", Additional: &server.Property%s", r.fields(*prop.Additional))
 	}
 	if len(prop.ContentTypes) > 0 {
 		fmt.Fprintf(&b, ", ContentTypes: %s", stringSlice(prop.ContentTypes))
@@ -747,7 +790,7 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 
 // propertiesVar declares the property types of an object parameter.
 func (f *fileGen) propertiesVar(o *ir.Operation, p *ir.Param) string {
-	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", objectProperty(p.Properties, p.Additional))
+	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", objectProperty(p.Properties, p.Additional, p.Shape))
 }
 
 // bindValue writes the branches that record a parse error or store and

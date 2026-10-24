@@ -83,5 +83,6 @@ jobs:
           codescan FuzzParseTag
           codescan FuzzDirectives
           runtime/client FuzzParamRoundTrip
+          runtime/client FuzzFieldsRoundTrip
           codegen/testdata/golden/petstore FuzzModels
           TARGETS

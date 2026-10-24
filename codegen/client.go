@@ -503,7 +503,7 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("r.FormBody(%s, %s)", ct, value)
 		case "multipart":
 			f.imp(serverImport, "server")
-			props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", objectProperty(m.Properties, m.Additional))
+			props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", objectProperty(m.Properties, m.Additional, m.Shape))
 			stmt = fmt.Sprintf("r.MultipartBody(%s, %s)", value, props)
 		case "parts":
 			f.imp(serverImport, "server")

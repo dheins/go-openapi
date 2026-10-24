@@ -90,6 +90,26 @@ func (s *store) DeletePet(_ context.Context, req *api.DeletePetRequest) (api.Del
 	return api.DeletePet204Response{}, nil
 }
 
+func (s *store) CreateOrder(_ context.Context, req *api.CreateOrderRequest) (api.CreateOrderResponse, error) {
+	s.seen["CreateOrder"] = req
+	return api.CreateOrder201JSONResponse{Body: req.Body}, nil
+}
+
+func (s *store) FindOrders(_ context.Context, req *api.FindOrdersRequest) (api.FindOrdersResponse, error) {
+	s.seen["FindOrders"] = req
+	return api.FindOrders200JSONResponse{Body: req.Filter.Value}, nil
+}
+
+func (s *store) PutLines(_ context.Context, req *api.PutLinesRequest) (api.PutLinesResponse, error) {
+	s.seen["PutLines"] = req
+	return api.PutLines204Response{}, nil
+}
+
+func (s *store) PlantTree(_ context.Context, req *api.PlantTreeRequest) (api.PlantTreeResponse, error) {
+	s.seen["PlantTree"] = req
+	return api.PlantTree200JSONResponse{Body: req.Body}, nil
+}
+
 func (s *store) Public(context.Context, *api.PublicRequest) (api.PublicResponse, error) {
 	return api.Public204Response{}, nil
 }

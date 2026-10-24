@@ -43,8 +43,9 @@ shipped in.
 - Checking the values of multipart part headers against their schemas
   (only `required` is checked), and `contentEncoding` (`[]byte`) parts.
   — later
-- Arrays of objects and recursive types in form and multipart bodies and
-  object parameters (nested objects and maps are supported). — later
+- Arrays of arrays in form and multipart bodies and object parameters
+  (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects
+  (indices are read and written). — later
 - Parameters and response headers with `content` other than JSON. — later
 - Links. — later
 - Security requirements of webhooks and callbacks: the sender does not
@@ -69,6 +70,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   request. File parts carry theirs in `oapi.File.Header`. — later
 - Retries, pagination and caching helpers: left to `Doer` middleware
   (`client.WithMiddleware`). — not planned
+- support client generation of specific paths and groups of paths
+- generate a typescript client for integration with front end
 
 ## Codescan
 
@@ -96,6 +99,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Arrays of objects and recursive types in form and multipart bodies,
+  deepObject parameters and form querystrings, with indexed brackets.
+  (03fa94a, bd720e9)
 - [x] Codescan: `goapi scan` and `codescan`, a document from Go types and
   `//goapi:` directives. (4305064, 7a8da51, 0cba04d)
 - [x] Swagger 2.0: converted to OpenAPI 3.1 on load, validated against the
