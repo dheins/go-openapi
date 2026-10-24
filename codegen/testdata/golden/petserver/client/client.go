@@ -470,6 +470,75 @@ func (c *Client) Secure(ctx context.Context, req *api.SecureRequest) (api.Secure
 	return api.ReadSecureResponse(c.cfg, resp)
 }
 
+// FindOrders calls GET /orders. A nil req sends no parameters or body.
+func (c *Client) FindOrders(ctx context.Context, req *api.FindOrdersRequest) (api.FindOrdersResponse, error) {
+	if req == nil {
+		req = &api.FindOrdersRequest{}
+	}
+	hreq, err := api.NewFindOrdersRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadFindOrdersResponse(c.cfg, resp)
+}
+
+// CreateOrder calls POST /orders. A nil req sends no parameters or body.
+//
+// An order as a form, its lines as an array of objects.
+func (c *Client) CreateOrder(ctx context.Context, req *api.CreateOrderRequest) (api.CreateOrderResponse, error) {
+	if req == nil {
+		req = &api.CreateOrderRequest{}
+	}
+	hreq, err := api.NewCreateOrderRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadCreateOrderResponse(c.cfg, resp)
+}
+
+// PutLines calls PUT /orders/{id}/lines. A nil req sends no parameters or
+// body.
+func (c *Client) PutLines(ctx context.Context, req *api.PutLinesRequest) (api.PutLinesResponse, error) {
+	if req == nil {
+		req = &api.PutLinesRequest{}
+	}
+	hreq, err := api.NewPutLinesRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutLinesResponse(c.cfg, resp)
+}
+
+// PlantTree calls POST /trees. A nil req sends no parameters or body.
+//
+// A recursive type as a form.
+func (c *Client) PlantTree(ctx context.Context, req *api.PlantTreeRequest) (api.PlantTreeResponse, error) {
+	if req == nil {
+		req = &api.PlantTreeRequest{}
+	}
+	hreq, err := api.NewPlantTreeRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPlantTreeResponse(c.cfg, resp)
+}
+
 // Public calls GET /public. A nil req sends no parameters or body.
 //
 // Open to anyone, though other operations are secured.

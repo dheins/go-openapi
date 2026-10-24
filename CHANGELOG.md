@@ -10,6 +10,11 @@
   multipart bodies as one JSON part per item. `server.Property` gains
   `Ref`, so a recursive type's shape can refer to itself. An array index
   must now be written canonically (`a[01]` is an error).
+- Operations whose form or multipart bodies, deepObject parameters or form
+  querystrings hold arrays of objects or recursive types are generated;
+  they were answered with 415, or 501 for parameters. A recursive shape is
+  built by a function in the generated code. Other object parameter
+  styles cannot write such values and are reported as before.
 - `codescan`: generating an OpenAPI 3.1 document from Go source. Go types
   become schemas as `encoding/json` encodes them, with the module's
   `oapi` types understood, doc comments as descriptions, JSON Schema

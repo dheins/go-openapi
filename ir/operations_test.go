@@ -229,7 +229,7 @@ components:
 		t.Errorf("params:\n%s\nwant\n%s", strings.Join(got, " "), want)
 	}
 	filter := styles.Params[1]
-	if fmt.Sprint(filter.Properties) != "[{role string false [] <nil> [] []} {age integer false [] <nil> [] []} {tags string true [] <nil> [] []}]" {
+	if fmt.Sprint(filter.Properties) != "[{role string false [] <nil> [] []  } {age integer false [] <nil> [] []  } {tags string true [] <nil> [] []  }]" {
 		t.Errorf("properties = %v", filter.Properties)
 	}
 	if !styles.Params[3].AllowEmptyValue {
@@ -295,7 +295,7 @@ components:
 	if strings.Join(fields, " ") != "Body:2 TextBody:1" || o.Body.Fields[1].Type.Kind != Optional {
 		t.Errorf("body fields = %v", fields)
 	}
-	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] <nil> [] []} {photo file false [] <nil> [] []} {tags string true [] <nil> [] []}]" {
+	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] <nil> [] []  } {photo file false [] <nil> [] []  } {tags string true [] <nil> [] []  }]" {
 		t.Errorf("multipart properties = %s", props)
 	}
 	var warnings []string
@@ -398,7 +398,7 @@ components:
         pdf: {type: string, contentMediaType: application/pdf}
 `, Options{Operations: true})
 	props := operationNamed(t, m, "Upload").Body.Media[0].Properties
-	if got := fmt.Sprint(props); got != "[{pdf file false [] <nil> [application/pdf] [X-Sum]} {untyped file false [] <nil> [] []} {anything file false [] <nil> [] []} {scans file true [] <nil> [] []} {caption string false [] <nil> [] []}]" {
+	if got := fmt.Sprint(props); got != "[{pdf file false [] <nil> [application/pdf] [X-Sum]  } {untyped file false [] <nil> [] []  } {anything file false [] <nil> [] []  } {scans file true [] <nil> [] []  } {caption string false [] <nil> [] []  }]" {
 		t.Errorf("multipart properties = %s", got)
 	}
 	// Outside multipart, a contentMediaType string holds text.
@@ -468,6 +468,13 @@ paths:
       operationId: recursive
       parameters:
         - {name: n, in: query, style: deepObject, explode: true, schema: {$ref: "#/components/schemas/Node"}}
+        - {name: l, in: query, style: deepObject, explode: true, schema: {$ref: "#/components/schemas/List"}}
+      responses: {"204": {description: ok}}
+  /flat:
+    get:
+      operationId: flat
+      parameters:
+        - {name: l, in: query, schema: {$ref: "#/components/schemas/List"}}
       responses: {"204": {description: ok}}
 components:
   schemas:
@@ -480,12 +487,16 @@ components:
       type: object
       properties:
         child: {$ref: "#/components/schemas/Node"}
+    List:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Filter"}}
 `, Options{Operations: true})
 	deep := operationNamed(t, m, "Deep")
 	if deep.Unsupported != "" {
 		t.Fatalf("deep: %s", deep.Unsupported)
 	}
-	if got := fmt.Sprint(deep.Params[0].Properties); got != "[{owner object false [{age integer false [] <nil> [] []}] <nil> [] []} {any any false [] <nil> [] []}]" {
+	if got := fmt.Sprint(deep.Params[0].Properties); got != "[{owner object false [{age integer false [] <nil> [] []  }] <nil> [] []  } {any any false [] <nil> [] []  }]" {
 		t.Errorf("nested properties = %s", got)
 	}
 	if a := deep.Params[1].Additional; a == nil || a.Type != "integer" {
@@ -494,8 +505,21 @@ components:
 	if o := operationNamed(t, m, "Exploded"); !strings.Contains(o.Unsupported, "cannot use the exploded form style") {
 		t.Errorf("exploded map: %q", o.Unsupported)
 	}
-	if o := operationNamed(t, m, "Recursive"); !strings.Contains(o.Unsupported, "not a primitive value") {
-		t.Errorf("recursive: %q", o.Unsupported)
+	// A recursive type refers to its own shape; arrays of objects hold
+	// their item's properties.
+	rec := operationNamed(t, m, "Recursive")
+	if rec.Unsupported != "" {
+		t.Fatalf("recursive: %s", rec.Unsupported)
+	}
+	if n := rec.Params[0]; n.Shape != "Node" || len(n.Properties) != 1 || n.Properties[0].Ref != "Node" || n.Properties[0].Type != "" {
+		t.Errorf("recursive = %+v", n)
+	}
+	if items := rec.Params[1].Properties[0]; !items.Array || items.Type != "object" || len(items.Properties) != 2 || items.Properties[0].Name != "owner" {
+		t.Errorf("array of objects = %+v", items)
+	}
+	// Only brackets write them.
+	if o := operationNamed(t, m, "Flat"); !strings.Contains(o.Unsupported, "arrays of objects and recursive types need the deepObject style") {
+		t.Errorf("flat: %q", o.Unsupported)
 	}
 }
 
@@ -644,7 +668,7 @@ paths:
 		t.Errorf("fields = %s", got)
 	}
 	mixed, related := o.Body.Media[1].Parts, o.Body.Media[2].Parts
-	if mixed.Item != "file" || fmt.Sprint(mixed.Prefix) != "[{  false [] <nil> [image/png] [Content-Id]}]" || fmt.Sprint(mixed.Rest.ContentTypes) != "[image/*]" {
+	if mixed.Item != "file" || fmt.Sprint(mixed.Prefix) != "[{  false [] <nil> [image/png] [Content-Id]  }]" || fmt.Sprint(mixed.Rest.ContentTypes) != "[image/*]" {
 		t.Errorf("mixed = %+v", mixed)
 	}
 	// Items by position cannot be typed: the parts are files.
