@@ -410,12 +410,25 @@ Objects in parameters, form bodies and multipart bodies may nest objects
 and maps (`additionalProperties`), written with brackets as `deepObject`
 does: `?filter[owner][name]=Ann`, `owner[age]=40&labels[a]=1` in a form.
 Arrays may repeat the key (`tags=a&tags=b`), or use `tags[]` or
-`tags[0]`. An object sent as one value (`owner={"age":40}`, or a multipart
-part) is read as JSON, the default content type of objects in form and
-multipart bodies. Recursive types and arrays of objects cannot be written
-this way and are not supported; nor are objects with additional properties
-in the exploded `form` style, which sends each property as a parameter of
-its own (use `deepObject` or `explode: false`).
+`tags[0]`. Arrays of objects are written with indices, nested to any
+depth, as the qs library, PHP, Rails and Stripe write them:
+
+```
+lines[0][sku]=apple&lines[0][qty]=3&lines[0][tags][0]=red&lines[1][sku]=pear&lines[1][qty]=1
+```
+
+Indices need not start at 0 or follow each other; items keep their
+order, and errors point at them (`/lines/1/sku`). Recursive types work the
+same way (`children[0][children][1][name]=leaf`), to any depth. An object
+sent as one value (`owner={"age":40}`, or a multipart part) is read as
+JSON, the default content type of objects in form and multipart bodies.
+In a multipart body, an array of objects is one JSON part per item. The
+generated client writes the same formats.
+
+Arrays of arrays cannot be written as fields. Arrays of objects,
+recursive types, and objects with additional properties cannot use the
+exploded `form` style either, which sends each property as a parameter of
+its own (use `deepObject`, or `explode: false` for the last).
 
 Supported request bodies: JSON (`application/json`, `*+json`), XML
 (`application/xml`, `text/xml`, `*+xml`),
