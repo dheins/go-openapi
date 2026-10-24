@@ -83,11 +83,17 @@ func FuzzMultipart(f *testing.F) {
 func FuzzObjectJSON(f *testing.F) {
 	f.Add("owner[age]=3&owner[name]=Ann&ids[]=1&ids[1]=2&meta[x][y]=z")
 	f.Add("a[b]=1&owner=%7B%22age%22%3A1%7D&x[=1&[c]=3")
+	f.Add("items[0][name]=a&items[0][tags][1]=x&items[3][qty]=2&tree[children][0][children][0][name]=leaf")
+	f.Add("items[0]=v&items[0][name]=b&tree[children][x]=1&items[01][qty]=1")
+	tree := &Property{}
+	*tree = Property{Type: "object", Properties: map[string]Property{"name": {Type: "string"}, "children": {Array: true, Ref: tree}}}
 	obj := Property{Type: "object", Properties: map[string]Property{
 		"owner": {Type: "object", Properties: map[string]Property{"age": {Type: "integer"}}},
 		"ids":   {Type: "integer", Array: true},
 		"meta":  {Type: "object", Additional: &Property{Type: "any"}},
 		"a[b]":  {Type: "string"},
+		"items": {Type: "object", Array: true, Properties: map[string]Property{"name": {Type: "string"}, "tags": {Type: "string", Array: true}, "qty": {Type: "integer"}}},
+		"tree":  {Ref: tree},
 	}}
 	f.Fuzz(func(t *testing.T, query string) {
 		q, err := url.ParseQuery(query)

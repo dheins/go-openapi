@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -429,6 +430,15 @@ func readFields(dec *jsontext.Decoder, prefix []string, nested bool, fields *[]f
 			if err != nil {
 				return err
 			}
+			if nested {
+				indexed, err := indexedFields(raw, path, fields)
+				if err != nil {
+					return err
+				}
+				if indexed {
+					continue
+				}
+			}
 			values, err := arrayValues(raw)
 			if err != nil {
 				return err
@@ -449,6 +459,46 @@ func readFields(dec *jsontext.Decoder, prefix []string, nested bool, fields *[]f
 	}
 	_, err := dec.ReadToken()
 	return err
+}
+
+// indexedFields writes the JSON array raw at path with indices, if it
+// holds an object: a[0][b]=x for an object item, a[1]=y for a scalar one.
+// It reports whether it did; an array of scalars is left to the caller,
+// as a=x&a=y.
+func indexedFields(raw []byte, path []string, fields *[]field) (bool, error) {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return false, err
+	}
+	hasObject := false
+	for _, it := range items {
+		if len(it) > 0 && it[0] == '{' {
+			hasObject = true
+			break
+		}
+	}
+	if !hasObject {
+		return false, nil
+	}
+	for i, it := range items {
+		at := append(append([]string{}, path...), strconv.Itoa(i))
+		switch {
+		case it[0] == '{':
+			dec := jsontext.NewDecoder(bytes.NewReader(it))
+			if _, err := dec.ReadToken(); err != nil {
+				return false, err
+			}
+			if err := readFields(dec, at, true, fields); err != nil {
+				return false, err
+			}
+		case string(it) == "null":
+			// An absent item, as null members are: the server reads the
+			// items that are given, in order.
+		default:
+			*fields = append(*fields, field{path: at, values: []string{textOf(it)}})
+		}
+	}
+	return true, nil
 }
 
 // arrayValues returns the items of a JSON array as text: scalars as

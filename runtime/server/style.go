@@ -315,6 +315,10 @@ func QueryString(r *http.Request) (string, bool, error) {
 // of any others (Additional; strings if nil). For a multipart part, it
 // also says which content types the part may declare (any if empty) and
 // which headers it must carry, from its encoding.
+//
+// A property whose Ref is set has the shape of *Ref: its Type,
+// Properties and Additional. It is how a recursive type refers to itself;
+// Array, ContentTypes and Headers stay the property's own.
 type Property struct {
 	Type         string
 	Array        bool
@@ -322,6 +326,17 @@ type Property struct {
 	Additional   *Property
 	ContentTypes []string
 	Headers      []string
+	Ref          *Property
+}
+
+// shape returns p with the shape of its Ref, if it has one.
+func (p Property) shape() Property {
+	if p.Ref == nil {
+		return p
+	}
+	s := p.Ref.shape()
+	s.Array, s.ContentTypes, s.Headers = p.Array, p.ContentTypes, p.Headers
+	return s
 }
 
 // ObjectJSON converts the fields of an object parameter or form body to a
@@ -331,11 +346,13 @@ type Property struct {
 //
 // Nested objects are written with brackets, as in deepObject parameters:
 // "a[b][c]=v". An array may be written "a=1&a=2", "a[]=1&a[]=2" or
-// "a[0]=1&a[1]=2". An object given as a single value is read as JSON,
+// "a[0]=1&a[1]=2", and an array of objects with indices:
+// "a[0][b]=1&a[1][b]=2". An object given as a single value is read as JSON,
 // the default content type of objects in form and multipart bodies. A
 // field named exactly like a declared property is that property, even if
 // it contains brackets.
 func ObjectJSON(fields map[string][]string, obj Property) ([]byte, error) {
+	obj = obj.shape()
 	root := &fieldNode{}
 	for key, vals := range fields {
 		path := []string{key}
@@ -395,6 +412,7 @@ func splitKey(key string) []string {
 
 // json renders n, found at the JSON pointer path, as a value of prop.
 func (n *fieldNode) json(path string, prop Property) (json.RawMessage, error) {
+	prop = prop.shape()
 	if len(n.children) > 0 && len(n.values) > 0 {
 		return nil, &oapi.ValidationError{Path: path, Message: "both a value and nested properties"}
 	}
@@ -449,24 +467,31 @@ func (n *fieldNode) objectJSON(path string, prop Property) (json.RawMessage, err
 	return json.Marshal(obj)
 }
 
-// indexedJSON renders "a[0]=x&a[1]=y" as an array, in index order.
+// indexedJSON renders "a[0]=x&a[1]=y", or "a[0][b]=x" for objects, as an
+// array in index order; missing indices are skipped.
 func (n *fieldNode) indexedJSON(path string, prop Property) (json.RawMessage, error) {
 	type item struct {
 		index int
-		value string
+		node  *fieldNode
 	}
 	var items []item
 	for key, child := range n.children {
 		i, err := strconv.Atoi(key)
-		if err != nil || i < 0 || len(child.children) > 0 || len(child.values) != 1 {
+		if err != nil || i < 0 || key != strconv.Itoa(i) {
 			return nil, &oapi.ValidationError{Path: oapi.Field(path, key), Message: "expected an array item with an index"}
 		}
-		items = append(items, item{i, child.values[0]})
+		items = append(items, item{i, child})
 	}
 	slices.SortFunc(items, func(a, b item) int { return a.index - b.index })
+	elem := prop
+	elem.Array = false
 	out := make([]json.RawMessage, len(items))
 	for i, it := range items {
-		out[i] = scalarJSON(it.value, prop.Type)
+		data, err := it.node.json(oapi.Index(path, i), elem)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = data
 	}
 	return json.Marshal(out)
 }

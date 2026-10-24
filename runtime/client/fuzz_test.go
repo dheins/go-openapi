@@ -1,6 +1,7 @@
 package client
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -76,4 +77,50 @@ func FuzzParamRoundTrip(f *testing.F) {
 			t.Fatalf("%s %s: sent %q, got %q (%v); url %s", st.in, st.p.Style, items, got.Items, err, req.URL)
 		}
 	})
+}
+
+// FuzzFieldsRoundTrip checks that an object with arrays of objects, maps
+// of them and a recursive type, written as a form, reads back the same
+// through the server's decoder. Map keys with brackets cannot be written
+// as fields and are skipped.
+func FuzzFieldsRoundTrip(f *testing.F) {
+	f.Add("o-1", "apple", "red", int64(3), "gift", "root", uint8(2))
+	f.Add("", "a b&c=d", "", int64(-1), "k", "x[y]", uint8(0))
+	f.Fuzz(func(t *testing.T, id, name, tag string, qty int64, key, nodeName string, depth uint8) {
+		for _, s := range []string{id, name, tag, key, nodeName} {
+			if !utf8.ValidString(s) {
+				return
+			}
+		}
+		if key == "" || strings.ContainsAny(key, "[]") {
+			return
+		}
+		in := order{ID: id, Items: []item{{Name: name, Qty: qty}, {Name: tag, Tags: []string{tag, name}}}, Meta: map[string]item{key: {Name: name, Qty: qty}}}
+		// A tree of the given depth, with a sibling at each level.
+		var tree *node
+		for range depth % 6 {
+			tree = &node{Name: nodeName, Children: append([]node{{Name: tag}}, deref(tree)...)}
+		}
+		in.Tree = tree
+		r := NewRequest("POST")
+		r.FormBody("application/x-www-form-urlencoded", in)
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		fields, err := server.FormFields(r.body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := server.DecodeFields[order](fields, orderShape)
+		if err != nil || !reflect.DeepEqual(out, in) {
+			t.Fatalf("sent %+v as %s\ngot %+v, %v", in, r.body, out, err)
+		}
+	})
+}
+
+func deref(n *node) []node {
+	if n == nil {
+		return nil
+	}
+	return []node{*n}
 }

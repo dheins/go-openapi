@@ -4,6 +4,12 @@
 
 ### Added
 
+- The runtimes read and write arrays of objects in forms, deepObject
+  parameters and form querystrings with indexed brackets
+  (`items[0][name]=Rex&items[1][name]=Tom`), nested to any depth, and in
+  multipart bodies as one JSON part per item. `server.Property` gains
+  `Ref`, so a recursive type's shape can refer to itself. An array index
+  must now be written canonically (`a[01]` is an error).
 - `codescan`: generating an OpenAPI 3.1 document from Go source. Go types
   become schemas as `encoding/json` encodes them, with the module's
   `oapi` types understood, doc comments as descriptions, JSON Schema
