@@ -17,11 +17,14 @@ import (
 	"github.com/dheins/go-openapi/validate"
 )
 
-// runGenerate implements "generate model", "generate server" and
-// "generate client".
+// runGenerate implements "generate model", "generate server",
+// "generate client" and "generate ts-client".
 func runGenerate(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "ts-client" {
+		return runGenerateTS(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || (args[0] != "model" && args[0] != "server" && args[0] != "client") {
-		fmt.Fprintln(stderr, `goapi generate: expected "model", "server" or "client"`)
+		fmt.Fprintln(stderr, `goapi generate: expected "model", "server", "client" or "ts-client"`)
 		return exitFailure
 	}
 	target := args[0]

@@ -102,13 +102,14 @@ func TestGolden(t *testing.T) {
 				}
 			}
 			// The TypeScript of the model, in ts.
-			tsFiles, err := TypeScript(model, TSOptions{Source: opts.Source})
+			tsFiles, tsWarnings, err := TypeScript(model, TSOptions{Source: opts.Source})
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, f := range tsFiles {
 				files = append(files, File{Name: path.Join("ts", f.Name), Content: f.Content})
 			}
+			files = append(files, File{Name: "ts/warnings.txt", Content: []byte(strings.Join(append(tsWarnings, ""), "\n"))})
 			var warnings bytes.Buffer
 			for _, w := range model.Warnings {
 				fmt.Fprintf(&warnings, "%d:%d: %s\n", w.Position.Line, w.Position.Column, w.Message)

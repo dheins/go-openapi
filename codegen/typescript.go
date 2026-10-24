@@ -25,15 +25,64 @@ type TSOptions struct {
 }
 
 // TypeScript generates a TypeScript client of the model: runtime.ts, the
-// runtime every client shares, and models.ts, with a type and a schema
+// runtime every client shares; models.ts, with a type and a schema
 // descriptor per type of the model, which the runtime validates and
-// encodes values with. It uses only syntax that type stripping erases.
-func TypeScript(m *ir.Model, opts TSOptions) ([]File, error) {
+// encodes values with; client.ts, with a Client class and the request and
+// response types of the operations, if the model has some; and index.ts.
+// It uses only syntax that type stripping erases. It returns what it
+// leaves out, such as media types the TypeScript runtime cannot send.
+func TypeScript(m *ir.Model, opts TSOptions) ([]File, []string, error) {
 	g := newTSGen(m, opts)
-	return []File{
+	files := []File{
 		{Name: "runtime.ts", Content: tsRuntime},
 		{Name: "models.ts", Content: []byte(g.models())},
-	}, nil
+	}
+	hasClient := len(m.Operations) > 0
+	if hasClient {
+		files = append(files, File{Name: "client.ts", Content: []byte(g.client())})
+	}
+	files = append(files, File{Name: "index.ts", Content: []byte(g.index(hasClient))})
+	return files, g.warnings, nil
+}
+
+// tsRuntimeExports are the names of runtime.ts that users of a client
+// need, which index.ts re-exports unless a model has the name; the whole
+// runtime is exported as runtime too.
+var tsRuntimeExports = []struct {
+	name string
+	typ  bool
+}{
+	{"ClientOptions", true}, {"CallOptions", true}, {"Credential", true}, {"BasicCredential", true},
+	{"ServerEvent", true}, {"Problem", true}, {"Issue", true}, {"Schema", true},
+	{"InvalidRequestError", false}, {"UnexpectedResponseError", false}, {"InvalidResponseError", false},
+	{"NoCredentialsError", false}, {"validate", false}, {"encode", false},
+}
+
+func (g *tsGen) index(hasClient bool) string {
+	taken := map[string]bool{"Client": hasClient, "Credentials": hasClient, "defaultServerUrl": hasClient}
+	for _, t := range g.m.Types {
+		taken[g.names[t]], taken[g.schemas[t]] = true, true
+	}
+	var names []string
+	for _, e := range tsRuntimeExports {
+		if taken[e.name] {
+			continue
+		}
+		if e.typ {
+			names = append(names, "type "+e.name)
+		} else {
+			names = append(names, e.name)
+		}
+	}
+	var b strings.Builder
+	b.WriteString(g.header())
+	fmt.Fprintf(&b, "export { %s } from \"./runtime.ts\";\n", strings.Join(names, ", "))
+	b.WriteString("export * as runtime from \"./runtime.ts\";\n")
+	b.WriteString("export * from \"./models.ts\";\n")
+	if hasClient {
+		b.WriteString("export * from \"./client.ts\";\n")
+	}
+	return b.String()
 }
 
 // tsGen generates the TypeScript of one model.
@@ -43,6 +92,10 @@ type tsGen struct {
 	// names are the TypeScript names of the model's types, and schemas
 	// those of their descriptors.
 	names, schemas map[*ir.Type]string
+	// qual qualifies the names of models: "" in models.ts, "$m." in
+	// client.ts, which imports them as $m.
+	qual     string
+	warnings []string
 }
 
 // tsReserved are global names the generated code refers to, which a type
@@ -186,7 +239,7 @@ func fieldText(f *ir.Field) string {
 func (g *tsGen) tsType(r *ir.Ref) string {
 	switch r.Kind {
 	case ir.Named:
-		return g.names[r.Type]
+		return g.qual + g.names[r.Type]
 	case ir.Slice:
 		elem := g.tsType(r.Elem)
 		if strings.ContainsAny(elem, "|&") {
@@ -310,7 +363,7 @@ func (g *tsGen) schema(r *ir.Ref) string {
 	}
 	switch r.Kind {
 	case ir.Named:
-		return fmt.Sprintf("$ref(() => %s)", g.schemas[r.Type])
+		return fmt.Sprintf("$ref(() => %s%s)", g.qual, g.schemas[r.Type])
 	case ir.Optional, ir.Pointer:
 		return g.schema(r.Elem)
 	case ir.Nullable:

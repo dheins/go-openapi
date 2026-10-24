@@ -370,3 +370,783 @@ export function encode(schema: Schema, value: unknown, direction: Direction): un
       return value;
   }
 }
+
+// ---- HTTP ----------------------------------------------------------------
+
+/** How a client sends requests. */
+export interface ClientOptions {
+  /** The server URL, below which paths are sent; the document's first
+   * server URL by default. */
+  baseUrl?: string;
+  /** The fetch function to send with; the global fetch by default. */
+  fetch?: typeof fetch;
+  /** Headers sent with every request that does not set them. */
+  headers?: Record<string, string>;
+  /** Check requests before sending them (true by default). */
+  validateRequests?: boolean;
+  /** Check response bodies and required headers (false by default). */
+  validateResponses?: boolean;
+}
+
+/** Options of one call. */
+export interface CallOptions {
+  signal?: AbortSignal;
+  headers?: Record<string, string>;
+}
+
+/** A credential: a string, or a function returning one, possibly async. */
+export type Credential = string | (() => string | Promise<string>);
+
+/** HTTP basic credentials, or a function returning them. */
+export type BasicCredential =
+  | { username: string; password: string }
+  | (() => { username: string; password: string } | Promise<{ username: string; password: string }>);
+
+/** A parameter of an operation: where it is, and how it is serialized. */
+export interface ParamSpec {
+  readonly key: string;
+  readonly name: string;
+  readonly in: "path" | "query" | "header" | "cookie" | "querystring";
+  readonly style: string;
+  readonly explode: boolean;
+  readonly shape: "scalar" | "array" | "object";
+  /** The parameter is serialized as JSON (content), not in a style. */
+  readonly json?: boolean;
+  readonly required?: boolean;
+  readonly schema: Schema;
+}
+
+export interface BodyMediaSpec {
+  readonly mediaType: string;
+  readonly kind: "json" | "form" | "multipart" | "text" | "binary";
+  /** The request property holding a body of this media type. */
+  readonly key: string;
+  readonly schema: Schema;
+}
+
+export interface HeaderSpec {
+  readonly key: string;
+  readonly name: string;
+  readonly required?: boolean;
+  readonly array?: boolean;
+  readonly json?: boolean;
+  readonly schema: Schema;
+}
+
+export interface ResponseSpec {
+  /** "200", a range such as "4XX", or "default". */
+  readonly status: string;
+  readonly mediaType?: string;
+  readonly kind?: "json" | "text" | "binary" | "jsonl" | "sse";
+  readonly schema?: Schema;
+  /** The schema of each item, for JSON Lines. */
+  readonly item?: Schema;
+  readonly headers?: readonly HeaderSpec[];
+  /** Several media types share the status: the variant names its own. */
+  readonly withContentType?: boolean;
+}
+
+export interface SchemeSpec {
+  readonly key: string;
+  readonly type: "apiKey" | "http" | "oauth2" | "openIdConnect" | "mutualTLS";
+  readonly in?: "header" | "query" | "cookie";
+  readonly name?: string;
+  readonly scheme?: string;
+}
+
+/** An operation, as client.ts describes it to send. */
+export interface OperationSpec {
+  readonly method: string;
+  readonly path: string;
+  readonly params: readonly ParamSpec[];
+  readonly body?: { readonly required: boolean; readonly media: readonly BodyMediaSpec[] };
+  readonly responses: readonly ResponseSpec[];
+  /** Alternative requirements, each needing all its schemes; none means
+   * the operation is not secured, and an empty one allows anonymous use. */
+  readonly security?: readonly (readonly SchemeSpec[])[];
+}
+
+/** The problem details of an RFC 9457 problem response. */
+export interface Problem {
+  type?: string;
+  title?: string;
+  status?: number;
+  detail?: string;
+  instance?: string;
+  errors?: { in?: string; parameter?: string; pointer?: string; detail?: string }[];
+  [key: string]: unknown;
+}
+
+/** A request that does not match the document, found before it is sent. */
+export class InvalidRequestError extends Error {
+  readonly issues: readonly (Issue & { in: string; parameter?: string })[];
+  constructor(issues: readonly (Issue & { in: string; parameter?: string })[]) {
+    super("invalid request: " + issues.map((i) => `${i.parameter ?? i.in}${i.pointer}: ${i.message}`).join("; "));
+    this.name = "InvalidRequestError";
+    this.issues = issues;
+  }
+}
+
+/** A response with a status or media type the operation does not declare. */
+export class UnexpectedResponseError extends Error {
+  readonly status: number;
+  readonly headers: Headers;
+  /** The beginning of the body. */
+  readonly body: string;
+  /** The problem details of a problem+json body. */
+  readonly problem?: Problem;
+  constructor(status: number, headers: Headers, body: string, problem?: Problem) {
+    super(`unexpected ${status} response` + (problem?.title ? `: ${problem.title}` : ""));
+    this.name = "UnexpectedResponseError";
+    this.status = status;
+    this.headers = headers;
+    this.body = body;
+    if (problem !== undefined) {
+      this.problem = problem;
+    }
+  }
+}
+
+/** A declared response that cannot be read, or that does not match the
+ * document when responses are validated. */
+export class InvalidResponseError extends Error {
+  readonly status: number;
+  readonly issues: readonly Issue[];
+  constructor(status: number, message: string, issues: readonly Issue[] = []) {
+    super(`invalid ${status} response: ${message}`);
+    this.name = "InvalidResponseError";
+    this.status = status;
+    this.issues = issues;
+  }
+}
+
+/** No security requirement of the operation has all its credentials. */
+export class NoCredentialsError extends Error {
+  constructor() {
+    super("no credentials for any of the operation's security requirements");
+    this.name = "NoCredentialsError";
+  }
+}
+
+/** A server-sent event. */
+export interface ServerEvent {
+  event?: string;
+  data: string;
+  id?: string;
+  retry?: number;
+}
+
+type Values = Record<string, unknown>;
+
+function text(v: unknown): string {
+  if (typeof v === "string") {
+    return v;
+  }
+  if (typeof v === "number" || typeof v === "boolean") {
+    return String(v);
+  }
+  return JSON.stringify(v);
+}
+
+// entries returns the properties of an object in order, without the
+// absent ones.
+function entries(v: unknown): [string, unknown][] {
+  return isObject(v) ? Object.entries(v).filter(([, x]) => x !== undefined) : [];
+}
+
+// fields flattens an object into bracketed fields, as forms and deepObject
+// write them: a[b]=1, an array of scalars repeated, an array of objects
+// with indices (a[0][b]=1).
+function fields(v: unknown, prefix: string, out: [string, string][]): void {
+  for (const [k, x] of entries(v)) {
+    const name = prefix === "" ? k : `${prefix}[${k}]`;
+    addField(name, x, out);
+  }
+}
+
+function addField(name: string, x: unknown, out: [string, string][]): void {
+  if (x === null) {
+    return;
+  }
+  if (Array.isArray(x)) {
+    if (x.some((item) => isObject(item))) {
+      x.forEach((item, i) => (isObject(item) ? fields(item, `${name}[${i}]`, out) : item === null ? undefined : out.push([`${name}[${i}]`, text(item)])));
+    } else {
+      for (const item of x) {
+        out.push([name, text(item)]);
+      }
+    }
+  } else if (isObject(x)) {
+    fields(x, name, out);
+  } else {
+    out.push([name, text(x)]);
+  }
+}
+
+const unreserved = (s: string) => encodeURIComponent(s);
+
+// quoteItem quotes a header list item that has a comma, a quote or
+// surrounding spaces, as RFC 9110 lists allow.
+function quoteItem(s: string): string {
+  if (s.includes(",") || s.includes('"') || s.trim() !== s) {
+    return '"' + s.replaceAll("\\", "\\\\").replaceAll('"', '\\"') + '"';
+  }
+  return s;
+}
+
+// simple serializes a value in the simple style, with item applied to
+// each piece.
+function simple(p: ParamSpec, v: unknown, item: (s: string) => string): string {
+  if (p.shape === "array" && Array.isArray(v)) {
+    return v.map((x) => item(text(x))).join(",");
+  }
+  if (p.shape === "object") {
+    const parts = entries(v).map(([k, x]) => (p.explode ? `${item(k)}=${item(text(x))}` : `${item(k)},${item(text(x))}`));
+    return parts.join(",");
+  }
+  return item(text(v));
+}
+
+function pathValue(p: ParamSpec, v: unknown): string {
+  if (p.json) {
+    return unreserved(JSON.stringify(v));
+  }
+  switch (p.style) {
+    case "label":
+      if (p.shape === "array" && Array.isArray(v)) {
+        return "." + v.map((x) => unreserved(text(x))).join(p.explode ? "." : ",");
+      }
+      if (p.shape === "object") {
+        const parts = entries(v).map(([k, x]) => (p.explode ? `${unreserved(k)}=${unreserved(text(x))}` : `${unreserved(k)},${unreserved(text(x))}`));
+        return "." + parts.join(p.explode ? "." : ",");
+      }
+      return "." + unreserved(text(v));
+    case "matrix": {
+      const n = unreserved(p.name);
+      if (p.shape === "array" && Array.isArray(v)) {
+        return p.explode ? v.map((x) => `;${n}=${unreserved(text(x))}`).join("") : `;${n}=` + v.map((x) => unreserved(text(x))).join(",");
+      }
+      if (p.shape === "object") {
+        return p.explode
+          ? entries(v).map(([k, x]) => `;${unreserved(k)}=${unreserved(text(x))}`).join("")
+          : `;${n}=` + entries(v).map(([k, x]) => `${unreserved(k)},${unreserved(text(x))}`).join(",");
+      }
+      return `;${n}=${unreserved(text(v))}`;
+    }
+    default:
+      return simple(p, v, unreserved);
+  }
+}
+
+function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown): void {
+  if (p.json) {
+    q.append(p.name, JSON.stringify(v));
+    return;
+  }
+  if (p.style === "deepObject") {
+    const out: [string, string][] = [];
+    fields(v, p.name, out);
+    for (const [k, x] of out) {
+      q.append(k, x);
+    }
+    return;
+  }
+  if (p.shape === "array" && Array.isArray(v)) {
+    const items = v.map(text);
+    if (p.style === "form" && p.explode) {
+      for (const item of items) {
+        q.append(p.name, item);
+      }
+    } else {
+      q.append(p.name, items.join({ spaceDelimited: " ", pipeDelimited: "|" }[p.style] ?? ","));
+    }
+    return;
+  }
+  if (p.shape === "object") {
+    if (p.explode) {
+      for (const [k, x] of entries(v)) {
+        q.append(k, text(x));
+      }
+    } else {
+      q.append(p.name, entries(v).flatMap(([k, x]) => [k, text(x)]).join(","));
+    }
+    return;
+  }
+  q.append(p.name, text(v));
+}
+
+/** The parts of a request being built. */
+interface Built {
+  path: string;
+  query: URLSearchParams;
+  rawQuery?: string;
+  headers: Headers;
+  cookies: string[];
+  body?: BodyInit;
+}
+
+function buildParams(op: OperationSpec, req: Values, b: Built): void {
+  let path = op.path;
+  for (const p of op.params) {
+    const v = req[p.key];
+    if (p.in === "path") {
+      path = path.replace(`{${p.name}}`, pathValue(p, v));
+      continue;
+    }
+    if (v === undefined) {
+      continue;
+    }
+    switch (p.in) {
+      case "query":
+        queryValue(b.query, p, v);
+        break;
+      case "querystring":
+        if (p.json) {
+          b.rawQuery = encodeURIComponent(JSON.stringify(v));
+        } else {
+          const out: [string, string][] = [];
+          fields(v, "", out);
+          for (const [k, x] of out) {
+            b.query.append(k, x);
+          }
+        }
+        break;
+      case "header":
+        b.headers.set(p.name, p.json ? JSON.stringify(v) : simple(p, v, quoteItem));
+        break;
+      case "cookie":
+        if (p.json) {
+          b.cookies.push(`${p.name}=${encodeURIComponent(JSON.stringify(v))}`);
+        } else if (p.shape === "array" && Array.isArray(v) && p.explode) {
+          for (const x of v) {
+            b.cookies.push(`${p.name}=${encodeURIComponent(text(x))}`);
+          }
+        } else if (p.shape === "object" && p.explode) {
+          for (const [k, x] of entries(v)) {
+            b.cookies.push(`${k}=${encodeURIComponent(text(x))}`);
+          }
+        } else {
+          b.cookies.push(`${p.name}=${simple(p, v, encodeURIComponent)}`);
+        }
+        break;
+    }
+  }
+  b.path = path;
+}
+
+function fileName(v: Blob): string | undefined {
+  return typeof File !== "undefined" && v instanceof File ? v.name : undefined;
+}
+
+function buildBody(op: OperationSpec, req: Values, b: Built): void {
+  const body = op.body;
+  if (body === undefined) {
+    return;
+  }
+  const contentType = typeof req["contentType"] === "string" ? req["contentType"] : undefined;
+  const media =
+    body.media.find((m) => m.mediaType === contentType) ??
+    body.media.find((m) => req[m.key] !== undefined && contentType === undefined);
+  if (media === undefined) {
+    return;
+  }
+  const v = req[media.key];
+  if (v === undefined) {
+    return;
+  }
+  switch (media.kind) {
+    case "json":
+      b.headers.set("Content-Type", media.mediaType);
+      b.body = JSON.stringify(encode(media.schema, v, "request"));
+      break;
+    case "form": {
+      const out: [string, string][] = [];
+      fields(encode(media.schema, v, "request"), "", out);
+      b.headers.set("Content-Type", media.mediaType);
+      b.body = new URLSearchParams(out).toString();
+      break;
+    }
+    case "multipart": {
+      // fetch writes the content type, with the boundary.
+      const form = new FormData();
+      for (const [k, x] of entries(encode(media.schema, v, "request"))) {
+        for (const item of Array.isArray(x) ? x : [x]) {
+          if (item instanceof Blob) {
+            const name = fileName(item);
+            if (name === undefined) {
+              form.append(k, item);
+            } else {
+              form.append(k, item, name);
+            }
+          } else if (isObject(item) || Array.isArray(item)) {
+            form.append(k, new Blob([JSON.stringify(item)], { type: "application/json" }));
+          } else if (item !== null) {
+            form.append(k, text(item));
+          }
+        }
+      }
+      b.body = form;
+      break;
+    }
+    case "text":
+      b.headers.set("Content-Type", media.mediaType.includes("charset=") ? media.mediaType : media.mediaType + "; charset=utf-8");
+      b.body = text(v);
+      break;
+    case "binary":
+      b.headers.set("Content-Type", v instanceof Blob && v.type !== "" && media.mediaType.includes("*") ? v.type : media.mediaType);
+      b.body = v as BodyInit;
+      break;
+  }
+}
+
+// check validates the parameters and body of a request, as the server
+// would, reporting where each problem is.
+function checkRequest(op: OperationSpec, req: Values): void {
+  const issues: (Issue & { in: string; parameter?: string })[] = [];
+  for (const p of op.params) {
+    const v = req[p.key];
+    if (v === undefined) {
+      if (p.required) {
+        issues.push({ in: p.in, parameter: p.name, pointer: "", message: "required parameter is missing" });
+      }
+      continue;
+    }
+    for (const i of validate(p.schema, v, "request")) {
+      issues.push({ ...i, in: p.in, parameter: p.name });
+    }
+  }
+  if (op.body !== undefined) {
+    const given = op.body.media.filter((m) => req[m.key] !== undefined);
+    if (given.length === 0 && op.body.required) {
+      issues.push({ in: "body", pointer: "", message: "the request body is missing" });
+    }
+    for (const m of given.filter((m, i, all) => all.findIndex((n) => n.key === m.key) === i)) {
+      for (const i of validate(m.schema, req[m.key], "request")) {
+        issues.push({ ...i, in: "body" });
+      }
+    }
+  }
+  if (issues.length > 0) {
+    throw new InvalidRequestError(issues);
+  }
+}
+
+async function credential(c: Credential): Promise<string> {
+  return typeof c === "string" ? c : await c();
+}
+
+// authorize applies the first security requirement whose credentials are
+// all given.
+async function authorize(op: OperationSpec, creds: Values, b: Built): Promise<void> {
+  if (op.security === undefined || op.security.length === 0) {
+    return;
+  }
+  for (const req of op.security) {
+    if (!req.every((s) => creds[s.key] !== undefined && creds[s.key] !== false)) {
+      continue;
+    }
+    for (const s of req) {
+      const c = creds[s.key];
+      if (s.type === "apiKey") {
+        const key = await credential(c as Credential);
+        if (s.in === "query") {
+          b.query.set(s.name ?? "", key);
+        } else if (s.in === "cookie") {
+          b.cookies.push(`${s.name}=${encodeURIComponent(key)}`);
+        } else {
+          b.headers.set(s.name ?? "", key);
+        }
+      } else if (s.type === "http" && s.scheme === "basic") {
+        const { username, password } = typeof c === "function" ? await (c as () => Promise<{ username: string; password: string }>)() : (c as { username: string; password: string });
+        const bytes = new TextEncoder().encode(`${username}:${password}`);
+        b.headers.set("Authorization", "Basic " + btoa(String.fromCharCode(...bytes)));
+      } else if (s.type !== "mutualTLS") {
+        const scheme = s.type === "http" && s.scheme !== undefined && s.scheme !== "bearer" ? s.scheme[0]!.toUpperCase() + s.scheme.slice(1) : "Bearer";
+        b.headers.set("Authorization", `${scheme} ${await credential(c as Credential)}`);
+      }
+    }
+    return;
+  }
+  throw new NoCredentialsError();
+}
+
+/** The parts of a client a call needs. */
+export interface Config {
+  readonly baseUrl: string;
+  readonly fetch: typeof fetch;
+  readonly headers: Record<string, string>;
+  readonly validateRequests: boolean;
+  readonly validateResponses: boolean;
+  readonly credentials: Values;
+}
+
+/** Makes the configuration of a client from its options. */
+export function config(options: ClientOptions, defaultBaseUrl: string, credentials: object | undefined): Config {
+  const baseUrl = options.baseUrl ?? defaultBaseUrl;
+  if (baseUrl === "") {
+    throw new Error("the document has no absolute server URL: give baseUrl");
+  }
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    fetch: options.fetch ?? ((input, init) => fetch(input, init)),
+    headers: options.headers ?? {},
+    validateRequests: options.validateRequests ?? true,
+    validateResponses: options.validateResponses ?? false,
+    credentials: (credentials ?? {}) as Values,
+  };
+}
+
+/** Sends a request of op and reads its response: what a generated method
+ * does. */
+export async function send(cfg: Config, op: OperationSpec, req: object, call: CallOptions = {}): Promise<unknown> {
+  const values = req as Values;
+  if (cfg.validateRequests) {
+    checkRequest(op, values);
+  }
+  const b: Built = { path: "", query: new URLSearchParams(), headers: new Headers(), cookies: [] };
+  buildParams(op, values, b);
+  buildBody(op, values, b);
+  await authorize(op, cfg.credentials, b);
+  const accept = [...new Set(op.responses.flatMap((r) => (r.mediaType ? [r.mediaType] : [])))];
+  if (accept.length > 0) {
+    b.headers.set("Accept", accept.join(", "));
+  }
+  for (const [k, v] of Object.entries({ ...cfg.headers, ...call.headers })) {
+    if (!b.headers.has(k)) {
+      b.headers.set(k, v);
+    }
+  }
+  if (b.cookies.length > 0) {
+    // Browsers do not let scripts set Cookie; elsewhere it is sent.
+    b.headers.set("Cookie", b.cookies.join("; "));
+  }
+  const query = b.rawQuery ?? b.query.toString();
+  const url = cfg.baseUrl + b.path + (query === "" ? "" : "?" + query);
+  const init: RequestInit = { method: op.method, headers: b.headers };
+  if (b.body !== undefined) {
+    init.body = b.body;
+  }
+  if (call.signal !== undefined) {
+    init.signal = call.signal;
+  }
+  return readResponse(cfg, op, await cfg.fetch(url, init));
+}
+
+// mediaType returns the media type of a response, lower case, without
+// parameters.
+function mediaType(resp: Response): string {
+  return (resp.headers.get("Content-Type") ?? "").split(";")[0]!.trim().toLowerCase();
+}
+
+function statusMatches(declared: string, status: number): boolean {
+  if (declared === "default") {
+    return true;
+  }
+  if (declared.endsWith("XX")) {
+    return String(status)[0] === declared[0];
+  }
+  return Number(declared) === status;
+}
+
+function mediaMatches(declared: string, actual: string): boolean {
+  const d = declared.split(";")[0]!.trim().toLowerCase();
+  if (d === "*/*" || d === actual) {
+    return true;
+  }
+  return d.endsWith("/*") && actual.startsWith(d.slice(0, -1));
+}
+
+// pick returns the declared response resp is: exact statuses first, then
+// ranges, then default, with a matching media type.
+function pick(op: OperationSpec, resp: Response): ResponseSpec | undefined {
+  const rank = (s: string) => (s === "default" ? 2 : s.endsWith("XX") ? 1 : 0);
+  const mt = mediaType(resp);
+  const candidates = op.responses.filter((r) => statusMatches(r.status, resp.status)).sort((a, b) => rank(a.status) - rank(b.status));
+  return candidates.find((r) => {
+    if (r.mediaType === undefined) {
+      return true;
+    }
+    // A response without a media type is the only one of its status.
+    return mt === "" ? candidates.filter((c) => c.status === r.status).length === 1 : mediaMatches(r.mediaType, mt);
+  });
+}
+
+async function unexpected(resp: Response): Promise<UnexpectedResponseError> {
+  const body = (await resp.text()).slice(0, 64 << 10);
+  let problem: Problem | undefined;
+  if (mediaType(resp).endsWith("problem+json")) {
+    try {
+      problem = JSON.parse(body) as Problem;
+    } catch {
+      // Not JSON after all: the body says what there is.
+    }
+  }
+  return new UnexpectedResponseError(resp.status, resp.headers, body, problem);
+}
+
+function headerValue(h: HeaderSpec, raw: string): unknown {
+  if (h.json) {
+    return JSON.parse(raw);
+  }
+  const scalar = (s: string): unknown => {
+    let schema = h.schema;
+    while (schema.kind === "ref" || schema.kind === "nullable" || schema.kind === "array") {
+      schema = schema.kind === "ref" ? schema.to() : schema.kind === "nullable" ? schema.of : schema.items;
+    }
+    switch (schema.kind) {
+      case "integer":
+      case "number":
+        return Number(s);
+      case "boolean":
+        return s === "true" ? true : s === "false" ? false : s;
+    }
+    return s;
+  };
+  return h.array ? raw.split(",").map((s) => scalar(s.trim())) : scalar(raw.trim());
+}
+
+async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Promise<unknown> {
+  const spec = pick(op, resp);
+  if (spec === undefined) {
+    throw await unexpected(resp);
+  }
+  const out: Values = { status: resp.status };
+  if (spec.withContentType) {
+    out["contentType"] = spec.mediaType;
+  }
+  const headers: Values = {};
+  for (const h of spec.headers ?? []) {
+    const raw = resp.headers.get(h.name);
+    if (raw === null) {
+      if (h.required && cfg.validateResponses) {
+        throw new InvalidResponseError(resp.status, `header ${h.name} is required`);
+      }
+      continue;
+    }
+    try {
+      headers[h.key] = headerValue(h, raw);
+    } catch (e) {
+      throw new InvalidResponseError(resp.status, `header ${h.name}: ${String(e)}`);
+    }
+  }
+  if (spec.headers !== undefined && spec.headers.length > 0) {
+    out["headers"] = headers;
+  }
+  switch (spec.kind) {
+    case "json": {
+      let body: unknown;
+      try {
+        body = JSON.parse(await resp.text());
+      } catch (e) {
+        throw new InvalidResponseError(resp.status, String(e));
+      }
+      if (cfg.validateResponses && spec.schema !== undefined) {
+        const issues = validate(spec.schema, body, "response");
+        if (issues.length > 0) {
+          throw new InvalidResponseError(resp.status, issues.map((i) => `${i.pointer}: ${i.message}`).join("; "), issues);
+        }
+      }
+      out["body"] = body;
+      break;
+    }
+    case "text":
+      out["body"] = await resp.text();
+      break;
+    case "binary":
+      out["body"] = await resp.blob();
+      if (spec.mediaType?.includes("*")) {
+        out["contentType"] = resp.headers.get("Content-Type") ?? "";
+      }
+      break;
+    case "jsonl":
+      out["items"] = jsonLines(resp);
+      break;
+    case "sse":
+      out["events"] = serverEvents(resp);
+      break;
+    default:
+      // Read the empty body so the connection can be reused.
+      await resp.arrayBuffer();
+  }
+  return out;
+}
+
+async function* lines(resp: Response): AsyncGenerator<string> {
+  if (resp.body === null) {
+    return;
+  }
+  const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += value;
+      let i: number;
+      while ((i = buffer.indexOf("\n")) >= 0) {
+        yield buffer.slice(0, i).replace(/\r$/, "");
+        buffer = buffer.slice(i + 1);
+      }
+    }
+    if (buffer !== "") {
+      yield buffer;
+    }
+  } finally {
+    // Stopping early cancels the rest of the stream.
+    await reader.cancel().catch(() => {});
+  }
+}
+
+/** The items of a JSON Lines response, as they arrive. */
+async function* jsonLines(resp: Response): AsyncGenerator<unknown> {
+  for await (const line of lines(resp)) {
+    if (line.trim() !== "") {
+      yield JSON.parse(line);
+    }
+  }
+}
+
+/** The events of a server-sent events response, as they arrive. */
+async function* serverEvents(resp: Response): AsyncGenerator<ServerEvent> {
+  let event: ServerEvent = { data: "" };
+  let data: string[] = [];
+  for await (const line of lines(resp)) {
+    if (line === "") {
+      if (data.length > 0) {
+        event.data = data.join("\n");
+        yield event;
+      }
+      event = { data: "" };
+      data = [];
+      continue;
+    }
+    if (line.startsWith(":")) {
+      continue;
+    }
+    const colon = line.indexOf(":");
+    const field = colon < 0 ? line : line.slice(0, colon);
+    const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
+    switch (field) {
+      case "event":
+        event.event = value;
+        break;
+      case "data":
+        data.push(value);
+        break;
+      case "id":
+        event.id = value;
+        break;
+      case "retry":
+        if (/^\d+$/.test(value)) {
+          event.retry = Number(value);
+        }
+        break;
+    }
+  }
+  if (data.length > 0) {
+    event.data = data.join("\n");
+    yield event;
+  }
+}

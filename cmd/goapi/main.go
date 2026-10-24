@@ -6,6 +6,7 @@
 //	goapi generate model [-out dir] [-package name] [-optional wrapper|pointer] file
 //	goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
 //	goapi generate client [-out dir] [-package name] [-types import] file
+//	goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
 //	goapi convert [-out file] [-format yaml|json] file
 //	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
 //	goapi version
@@ -78,6 +79,7 @@ Usage:
   goapi generate model [-out dir] [-package name] [-optional wrapper|pointer] file
   goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
   goapi generate client [-out dir] [-package name] [-types import] file
+  goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
   goapi convert [-out file] [-format yaml|json] file
   goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
   goapi version
@@ -87,6 +89,7 @@ Commands:
   generate model    generate Go types for the schemas of a document
   generate server   generate the types and an HTTP server for a document
   generate client   generate the types and an HTTP client for a document
+  generate ts-client generate a TypeScript client for a document
   convert           write a Swagger 2.0 document as OpenAPI 3.1
   scan              write the document that goapi directives in Go code describe
   version           print the version of goapi

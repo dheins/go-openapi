@@ -11,6 +11,15 @@
   read-only properties are not required in requests) and encodes values
   with. The code uses only syntax type stripping erases, and type-checks
   under the strictest compiler settings.
+- `goapi generate ts-client [-out dir] [-paths -tags -exclude-paths
+  -exclude-tags] file`: a TypeScript client using only `fetch`. `client.ts`
+  has a `Client` class with an async method per operation, request types,
+  responses as unions discriminated by `status`, a descriptor per operation
+  that `runtime.ts` sends (every parameter style, JSON, form, multipart,
+  text and binary bodies, JSON Lines and server-sent events as async
+  iterables, security schemes, typed errors), and `index.ts` re-exports
+  them. Media types the TypeScript runtime cannot send or read yet (XML,
+  positional parts) are reported.
 - `ir.Options.Select` keeps only some operations: those whose paths match
   glob patterns (`*` a segment, `**` any number) or that have given tags,
   less exclusions, with the types and security schemes they use. Names
