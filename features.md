@@ -6,10 +6,6 @@ Defects in existing behaviour are in [bugs.md](bugs.md). Implemented entries
 are checked off under [Implemented](#implemented), by the release they
 shipped in.
 
-## Out of v1 scope
-
-- Codescan: generating a document from Go source annotations.
-
 ## Loader
 
 - `goapi convert -version 3.2.0`: converting Swagger 2.0 to OpenAPI 3.2
@@ -74,6 +70,19 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - Retries, pagination and caching helpers: left to `Doer` middleware
   (`client.WithMiddleware`). — not planned
 
+## Codescan
+
+- Unions: `oneOf` from interfaces or sum-type patterns, and
+  discriminators. — later
+- Webhooks, callbacks, links, examples of operations and media types, and
+  per-property encodings of form and multipart bodies in directives.
+  — later
+- Generic types are only mapped as instances (`Page[Pet]` becomes
+  `PagePet`); a generic `$defs`-style schema is not. — later
+- `encoding/json`'s rules for fields of the same name at one depth of
+  embedding (both are dropped) are approximated: the first is kept.
+  — later
+
 ## Logging and telemetry
 
 - Integrations with zap, OpenTelemetry or other vendors are not planned in
@@ -87,6 +96,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Codescan: `goapi scan` and `codescan`, a document from Go types and
+  `//goapi:` directives. (4305064, 7a8da51, 0cba04d)
 - [x] Swagger 2.0: converted to OpenAPI 3.1 on load, validated against the
   2.0 schema, and written out by `goapi convert`. (881bd5e, 6f09b88,
   614d192)
