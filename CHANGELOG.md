@@ -133,6 +133,9 @@
 
 ### Fixed
 
+- The 3.0 upgrade skipped properties, headers and component schemas named
+  `x-…`, taking them for extensions, so their `nullable`, exclusive bounds
+  and `example` stayed 3.0.
 - `oapi.EnsureProperty` accepted data after the object, and returned it
   unchanged when the property was set. Found by `FuzzEnsureProperty`.
 - An integer form field or object parameter property written with leading

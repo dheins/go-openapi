@@ -65,7 +65,7 @@ func (u *upgrader) upgradeComponents(n *yaml.Node) {
 	if u.visited(n) {
 		return
 	}
-	eachValue(mappingValue(n, "schemas"), u.upgradeSchema)
+	eachEntry(mappingValue(n, "schemas"), u.upgradeSchema)
 	eachValue(mappingValue(n, "responses"), u.upgradeResponse)
 	eachValue(mappingValue(n, "parameters"), u.upgradeParameter)
 	eachValue(mappingValue(n, "requestBodies"), func(rb *yaml.Node) {
@@ -73,7 +73,7 @@ func (u *upgrader) upgradeComponents(n *yaml.Node) {
 			u.upgradeContent(mappingValue(rb, "content"))
 		}
 	})
-	eachValue(mappingValue(n, "headers"), u.upgradeParameter)
+	eachEntry(mappingValue(n, "headers"), u.upgradeParameter)
 	eachValue(mappingValue(n, "callbacks"), u.upgradeCallback)
 }
 
@@ -134,7 +134,7 @@ func (u *upgrader) upgradeResponse(n *yaml.Node) {
 	if isRef(n) {
 		return
 	}
-	eachValue(mappingValue(n, "headers"), u.upgradeParameter)
+	eachEntry(mappingValue(n, "headers"), u.upgradeParameter)
 	u.upgradeContent(mappingValue(n, "content"))
 }
 
@@ -154,7 +154,7 @@ func (u *upgrader) upgradeMediaType(n *yaml.Node) {
 	}
 	u.upgradeSchema(mappingValue(n, "schema"))
 	eachValue(mappingValue(n, "encoding"), func(enc *yaml.Node) {
-		eachValue(mappingValue(enc, "headers"), u.upgradeParameter)
+		eachEntry(mappingValue(enc, "headers"), u.upgradeParameter)
 	})
 }
 
@@ -168,7 +168,19 @@ func (u *upgrader) upgradeSchema(n *yaml.Node) {
 	if n == nil || n.Kind != yaml.MappingNode || isRef(n) {
 		return
 	}
+	upgradeSchemaFields(n)
+	eachEntry(mappingValue(n, "properties"), u.upgradeSchema)
+	u.upgradeSchema(mappingValue(n, "items"))
+	u.upgradeSchema(mappingValue(n, "additionalProperties"))
+	u.upgradeSchema(mappingValue(n, "not"))
+	for _, k := range []string{"allOf", "anyOf", "oneOf"} {
+		eachItem(mappingValue(n, k), u.upgradeSchema)
+	}
+}
 
+// upgradeSchemaFields rewrites the 3.0 fields of the schema n itself, not
+// of its subschemas.
+func upgradeSchemaFields(n *yaml.Node) {
 	if nullable := removeKey(n, "nullable"); isTrue(nullable) {
 		// 3.0.3 clarifies that nullable only has an effect together with type.
 		if t := mappingValue(n, "type"); t != nil && t.Kind == yaml.ScalarNode {
@@ -188,14 +200,6 @@ func (u *upgrader) upgradeSchema(n *yaml.Node) {
 				break
 			}
 		}
-	}
-
-	eachValue(mappingValue(n, "properties"), u.upgradeSchema)
-	u.upgradeSchema(mappingValue(n, "items"))
-	u.upgradeSchema(mappingValue(n, "additionalProperties"))
-	u.upgradeSchema(mappingValue(n, "not"))
-	for _, k := range []string{"allOf", "anyOf", "oneOf"} {
-		eachItem(mappingValue(n, k), u.upgradeSchema)
 	}
 }
 
@@ -265,6 +269,19 @@ func eachValue(n *yaml.Node, fn func(*yaml.Node)) {
 		if !strings.HasPrefix(n.Content[i].Value, "x-") {
 			fn(resolveAlias(n.Content[i+1]))
 		}
+	}
+}
+
+// eachEntry calls fn for every value of the mapping n, which maps names
+// (of properties, headers or schemas) that may start with "x-", not
+// fields.
+func eachEntry(n *yaml.Node, fn func(*yaml.Node)) {
+	n = resolveAlias(n)
+	if n == nil || n.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		fn(resolveAlias(n.Content[i+1]))
 	}
 }
 

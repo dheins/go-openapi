@@ -150,6 +150,41 @@ func TestUpgrade30(t *testing.T) {
 	}
 }
 
+func TestUpgrade30NamesLikeExtensions(t *testing.T) {
+	// Properties and headers may be named x-...; they are not extensions.
+	spec, err := LoadBytes([]byte(`openapi: 3.0.3
+info: {title: t, version: v}
+paths:
+  /a:
+    get:
+      responses:
+        "200":
+          description: ok
+          headers:
+            x-next: {schema: {type: string, nullable: true}}
+components:
+  schemas:
+    x-thing:
+      type: object
+      properties:
+        x-flag: {type: boolean, nullable: true}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	thing, _ := spec.Document.Components.Schemas.Get("x-thing")
+	flag, _ := thing.Properties.Get("x-flag")
+	if !flag.Type.Has("null") {
+		t.Errorf("property x-flag not upgraded: %v", flag.Type)
+	}
+	a, _ := spec.Document.Paths.Items.Get("/a")
+	ok, _ := a.Get.Responses.Items.Get("200")
+	next, _ := ok.Headers.Get("x-next")
+	if !next.Schema.Type.Has("null") {
+		t.Errorf("header x-next not upgraded: %v", next.Schema.Type)
+	}
+}
+
 func TestUpgrade30Idempotent(t *testing.T) {
 	src, err := Parse("testdata/petstore-3.0.yaml")
 	if err != nil {
