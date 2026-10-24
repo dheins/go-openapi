@@ -9,7 +9,7 @@ built on `net/http`.
 | Topic | Decision |
 |---|---|
 | Spec version | 3.2 is the canonical model. 3.1 loads directly; 3.0 is upgraded at load time. |
-| Swagger 2.0 | Not supported. A 2.0 → 3.2 converter is future scope. |
+| Swagger 2.0 | Converted to 3.1 on load, like 3.0 is upgraded; `goapi convert` writes the result. |
 | Spec model | Own `oas` package; no dependency on kin-openapi/libopenapi. |
 | v1 scope | Models, server and client. |
 | Router | `net/http.ServeMux` (Go 1.22+ patterns). Generated servers are plain `http.Handler`s, so they mount in chi/echo/gin; middleware is `func(http.Handler) http.Handler`. A small `Router` interface allows adapters later. |
@@ -17,15 +17,14 @@ built on `net/http`.
 | JSON Schema validation | `santhosh-tekuri/jsonschema/v6` with the official OAS schemas embedded. |
 | Remote `$ref`s | Off by default; local files only unless a `loader.Fetcher` is supplied. |
 
-**Future scope:** codescan (Go source → spec), 2.0 → 3.2 converter, chi
-adapter.
+**Future scope:** codescan (Go source → spec), chi adapter.
 
 ## Layout
 
 ```
-cmd/goapi/       CLI: validate, generate model, generate server, generate client
+cmd/goapi/       CLI: validate, generate model, generate server, generate client, convert
 oas/             Spec model (3.2): Document … Schema, OrderedMap, Extensions
-loader/          JSON/YAML parsing, version handling, 3.0 upgrade, $ref resolution
+loader/          JSON/YAML parsing, version handling, 3.0 upgrade, 2.0 conversion, $ref resolution
 validate/        Structural (official OAS schema) + semantic document validation
 ir/              Spec → Go-shaped model consumed by templates
 codegen/         Model and server generators, embedded templates
@@ -172,6 +171,30 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
 - *Not done*: security requirements of webhooks and callbacks (left to
   client middleware), `$url`, `$statusCode` and `$response.*` in callback
   URLs, and links ([features.md](../features.md)).
+
+### M7 – Swagger 2.0 ✅
+- [x] `loader`: 2.0 documents converted to 3.1 on load, in place on the
+  YAML tree, with the objects of other 2.0 files converted as they are
+  referenced; what has no 3.x equivalent is reported as notices
+- [x] `validate`: the official Swagger 2.0 schema, for documents and the
+  fragments of other files; notices as `conversion` warnings
+- [x] `goapi convert`, and generation from 2.0 documents
+- [x] Golden conversions that must be valid 3.1, a 2.0 golden case
+  round-tripping through its generated client and server
+
+**How it went**
+- *Positions*: converting the YAML tree, as the 3.0 upgrade does, keeps
+  every node's line, so diagnostics on the converted document point into
+  the 2.0 file without a source map.
+- *Other files* are not restructured: references into them keep their 2.0
+  pointers, and each object is converted as the type it is referenced as.
+  A body parameter referenced from another file becomes the request body
+  it is decoded as.
+- *Fuzzing*: `FuzzConvert20` checks that valid 2.0 converts to valid 3.1;
+  `FuzzLoadBytes` with 2.0 seeds found a crash on a body parameter without
+  a schema. The OAI 2.0 petstore found that the 3.0 upgrade skipped
+  headers and properties named `x-…`.
+- *Not done*: converting to 3.2.0 ([features.md](../features.md)).
 
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).

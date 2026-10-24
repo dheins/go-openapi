@@ -93,9 +93,15 @@ func ParseBytes(data []byte, uri string) (*Source, error) {
 // URI returns the URI the source was read from.
 func (s *Source) URI() string { return s.uri.String() }
 
-// Version returns the value of the top-level "openapi" field, or "" when
-// the file is not an OpenAPI document (for example a referenced fragment).
-func (s *Source) Version() string { return s.stringField("openapi") }
+// Version returns the value of the top-level "openapi" field, or of the
+// "swagger" field of a Swagger document ("2.0"), or "" when the file is not
+// an OpenAPI document (for example a referenced fragment).
+func (s *Source) Version() string {
+	if v := s.stringField("openapi"); v != "" {
+		return v
+	}
+	return s.stringField("swagger")
+}
 
 // JSON returns the source converted to JSON, with key order preserved.
 func (s *Source) JSON() ([]byte, error) {

@@ -1,0 +1,325 @@
+# 51:29: collectionFormat tsv has no OpenAPI 3 equivalent in query; the values are read as csv
+# 124:16: the schemes of an operation are not converted; it uses the document's servers
+openapi: 3.1.0
+info:
+  title: Kitchen sink
+  version: "1.0"
+  x-audience: internal
+servers:
+  - url: https://api.example.com/v2
+  - url: http://api.example.com/v2
+tags:
+  - name: pets
+paths:
+  /pets:
+    parameters:
+      - $ref: "#/components/parameters/trace"
+      - name: tenant
+        in: header
+        schema:
+          type: string
+    get:
+      operationId: listPets
+      tags: [pets]
+      parameters:
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+        - name: ids
+          in: query
+          schema:
+            type: array
+            items:
+              type: integer
+              format: int64
+        - name: words
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          style: spaceDelimited
+          explode: false
+        - name: bars
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          style: pipeDelimited
+          explode: false
+        - name: tabs
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            format: int32
+            default: 20
+            minimum: 1
+            exclusiveMaximum: 100
+        - name: q
+          in: query
+          allowEmptyValue: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The pets.
+          headers:
+            X-Total:
+              schema:
+                type: integer
+            X-Links:
+              schema:
+                type: array
+                items:
+                  type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+              example:
+                - id: 1
+                  name: Rex
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createPet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+        required: true
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+  /pets/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: X-Ids
+        in: header
+        schema:
+          type: array
+          items:
+            type: string
+    put:
+      operationId: updatePet
+      requestBody:
+        description: The new pet.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/Pet"
+        required: true
+        x-go-name: Pet
+      responses:
+        "204":
+          description: Updated.
+    get:
+      operationId: getPhoto
+      responses:
+        "200":
+          description: The photo.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+  /pets/{id}/photo:
+    post:
+      operationId: uploadPhoto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                caption:
+                  type: string
+                  maxLength: 20
+                labels:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - photo
+            encoding:
+              labels:
+                style: form
+                explode: false
+        required: true
+      responses:
+        "204":
+          description: Stored.
+  /login:
+    post:
+      operationId: login
+      security: []
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                user:
+                  type: string
+                password:
+                  type: string
+                  format: password
+              required:
+                - user
+        required: true
+      responses:
+        "200":
+          description: Logged in.
+          content:
+            application/json:
+              schema:
+                type: string
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [name, kind]
+      discriminator:
+        propertyName: kind
+      properties:
+        id:
+          type: integer
+          format: int64
+          readOnly: true
+        name:
+          type: string
+          examples:
+            - Rex
+        kind:
+          type: string
+        tag:
+          type:
+            - string
+            - "null"
+        example:
+          $ref: "#/components/schemas/Tag"
+        owner:
+          $ref: "#/components/schemas/Owner"
+    Tag:
+      type: string
+    Owner:
+      type: object
+      additionalProperties:
+        $ref: "#/components/schemas/Tag"
+      properties:
+        age:
+          type: integer
+          exclusiveMinimum: 0
+    Cat:
+      allOf:
+        - $ref: "#/components/schemas/Pet"
+        - type: object
+          properties:
+            lives:
+              type: integer
+  parameters:
+    trace:
+      name: X-Trace
+      in: header
+      schema:
+        type: string
+  requestBodies:
+    pet:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Pet"
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Pet"
+      required: true
+  responses:
+    Error:
+      description: An error.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+  securitySchemes:
+    basic:
+      type: http
+      scheme: basic
+    key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    implicit:
+      type: oauth2
+      flows:
+        implicit:
+          authorizationUrl: https://example.com/auth
+          scopes:
+            read: Read pets
+    password:
+      type: oauth2
+      flows:
+        password:
+          tokenUrl: https://example.com/token
+          scopes: {}
+    app:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://example.com/token
+          scopes: {}
+    code:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes:
+            write: Write pets
+security:
+  - key: []
+x-generator: hand

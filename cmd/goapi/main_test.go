@@ -275,8 +275,8 @@ func TestGenerateClient(t *testing.T) {
 }
 
 // TestGenerateOAIExamples generates a server and a client sharing its
-// types for every OpenAPI 3 example of the OpenAPI Initiative, and vets
-// them.
+// types for every example of the OpenAPI Initiative, Swagger 2.0 ones
+// included, and vets them.
 func TestGenerateOAIExamples(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the go command")
@@ -285,7 +285,7 @@ func TestGenerateOAIExamples(t *testing.T) {
 	if err != nil {
 		t.Skip("go command not found")
 	}
-	docs, err := filepath.Glob("../../testdata/oai/v3.*/*.yaml")
+	docs, err := filepath.Glob("../../testdata/oai/v*/*.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,7 @@
 A Go framework for [OpenAPI 3.2](https://spec.openapis.org/oas/v3.2.0):
 load and validate API descriptions, generate models, servers and clients,
 and serve them on `net/http`. Inspired by go-swagger, rebuilt for OpenAPI 3.x and
-JSON Schema 2020-12.
+JSON Schema 2020-12; Swagger 2.0 documents are converted as they are read.
 
 > Version 0.1 (unreleased): validation, models, servers and clients are complete;
 > see [docs/PLAN.md](docs/PLAN.md) for scope and status.
@@ -12,7 +12,7 @@ JSON Schema 2020-12.
 
 - `oas`: the OpenAPI 3.2 document model
 - `loader`: reads 3.0, 3.1 and 3.2 documents (JSON or YAML), upgrades 3.0,
-  and resolves `$ref`s across files
+  converts Swagger 2.0 to 3.1, and resolves `$ref`s across files
 - `validate`: structural validation against the official OpenAPI schemas
   plus semantic rules, with file:line:col diagnostics
 - `ir` and `codegen`: generate Go models from the schemas
@@ -37,6 +37,7 @@ for _, d := range res.Diagnostics {
 go install github.com/dheins/go-openapi/cmd/goapi@latest
 goapi validate openapi.yaml
 goapi validate -format json -quiet openapi.yaml
+goapi convert -out openapi.yaml swagger.yaml          # Swagger 2.0 to OpenAPI 3.1
 goapi generate model -out internal/models openapi.yaml
 goapi generate server -out internal/gen openapi.yaml   # server in gen, operations in gen/api, schemas in gen/model
 goapi generate client -out internal/petclient -types example.com/shop/internal/gen/api openapi.yaml   # a client sharing the server's types

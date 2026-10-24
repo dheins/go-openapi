@@ -1,0 +1,266 @@
+swagger: "2.0"
+info:
+  title: Kitchen sink
+  version: "1.0"
+  x-audience: internal
+host: api.example.com
+basePath: /v2/
+schemes: [https, http]
+consumes: [application/json, application/xml]
+produces: [application/json]
+tags:
+  - name: pets
+paths:
+  /pets:
+    parameters:
+      - $ref: "#/parameters/trace"
+      - name: tenant
+        in: header
+        type: string
+    get:
+      operationId: listPets
+      tags: [pets]
+      parameters:
+        - name: tags
+          in: query
+          type: array
+          items:
+            type: string
+        - name: ids
+          in: query
+          type: array
+          collectionFormat: multi
+          items:
+            type: integer
+            format: int64
+        - name: words
+          in: query
+          type: array
+          collectionFormat: ssv
+          items:
+            type: string
+        - name: bars
+          in: query
+          type: array
+          collectionFormat: pipes
+          items:
+            type: string
+        - name: tabs
+          in: query
+          type: array
+          collectionFormat: tsv
+          items:
+            type: string
+        - name: limit
+          in: query
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+          exclusiveMaximum: true
+          default: 20
+        - name: q
+          in: query
+          type: string
+          allowEmptyValue: true
+      responses:
+        "200":
+          description: The pets.
+          headers:
+            X-Total:
+              type: integer
+            X-Links:
+              type: array
+              items:
+                type: string
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Pet"
+          examples:
+            application/json:
+              - id: 1
+                name: Rex
+        default:
+          $ref: "#/responses/Error"
+    post:
+      operationId: createPet
+      consumes: [application/json]
+      parameters:
+        - $ref: "#/parameters/pet"
+      responses:
+        "201":
+          description: Created.
+          schema:
+            $ref: "#/definitions/Pet"
+  /pets/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+      - name: X-Ids
+        in: header
+        type: array
+        items:
+          type: string
+    put:
+      operationId: updatePet
+      parameters:
+        - name: body
+          in: body
+          description: The new pet.
+          required: true
+          schema:
+            $ref: "#/definitions/Pet"
+          x-go-name: Pet
+      responses:
+        "204":
+          description: Updated.
+    get:
+      operationId: getPhoto
+      produces: [image/png, image/jpeg]
+      schemes: [https]
+      responses:
+        "200":
+          description: The photo.
+          schema:
+            type: file
+  /pets/{id}/photo:
+    post:
+      operationId: uploadPhoto
+      consumes: [multipart/form-data]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          type: integer
+        - name: photo
+          in: formData
+          required: true
+          type: file
+        - $ref: "#/parameters/caption"
+        - name: labels
+          in: formData
+          type: array
+          items:
+            type: string
+      responses:
+        "204":
+          description: Stored.
+  /login:
+    post:
+      operationId: login
+      consumes: [application/x-www-form-urlencoded]
+      security: []
+      parameters:
+        - name: user
+          in: formData
+          required: true
+          type: string
+        - name: password
+          in: formData
+          type: string
+          format: password
+      responses:
+        "200":
+          description: Logged in.
+          schema:
+            type: string
+definitions:
+  Pet:
+    type: object
+    required: [name, kind]
+    discriminator: kind
+    properties:
+      id:
+        type: integer
+        format: int64
+        readOnly: true
+      name:
+        type: string
+        example: Rex
+      kind:
+        type: string
+      tag:
+        type: string
+        x-nullable: true
+      example:
+        $ref: "#/definitions/Tag"
+      owner:
+        $ref: "#/definitions/Owner"
+  Tag:
+    type: string
+  Owner:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/Tag"
+    properties:
+      age:
+        type: integer
+        minimum: 0
+        exclusiveMinimum: true
+  Cat:
+    allOf:
+      - $ref: "#/definitions/Pet"
+      - type: object
+        properties:
+          lives:
+            type: integer
+parameters:
+  trace:
+    name: X-Trace
+    in: header
+    type: string
+  pet:
+    name: pet
+    in: body
+    required: true
+    schema:
+      $ref: "#/definitions/Pet"
+  caption:
+    name: caption
+    in: formData
+    type: string
+    maxLength: 20
+responses:
+  Error:
+    description: An error.
+    schema:
+      type: object
+      properties:
+        message:
+          type: string
+securityDefinitions:
+  basic:
+    type: basic
+  key:
+    type: apiKey
+    in: header
+    name: X-API-Key
+  implicit:
+    type: oauth2
+    flow: implicit
+    authorizationUrl: https://example.com/auth
+    scopes:
+      read: Read pets
+  password:
+    type: oauth2
+    flow: password
+    tokenUrl: https://example.com/token
+    scopes: {}
+  app:
+    type: oauth2
+    flow: application
+    tokenUrl: https://example.com/token
+  code:
+    type: oauth2
+    flow: accessCode
+    authorizationUrl: https://example.com/auth
+    tokenUrl: https://example.com/token
+    scopes:
+      write: Write pets
+security:
+  - key: []
+x-generator: hand

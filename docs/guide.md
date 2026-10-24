@@ -1,6 +1,6 @@
 # goapi guide
 
-goapi validates OpenAPI 3.0, 3.1 and 3.2 documents and generates Go models,
+goapi validates OpenAPI 3.0, 3.1 and 3.2 and Swagger 2.0 documents and generates Go models,
 HTTP servers and clients from them. This guide shows how to use each part;
 the [README](../README.md) has the short version,
 [extensions.md](extensions.md) lists the `x-go-*` extensions, and
@@ -9,6 +9,7 @@ its tests.
 
 - [Install](#install)
 - [Validate a document](#validate-a-document)
+- [Swagger 2.0 documents](#swagger-20-documents)
 - [Generate models](#generate-models)
 - [Generate a server](#generate-a-server)
 - [Requests](#requests)
@@ -48,7 +49,7 @@ goapi validate -format json -quiet openapi.yaml other.yaml
 Validation runs in three phases and stops at the first that finds errors:
 
 1. **Structure**: the document, as written, against the official OpenAPI
-   JSON Schema for its version (3.0, 3.1 or 3.2), including every Schema
+   JSON Schema for its version (2.0, 3.0, 3.1 or 3.2), including every Schema
    Object against the OpenAPI dialect. Files a `$ref` points to are checked
    against the schema of what is referenced (a Parameter, a Schema, ...).
 2. **References**: every `$ref`, discriminator mapping, `operationRef` and
@@ -72,6 +73,49 @@ openapi.yaml:55:20: error: operationId "getPet" is already used at openapi.yaml:
 
 The exit status is 0 for a valid document, 1 when there are errors and 2
 when a file cannot be read or the command line is wrong.
+
+## Swagger 2.0 documents
+
+Every command accepts Swagger 2.0 (`swagger: "2.0"`) documents. The loader
+converts them to OpenAPI 3.1 as it reads them, so models, servers and
+clients are generated from a 2.0 document as from the 3.1 one it
+becomes. To migrate for good, write the converted document out:
+
+```sh
+goapi convert swagger.yaml > openapi.yaml
+goapi convert -out openapi.json swagger.yaml   # JSON, from the extension
+```
+
+`goapi convert` writes YAML or JSON (`-format`, or the extension of `-out`
+or of the input), keeps the document's order, and copies the objects of
+other files the document refers to into it, so the result is one file.
+
+A 2.0 document is first checked against the official Swagger 2.0 JSON
+Schema, so structural errors are reported in 2.0 terms. Diagnostics point
+into the 2.0 files, even for objects the conversion moved. What the
+conversion does:
+
+| Swagger 2.0 | OpenAPI 3.1 |
+|---|---|
+| `host`, `basePath`, `schemes` | a `servers` URL per scheme (https without `schemes`), or the base path alone |
+| `definitions`, `responses`, `securityDefinitions` | `components/schemas`, `/responses`, `/securitySchemes`, with references rewritten |
+| `parameters` | `components/parameters`; body parameters become `components/requestBodies`, form fields are copied where they are used |
+| a body parameter | a `requestBody` with a media type per `consumes` (`application/json` by default) |
+| `formData` parameters | a `requestBody` with an object schema, as `application/x-www-form-urlencoded`, or `multipart/form-data` when `consumes` says so or a field is a file |
+| `type`, `items`, `format`, `default` and the constraints of other parameters and headers | their `schema` |
+| `collectionFormat` csv, ssv, pipes, multi | `style` and `explode` (csv, the 2.0 default, is `explode: false` in a query) |
+| response `schema` and `examples` | `content` per `produces`, with the examples |
+| `basic`, `apiKey`, `oauth2` flows | `http` basic, `apiKey`, `oauth2` `flows` (`application` → `clientCredentials`, `accessCode` → `authorizationCode`) |
+| `x-nullable`, `discriminator: name`, `type: file`, `example` | `null` in `type`, `discriminator.propertyName`, a binary string, `examples` |
+
+Some 2.0 features have no OpenAPI 3 equivalent. The conversion reports
+them as `conversion` warnings and does the closest thing:
+`collectionFormat: tsv` and formats of nested items are read as csv, the
+`schemes` of an operation are dropped for the document's servers, and an
+operation with both a body and form fields keeps the body.
+
+A server generated from a 2.0 document serves the converted 3.1 document
+at `server.WithDocument`.
 
 ## Generate models
 

@@ -111,6 +111,12 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: the document is invalid\n", cmd)
 		return exitInvalid
 	}
+	// What a Swagger 2.0 document says that the generated code cannot.
+	for _, d := range res.Diagnostics {
+		if d.Rule == validate.RuleConversion {
+			fmt.Fprintln(stderr, d)
+		}
+	}
 
 	model := ir.Build(res.Spec, ir.Options{
 		OptionalPointers: *optional == "pointer",

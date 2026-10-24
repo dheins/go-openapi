@@ -1,10 +1,12 @@
-// Command goapi works with OpenAPI 3.x documents.
+// Command goapi works with OpenAPI 3.x and Swagger 2.0 documents.
 //
 // Usage:
 //
 //	goapi validate [-format text|json] [-quiet] file...
 //	goapi generate model [-out dir] [-package name] [-optional wrapper|pointer] file
 //	goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
+//	goapi generate client [-out dir] [-package name] [-types import] file
+//	goapi convert [-out file] [-format yaml|json] file
 //	goapi version
 package main
 
@@ -41,6 +43,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidate(args[1:], stdout, stderr)
 	case "generate":
 		return runGenerate(args[1:], stdout, stderr)
+	case "convert":
+		return runConvert(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
 		fmt.Fprintln(stdout, "goapi", version())
 		return exitOK
@@ -64,18 +68,22 @@ func version() string {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `goapi works with OpenAPI 3.x documents.
+	fmt.Fprint(w, `goapi works with OpenAPI 3.x and Swagger 2.0 documents.
 
 Usage:
   goapi validate [-format text|json] [-quiet] file...
   goapi generate model [-out dir] [-package name] [-optional wrapper|pointer] file
   goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
+  goapi generate client [-out dir] [-package name] [-types import] file
+  goapi convert [-out file] [-format yaml|json] file
   goapi version
 
 Commands:
   validate          check documents against the OpenAPI specification
   generate model    generate Go types for the schemas of a document
   generate server   generate the types and an HTTP server for a document
+  generate client   generate the types and an HTTP client for a document
+  convert           write a Swagger 2.0 document as OpenAPI 3.1
   version           print the version of goapi
 `)
 }

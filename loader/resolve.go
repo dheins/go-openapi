@@ -41,6 +41,40 @@ type resolver struct {
 	extras []extra
 	done   map[any]bool
 	errs   []error
+	// conv converts the Swagger 2.0 files, if there are any.
+	conv *converter
+}
+
+// converter returns the converter of Swagger 2.0 content, made on first
+// use.
+func (r *resolver) converter() *converter {
+	if r.conv == nil {
+		r.conv = newConverter(r.node20)
+	}
+	return r.conv
+}
+
+// node20 returns the node ref leads to from the file at base, loading its
+// file, or nil if it cannot be found; the reference is reported when it is
+// resolved.
+func (r *resolver) node20(base, ref string) *yaml.Node {
+	b, err := url.Parse(base)
+	if err != nil {
+		return nil
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return nil
+	}
+	loc, err := r.locate(b.ResolveReference(u))
+	if err != nil {
+		return nil
+	}
+	n, err := r.spec.sources[loc.URI].node(loc.Pointer)
+	if err != nil {
+		return nil
+	}
+	return n
 }
 
 type alias struct {
@@ -456,8 +490,14 @@ func (r *resolver) decode(loc Location, typ reflect.Type) (any, error) {
 			return nil, err
 		}
 	}
-	if is30(version) {
+	switch {
+	case is30(version):
 		upgrade30(n, obj)
+	case is20(version):
+		r.converter().fragment(n, obj, loc.URI)
+		if frag.converted, err = nodeJSON(n); err != nil {
+			return nil, err
+		}
 	}
 	if err := decodeNode(n, obj); err != nil {
 		return nil, fmt.Errorf("decoding %s as %s: %w", loc, typeName(typ), err)

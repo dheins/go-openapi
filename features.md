@@ -9,10 +9,16 @@ shipped in.
 ## Out of v1 scope
 
 - Codescan: generating a document from Go source annotations.
-- Swagger 2.0 → OpenAPI 3.2 converter (2.0 input is rejected today).
 
 ## Loader
 
+- `goapi convert -version 3.2.0`: converting Swagger 2.0 to OpenAPI 3.2
+  rather than 3.1 (the content is the same; 3.2 could use
+  `components.pathItems` and other 3.2 fields). — later
+- Swagger 2.0 features without an OpenAPI 3 equivalent, reported as
+  `conversion` warnings: the `schemes` of an operation (it could become
+  operation-level `servers`), `collectionFormat: tsv`, and the collection
+  formats of nested items. — later
 - Dynamic-scope resolution of `$dynamicRef` (see bugs.md). — later
 
 ## Models
@@ -81,6 +87,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Swagger 2.0: converted to OpenAPI 3.1 on load, validated against the
+  2.0 schema, and written out by `goapi convert`. (881bd5e, 6f09b88,
+  614d192)
 - [x] Webhooks and callbacks: a `Sender` in generated servers, URL
   functions for callbacks, and receiver handlers (`WebhookHandler`,
   `CallbackHandler`) from both generators. (8b379f0, 200d7e3, 3c15973)

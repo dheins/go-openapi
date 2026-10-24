@@ -12,14 +12,9 @@ import (
 	"github.com/dheins/go-openapi/oas"
 )
 
-var (
-	// ErrSwagger2 is returned for Swagger/OpenAPI 2.0 documents, which are
-	// not supported.
-	ErrSwagger2 = errors.New("swagger 2.0 documents are not supported")
-	// ErrUnsupportedVersion is returned when the "openapi" field names a
-	// version this loader cannot read.
-	ErrUnsupportedVersion = errors.New("unsupported OpenAPI version")
-)
+// ErrUnsupportedVersion is returned when the "openapi" (or "swagger")
+// field names a version this loader cannot read.
+var ErrUnsupportedVersion = errors.New("unsupported OpenAPI version")
 
 // Spec is a loaded document together with what the loader learned about
 // it: where every object came from, and the referenced fragments of other
@@ -28,8 +23,12 @@ type Spec struct {
 	// Document is the 3.2 model of the document. All references in it and
 	// in the objects they lead to have their Resolved fields set.
 	Document *oas.Document
-	// SourceVersion is the "openapi" value as written, before any upgrade.
+	// SourceVersion is the "openapi" value as written, before any upgrade,
+	// or "2.0" for a Swagger 2.0 document.
 	SourceVersion string
+	// Notices report what the document says that the 3.2 model cannot,
+	// such as Swagger 2.0 features without an OpenAPI 3 equivalent.
+	Notices []Notice
 
 	root      *Source
 	sources   map[string]*Source
@@ -41,6 +40,14 @@ type Spec struct {
 	// written is the root document as JSON before the 3.0 upgrade, for
 	// 3.0 documents only; root is still as written otherwise.
 	written []byte
+}
+
+// Notice is something of a document that the loader could not carry
+// over, at the position of the field that says it.
+type Notice struct {
+	Location Location
+	Position Position
+	Message  string
 }
 
 // schemeKey is a scheme name in the security requirements of owner, the
@@ -64,6 +71,9 @@ type Fragment struct {
 	SourceVersion string
 
 	src *Source
+	// converted is the fragment as converted from Swagger 2.0, which a
+	// bundle copies, or nil.
+	converted []byte
 }
 
 // Position returns the source position of the JSON pointer ptr, taken
@@ -236,13 +246,18 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 	r := newResolver(spec, newConfig(opts))
 	r.addSource(src)
 
-	if is30(version) {
+	switch {
+	case is30(version):
 		written, err := nodeJSON(src.root)
 		if err != nil {
 			return nil, &Error{Location: Location{URI: src.URI()}, Err: err}
 		}
 		spec.written = written
 		upgrade30(src.root, (*oas.Document)(nil))
+	case is20(version):
+		// Bundle then returns the converted document: a 2.0 document with
+		// components added would be neither 2.0 nor 3.x.
+		r.converter().document(src.root, src.URI())
 	}
 	var doc oas.Document
 	if err := decodeNode(src.root, &doc); err != nil {
@@ -253,20 +268,23 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 	if err := r.register(&doc, src, ""); err != nil {
 		return nil, err
 	}
-	if err := r.run(); err != nil {
+	err := r.run()
+	if r.conv != nil {
+		spec.Notices = r.conv.notices
+	}
+	if err != nil {
 		return nil, err
 	}
 	return spec, nil
 }
 
 // CheckVersion reports whether the document declares a version the loader
-// can read. It returns ErrSwagger2 or ErrUnsupportedVersion otherwise.
+// can read: Swagger 2.0, or OpenAPI 3.0, 3.1 or 3.2. It returns
+// ErrUnsupportedVersion otherwise.
 func (s *Source) CheckVersion() error {
 	version := s.Version()
 	switch {
-	case s.stringField("swagger") != "":
-		return ErrSwagger2
-	case is30(version), strings.HasPrefix(version, "3.1."), strings.HasPrefix(version, "3.2."):
+	case is20(version), is30(version), strings.HasPrefix(version, "3.1."), strings.HasPrefix(version, "3.2."):
 		return nil
 	default:
 		return fmt.Errorf("%w: %q", ErrUnsupportedVersion, version)
@@ -275,4 +293,10 @@ func (s *Source) CheckVersion() error {
 
 func is30(version string) bool {
 	return strings.HasPrefix(version, "3.0.")
+}
+
+// is20 reports whether version, as Source.Version returns it, is Swagger
+// 2.0, which declares it as swagger: "2.0".
+func is20(version string) bool {
+	return version == "2.0"
 }

@@ -1,0 +1,159 @@
+swagger: "2.0"
+info:
+  title: Swagger pets
+  version: "1.0"
+host: pets.example.com
+basePath: /api
+schemes: [https]
+consumes: [application/json]
+produces: [application/json]
+securityDefinitions:
+  key:
+    type: apiKey
+    in: header
+    name: X-API-Key
+  basic:
+    type: basic
+security:
+  - key: []
+  - basic: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      security: []
+      parameters:
+        - name: tags
+          in: query
+          type: array
+          items:
+            type: string
+        - name: ids
+          in: query
+          type: array
+          collectionFormat: multi
+          items:
+            type: integer
+            format: int64
+        - name: fields
+          in: query
+          type: array
+          collectionFormat: pipes
+          items:
+            type: string
+        - name: limit
+          in: query
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+          default: 20
+        - name: X-Request-ID
+          in: header
+          type: string
+      responses:
+        "200":
+          description: The pets.
+          headers:
+            X-Total:
+              type: integer
+              format: int64
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Pet"
+    post:
+      operationId: createPet
+      parameters:
+        - name: pet
+          in: body
+          required: true
+          schema:
+            $ref: "#/definitions/Pet"
+      responses:
+        "201":
+          description: Created.
+          schema:
+            $ref: "#/definitions/Pet"
+        "409":
+          description: The name is taken.
+          schema:
+            $ref: "#/definitions/Error"
+  /pets/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+    get:
+      operationId: getPet
+      security: []
+      responses:
+        "200":
+          description: The pet.
+          schema:
+            $ref: "#/definitions/Pet"
+        "404":
+          description: No such pet.
+  /pets/{id}/photo:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+    post:
+      operationId: uploadPhoto
+      consumes: [multipart/form-data]
+      parameters:
+        - name: photo
+          in: formData
+          required: true
+          type: file
+        - name: caption
+          in: formData
+          type: string
+          maxLength: 20
+      responses:
+        "204":
+          description: Stored.
+  /login:
+    post:
+      operationId: login
+      security: []
+      consumes: [application/x-www-form-urlencoded]
+      parameters:
+        - name: user
+          in: formData
+          required: true
+          type: string
+        - name: remember
+          in: formData
+          type: boolean
+      responses:
+        "200":
+          description: Logged in.
+          schema:
+            type: string
+definitions:
+  Pet:
+    type: object
+    required: [name]
+    properties:
+      id:
+        type: integer
+        format: int64
+        readOnly: true
+      name:
+        type: string
+        minLength: 1
+      tag:
+        type: string
+        x-nullable: true
+  Error:
+    type: object
+    required: [message]
+    properties:
+      message:
+        type: string
