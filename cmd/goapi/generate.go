@@ -48,8 +48,13 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		models = fs.String("models", "model", `subdirectory and package of the schema types ("" puts them with the operations)`)
 		importPath = fs.String("import", "", "import path of -out, for the subpackages (default: from the go.mod above -out)")
 	}
+	var paths, tags, excludePaths, excludeTags *string
 	if target == "client" {
 		types = fs.String("types", "", "import path of the operations' package of a server or client generated before, to use instead of generating the types")
+		paths = fs.String("paths", "", "comma-separated path patterns of the operations to generate (* is a segment, ** any number)")
+		tags = fs.String("tags", "", "comma-separated tags of the operations to generate, as well as those -paths matches")
+		excludePaths = fs.String("exclude-paths", "", "comma-separated path patterns of operations to leave out")
+		excludeTags = fs.String("exclude-tags", "", "comma-separated tags of operations to leave out")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -118,16 +123,23 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	model := ir.Build(res.Spec, ir.Options{
-		OptionalPointers: *optional == "pointer",
-		Operations:       operations,
-	})
+	irOpts := ir.Options{OptionalPointers: *optional == "pointer", Operations: operations}
+	if paths != nil {
+		sel := &ir.Selection{Paths: splitList(*paths), Tags: splitList(*tags), ExcludePaths: splitList(*excludePaths), ExcludeTags: splitList(*excludeTags)}
+		if len(sel.Paths)+len(sel.Tags)+len(sel.ExcludePaths)+len(sel.ExcludeTags) > 0 {
+			irOpts.Select = sel
+		}
+	}
+	model := ir.Build(res.Spec, irOpts)
 	for _, w := range model.Warnings {
 		where := w.Location.File()
 		if w.Position.IsValid() {
 			where = fmt.Sprintf("%s:%d:%d", where, w.Position.Line, w.Position.Column)
 		}
 		fmt.Fprintf(stderr, "%s: warning: %s\n", where, w.Message)
+	}
+	if irOpts.Select != nil && len(model.Operations)+len(model.Webhooks) == 0 {
+		return fail("no operation matches -paths, -tags, -exclude-paths and -exclude-tags")
 	}
 
 	opts := codegen.Options{
@@ -170,6 +182,17 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "wrote %d files to %s\n", len(files), *out)
 	return exitOK
+}
+
+// splitList splits a comma-separated flag value, dropping empty items.
+func splitList(s string) []string {
+	var items []string
+	for _, item := range strings.Split(s, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 // dirImportPath returns the Go import path of dir, from the module path in

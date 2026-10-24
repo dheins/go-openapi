@@ -242,6 +242,19 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   server reads back the same; map keys with brackets cannot be fields.
 - *Not done*: arrays of arrays, and `a[][b]` ([features.md](../features.md)).
 
+### M10 – Clients of some operations ✅
+- [x] `ir.Options.Select`: operations chosen by path patterns and tags,
+  less exclusions, with the types and security schemes they use
+- [x] `generate client -paths -tags -exclude-paths -exclude-tags`
+
+**How it went**
+- *Names*: the whole document is built and then pruned, so names are
+  those of a full build and a subset client fits a server's operations
+  package through `-types`.
+- *Reachability* walks the model by reflection, so a field added to it
+  later is followed without changes here.
+- *Next*: a TypeScript client, which uses the same selection.
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

@@ -9,6 +9,9 @@
   less exclusions, with the types and security schemes they use. Names
   are those of the whole document, so a client of some operations fits a
   server's operations package. `ir.Operation` gains `Tags`.
+- `goapi generate client -paths -tags -exclude-paths -exclude-tags`
+  generates a client of some operations, with only the types and security
+  schemes they use; selecting nothing is an error.
 - The runtimes read and write arrays of objects in forms, deepObject
   parameters and form querystrings with indexed brackets
   (`items[0][name]=Rex&items[1][name]=Tom`), nested to any depth, and in

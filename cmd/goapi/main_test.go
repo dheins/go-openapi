@@ -274,6 +274,81 @@ func TestGenerateClient(t *testing.T) {
 	}
 }
 
+// TestGenerateClientSelection generates clients of some operations, with
+// their own types and with a server's, and vets them.
+func TestGenerateClientSelection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the go command")
+	}
+	goCmd, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go command not found")
+	}
+	// Inside the module, so the generated code builds against it.
+	root, err := os.MkdirTemp(".", "_sel-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	const module = "github.com/dheins/go-openapi/cmd/goapi"
+	gen := func(args ...string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		if code := run(append([]string{"generate", "client"}, args...), &stdout, &stderr); code != exitOK {
+			t.Fatalf("%v: exit code %d\nstderr: %s", args, code, &stderr)
+		}
+	}
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(root, filepath.FromSlash(name)))
+		return err == nil
+	}
+
+	// Some paths, with their own types: only what they use.
+	own := filepath.Join(root, "own")
+	gen("-out", own, "-import", path.Join(module, filepath.ToSlash(own)), "-paths", "/pets,/pets/{petId}", "-exclude-paths", "/pets/*/photo", petserverDoc)
+	for _, name := range []string{"own/api/list_pets_client.go", "own/api/get_pet_client.go", "own/model/pet.go", "own/model/error.go"} {
+		if !exists(name) {
+			t.Errorf("%s not generated", name)
+		}
+	}
+	for _, name := range []string{"own/api/create_order_client.go", "own/api/upload_photo_client.go", "own/model/order.go", "own/model/tree.go", "own/model/card.go"} {
+		if exists(name) {
+			t.Errorf("%s generated for operations not selected", name)
+		}
+	}
+	c := readFile(t, filepath.Join(own, "client.go"))
+	if !strings.Contains(c, ") ListPets(") || !strings.Contains(c, ") DeletePet(") || strings.Contains(c, ") CreateOrder(") || strings.Contains(c, "Credentials struct") {
+		t.Errorf("client.go has other operations:\n%s", c)
+	}
+
+	// Some tags, with the types of a server of every operation.
+	shared := filepath.Join(root, "shared")
+	gen("-out", shared, "-types", "github.com/dheins/go-openapi/codegen/testdata/golden/scanned/api", "-tags", "pets", "-exclude-paths", "/pets/*/photo",
+		"../../codegen/testdata/golden/scanned/openapi.yaml")
+	c = readFile(t, filepath.Join(shared, "client.go"))
+	if !strings.Contains(c, ") GetPet(") || strings.Contains(c, ") PutPhoto(") {
+		t.Errorf("tagged client.go:\n%s", c)
+	}
+
+	var pkgs []string
+	for _, dir := range []string{"own", "own/api", "own/model", "shared"} {
+		pkgs = append(pkgs, "./"+filepath.ToSlash(filepath.Join(root, dir)))
+	}
+	if vet, err := exec.Command(goCmd, append([]string{"vet"}, pkgs...)...).CombinedOutput(); err != nil {
+		t.Errorf("go vet: %v\n%s", err, vet)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"generate", "client", "-out", filepath.Join(root, "none"), "-import", "example.com/none", "-tags", "nope", petserverDoc}, &stdout, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), `no operation has the tag "nope"`) || !strings.Contains(stderr.String(), "no operation matches") {
+		t.Errorf("nothing selected: exit code %d\nstderr: %s", code, &stderr)
+	}
+}
+
 // TestGenerateOAIExamples generates a server and a client sharing its
 // types for every example of the OpenAPI Initiative, Swagger 2.0 ones
 // included, and vets them.

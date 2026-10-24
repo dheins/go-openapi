@@ -70,7 +70,6 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   request. File parts carry theirs in `oapi.File.Header`. — later
 - Retries, pagination and caching helpers: left to `Doer` middleware
   (`client.WithMiddleware`). — not planned
-- support client generation of specific paths and groups of paths
 - generate a typescript client for integration with front end
 
 ## Codescan
@@ -99,6 +98,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Clients of some operations: `generate client -paths -tags
+  -exclude-paths -exclude-tags`, with only the types they use. (58bd588)
 - [x] Arrays of objects and recursive types in form and multipart bodies,
   deepObject parameters and form querystrings, with indexed brackets.
   (03fa94a, bd720e9)
