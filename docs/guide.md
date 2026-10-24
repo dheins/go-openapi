@@ -18,6 +18,7 @@ its tests.
 - [Security](#security)
 - [Server options](#server-options)
 - [Generate a client](#generate-a-client)
+- [Generate a TypeScript client](#generate-a-typescript-client)
 - [Webhooks and callbacks](#webhooks-and-callbacks)
 - [Generate a document from Go code](#generate-a-document-from-go-code)
 - [Running in production](#running-in-production)
@@ -714,6 +715,61 @@ with a `*client.Config` from `client.NewConfig`.
 The client does not retry, paginate or cache; middleware does that.
 Required headers of positional parts that are not files cannot be sent yet
 ([features.md](../features.md)).
+
+## Generate a TypeScript client
+
+```sh
+goapi generate ts-client -out web/src/api openapi.yaml
+goapi generate ts-client -out web/src/api -tags pets -exclude-paths '/pets/*/photo' openapi.yaml
+```
+
+This writes a TypeScript client for front ends (and Node, Deno and Bun).
+It uses only the platform's `fetch` and needs no packages. The selection
+flags are those of `generate client`.
+
+| File | Contents |
+|---|---|
+| `runtime.ts` | the same in every client: requests, responses, validation, errors |
+| `models.ts` | a type per schema, and its descriptor (`PetSchema`) for validation |
+| `client.ts` | `Client`, with a method per operation, and their request and response types |
+| `index.ts` | re-exports them |
+
+The code uses only syntax that type stripping erases, so Node 23.6+,
+Deno, Bun and bundlers run it as it is. Imports name `./runtime.ts`, so
+with `tsc` set `allowImportingTsExtensions` (with `noEmit`, or
+`rewriteRelativeImportExtensions` when emitting). It type-checks under
+`strict`, `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
+
+```ts
+import { Client, UnexpectedResponseError } from "./api/index.ts";
+
+const api = new Client({ credentials: { apiKey: () => session.token } });
+const resp = await api.listPets({ limit: 10, tags: ["cat"] });
+if (resp.status === 200) {
+  console.log(resp.body.map((p) => p.name), resp.headers.xTotal);
+}
+```
+
+- **Types:**
+  - **Objects** become interfaces, with descriptions as JSDoc comments. Read-only properties are `readonly` and optional, since the server sets them.
+  - **Enums** become a union of literals plus a constant object (`PetStatus.Available`).
+  - **Unions** become TypeScript unions, and maps index signatures.
+  - **Dates and other formats** are strings, and files and bytes are `Blob`s.
+  - **`int64`** values are `number`s, exact up to 2^53.
+- **Requests:**
+  - Request properties are named after the parameters, in camel case (`petId`, `xRequestID`), plus `body` (or one property per body type) and `contentType`.
+  - The runtime writes every parameter style the Go client does, and JSON, form, multipart (`FormData`, with `Blob`s or `File`s as files) and text or binary bodies.
+  - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
+- **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines are `items` and server-sent events `events`, both `AsyncIterable`s that stop the stream when you `break`.
+- **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
+- **Options:** `baseUrl` (the document's server by default), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal` and `headers`. A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
+
+Not supported by the TypeScript client yet; `generate ts-client` warns
+about each one it leaves out:
+- XML and positional multipart bodies and responses.
+- Headers of multipart parts, which `FormData` cannot set.
+- Webhooks and callbacks, which a server sends.
+- Cookie parameters in browsers, which do not let scripts set `Cookie`. Elsewhere they are sent, and in browsers the browser's own cookies are.
 
 ## Webhooks and callbacks
 

@@ -19,7 +19,9 @@
   text and binary bodies, JSON Lines and server-sent events as async
   iterables, security schemes, typed errors), and `index.ts` re-exports
   them. Media types the TypeScript runtime cannot send or read yet (XML,
-  positional parts) are reported.
+  positional parts) are reported. Generated clients are type-checked with
+  TypeScript 7 and run with Node against the generated Go server in the
+  tests; CI installs Node 26 and TypeScript for them.
 - `ir.Options.Select` keeps only some operations: those whose paths match
   glob patterns (`*` a segment, `**` any number) or that have given tags,
   less exclusions, with the types and security schemes they use. Names
