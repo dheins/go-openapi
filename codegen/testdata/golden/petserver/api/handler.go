@@ -74,6 +74,10 @@ type Handler interface {
 	Admin(ctx context.Context, req *AdminRequest) (AdminResponse, error)
 	// Secure handles GET /secure.
 	Secure(ctx context.Context, req *SecureRequest) (SecureResponse, error)
+	// Subscribe handles POST /subscriptions.
+	//
+	// Asks for pet events, sent to the URL in the body, and pings, sent to the URL in X-Callback.
+	Subscribe(ctx context.Context, req *SubscribeRequest) (SubscribeResponse, error)
 }
 
 // SecurityHandler checks the credentials of requests, with one method per

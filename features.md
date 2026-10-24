@@ -44,8 +44,14 @@ shipped in.
 - Arrays of objects and recursive types in form and multipart bodies and
   object parameters (nested objects and maps are supported). — later
 - Parameters and response headers with `content` other than JSON. — later
-- Callbacks, webhooks and links: sending webhooks and callbacks will
-  build on the generated client. — next
+- Links. — later
+- Security requirements of webhooks and callbacks: the sender does not
+  apply them and receivers do not check them (a warning says so); add
+  credentials or signatures with client middleware and server
+  middleware. — later
+- Callback URLs with `$url`, `$statusCode` or `$response.*`: no URL
+  function is generated, and the sender is given the URL. — later
+- Webhooks and callbacks declared inside webhooks and callbacks. — later
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
@@ -75,6 +81,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Webhooks and callbacks: a `Sender` in generated servers, URL
+  functions for callbacks, and receiver handlers (`WebhookHandler`,
+  `CallbackHandler`) from both generators. (8b379f0, 200d7e3, 3c15973)
 - [x] Client generation: `goapi generate client` and `runtime/client`,
   sharing request and response types with the server. (42046b0, 2436777,
   105e887)

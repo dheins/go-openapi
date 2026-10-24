@@ -108,6 +108,17 @@ if r, ok := resp.(api.GetPet200JSONResponse); ok {
 }
 ```
 
+Webhooks and callbacks are generated both ways. The server gets a `Sender`
+with a method per webhook and callback, and each callback gets a function
+computing its URL from the request that asked for it. Consumers get typed
+handlers to receive them:
+
+```go
+s, _ := gen.NewSender()
+target, _ := api.SubscribePetEventCallbackURL(subscription) // from {$request.body#/url}
+s.SubscribePetEventCallback(ctx, target, &api.SubscribePetEventCallbackRequest{Body: pet})
+```
+
 Generated servers log through `log/slog` (`server.WithLogger`,
 `server.WithAccessLog`), with no logging or telemetry dependency of their
 own; any slog handler works, and `server.WithObserver` hooks in tracing or
@@ -115,7 +126,7 @@ metrics.
 
 ## Documentation
 
-- [Guide](docs/guide.md): validation, models, servers, clients, security, options
+- [Guide](docs/guide.md): validation, models, servers, clients, webhooks and callbacks, security, options
 - [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-enum-varnames`, `x-enum-descriptions`
 - [Example](examples/petstore): a complete server (`go run ./examples/petstore -key secret`)
 - [Benchmarks](docs/benchmarks.md)

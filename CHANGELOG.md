@@ -4,6 +4,22 @@
 
 ### Added
 
+- `ir` maps webhooks (`Model.Webhooks`) and callbacks
+  (`Operation.Callbacks`) to operations, with their callback URLs parsed
+  into text and request values (`$method`, `$request.path`, `.query`,
+  `.header` and `.body#/pointer`); other expressions are reported.
+- Sending webhooks and callbacks: a generated server has a `Sender`
+  (`NewSender`) with a method per webhook and callback, sending to a
+  target URL; operations packages gain their request and response types,
+  `NewXRequest` (with the target) and `ReadXResponse`, and, per callback,
+  a function computing its URL from the request that declared it.
+  `runtime/client` gains `NewSenderConfig`, `Config.BuildTo`,
+  `ParamValue`, `BodyValue` and `MissingValue`.
+- Receiving webhooks and callbacks: operations packages, from both
+  `generate server` and `generate client`, have `WebhookHandler` and
+  `CallbackHandler` interfaces and, per webhook and callback, its HTTP
+  handler (`HandleXWebhook`) and a `server.Operation` (`XWebhookOperation`)
+  to route it with `server.Config.Handle` at the path the receiver chose.
 - `goapi generate client` (`codegen.Client`): a client package with a
   `Client` type, `New`, a `Credentials` struct with a field per security
   scheme, a method per operation, and `DefaultServerURL` from the first

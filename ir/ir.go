@@ -27,6 +27,10 @@ type Model struct {
 	// Operations are the operations of the document's paths, in document
 	// order, when Options.Operations is set.
 	Operations []*Operation
+	// Webhooks are the operations of the document's webhooks, in document
+	// order, when Options.Operations is set; callbacks are with the
+	// operations declaring them.
+	Webhooks []*Operation
 	// BasePath is the path of the document's first server URL (with
 	// variables at their defaults), which routes are served below, and
 	// ServerURL that URL when it is absolute (clients send to it), or "".

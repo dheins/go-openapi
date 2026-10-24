@@ -1,0 +1,31 @@
+{{- /*
+Template for the sender of webhooks and callbacks: "sender" (Sender, with
+a method per webhook and callback) goes to the server package.
+*/ -}}
+
+{{define "sender"}}
+// Sender sends the document's webhooks and callbacks, with a method per
+// webhook and callback, to the URL given with each: one a consumer
+// registered for a webhook, or the URL of a callback (the callback's URL
+// function computes it from the request that asked for it). It validates
+// requests before sending them unless client.WithoutRequestValidation
+// says otherwise, and validates responses with
+// client.WithResponseValidation; retries, queues and request signing are
+// middleware (client.WithMiddleware).
+type Sender struct {
+	cfg *client.Config
+}
+
+// NewSender returns a sender configured by opts.
+func NewSender(opts ...client.Option) (*Sender, error) {
+	cfg, err := client.NewSenderConfig(opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Sender{cfg: cfg}, nil
+}
+{{- range .}}
+
+{{senderMethod .}}
+{{- end}}
+{{- end}}

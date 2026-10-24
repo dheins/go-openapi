@@ -140,11 +140,17 @@ func (r {{.TypeName}}) write{{$.ResponseType}}(w http.ResponseWriter, req *http.
 {{- end}}
 
 {{define "handler"}}
+{{- if ne .Interface "Handler"}}
+// {{.Name}}Operation identifies {{opLabel .Operation}} to
+// server.Config.Handle, which routes it to its handler at the path the
+// receiver chose.
+var {{.Name}}Operation = {{opInfo .Operation}}
+{{end}}
 // Handle{{.Name}} returns the HTTP handler of {{.Name}}.
 //
 // It {{if .Security}}checks the credentials with sec, {{end}}decodes and validates the
 // request, calls h.{{.Name}} and sends the response it returns.
-func Handle{{.Name}}(c *server.Config, h Handler{{if .Secured}}, sec SecurityHandler{{end}}) http.Handler {
+func Handle{{.Name}}(c *server.Config, h {{.Interface}}{{if .Secured}}, sec SecurityHandler{{end}}) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.Log(r.Context(), {{imp "log/slog" "slog"}}.LevelDebug, "handling request")
 {{- if .Security}}
