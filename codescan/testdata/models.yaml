@@ -1,0 +1,185 @@
+# testdata/models/models.go:109:2: warning: chan bool values are not encoded as JSON; they are left untyped
+openapi: 3.1.0
+info:
+  title: github.com/dheins/go-openapi/codescan/testdata/models
+  version: 0.0.0
+components:
+  schemas:
+    Pet:
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: ID is assigned by the store.
+          readOnly: true
+        name:
+          type: string
+          maxLength: 50
+          minLength: 1
+          examples:
+            - Rex
+        kind:
+          $ref: '#/components/schemas/Kind'
+          default: dog
+        tag:
+          type: string
+        nickname:
+          type:
+            - string
+            - "null"
+          description: Nickname may be null.
+        owner:
+          $ref: '#/components/schemas/Owner'
+        tags:
+          items:
+            type: string
+          type: array
+          maxItems: 10
+          uniqueItems: true
+        scores:
+          additionalProperties:
+            type: number
+          type: object
+        born:
+          type: string
+          format: date
+        seen:
+          type: string
+          format: date-time
+        photo:
+          type: string
+          contentEncoding: base64
+        weight:
+          type: string
+        age:
+          type: integer
+          maximum: 40
+          minimum: 0
+          format: int32
+        extra: {}
+        anything: {}
+        parent:
+          $ref: '#/components/schemas/Pet'
+        friends:
+          items:
+            $ref: '#/components/schemas/PetID'
+          type: array
+          maxItems: 2
+          minItems: 2
+        address:
+          type: string
+        note:
+          type:
+            - string
+            - "null"
+          pattern: ^[a-z;]*$
+        created:
+          type: string
+          format: date-time
+        by:
+          type: string
+        meta:
+          $ref: '#/components/schemas/Meta'
+        label:
+          type: string
+          deprecated: true
+      type: object
+      required:
+        - id
+        - name
+        - kind
+        - nickname
+        - seen
+        - weight
+        - age
+        - friends
+        - note
+        - created
+        - meta
+      description: |-
+        Pet is a pet in the store.
+
+        It is the main type of the fixture.
+    Kind:
+      type: string
+      enum:
+        - dog
+        - cat
+      description: Kind is the kind of a pet.
+    Owner:
+      properties:
+        name:
+          type: string
+        other:
+          $ref: '#/components/schemas/SharedOwner'
+        level:
+          $ref: '#/components/schemas/Level'
+      type: object
+      required:
+        - name
+        - level
+      description: Owner is a pet's owner; its name clashes with shared.Owner.
+    SharedOwner:
+      properties:
+        email:
+          type: string
+          format: email
+      type: object
+      required:
+        - email
+    Level:
+      type: integer
+      enum:
+        - 1
+        - 3
+      format: int64
+      description: Level is a numeric enum.
+    PetID:
+      type: integer
+      format: int64
+      description: PetID identifies a pet.
+    Meta:
+      properties:
+        version:
+          type: integer
+          format: int64
+      type: object
+      required:
+        - version
+      description: Meta is embedded in Pet under a name.
+    PetPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Pet'
+          type: array
+        next:
+          type: string
+      type: object
+      required:
+        - items
+      description: Pets is a page of pets, named by the directive.
+    Upload:
+      properties:
+        file:
+          type: string
+          format: binary
+        done: {}
+        pages:
+          $ref: '#/components/schemas/PageOwner'
+      type: object
+      required:
+        - file
+      description: Upload holds a file.
+    PageOwner:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Owner'
+          type: array
+        next:
+          type: string
+      type: object
+      required:
+        - items
+      description: Page is a page of items.

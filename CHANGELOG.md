@@ -4,6 +4,12 @@
 
 ### Added
 
+- `codescan`: generating an OpenAPI 3.1 document from Go source. Go types
+  become schemas as `encoding/json` encodes them, with the module's
+  `oapi` types understood, doc comments as descriptions, JSON Schema
+  keywords from a `goapi:"…"` struct tag, and `//goapi:schema` and
+  `//goapi:enum` directives; problems are reported at their positions.
+  Operations are not scanned yet.
 - Swagger 2.0 documents are read: the loader converts them to OpenAPI 3.1
   as it loads them (`Spec.SourceVersion` is "2.0"), including the objects
   other 2.0 files hold, so `goapi validate` and every `generate` command
