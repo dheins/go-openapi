@@ -349,6 +349,50 @@ func TestGenerateClientSelection(t *testing.T) {
 	}
 }
 
+func TestGenerateTSClient(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "web")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"generate", "ts-client", "-out", out, petserverDoc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	for _, name := range []string{"runtime.ts", "models.ts", "client.ts", "index.ts"} {
+		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
+			t.Errorf("%s not generated: %v", name, err)
+		}
+	}
+	// What the TypeScript runtime cannot send is said.
+	if !strings.Contains(stderr.String(), "PutCard: the TypeScript client cannot send application/xml bodies yet; the operation is left out") {
+		t.Errorf("stderr = %s", &stderr)
+	}
+	c := readFile(t, filepath.Join(out, "client.ts"))
+	if !strings.Contains(c, "  listPets(req: ListPetsRequest = {}, call?: CallOptions): Promise<ListPetsResponse> {") || strings.Contains(c, "  putCard(") {
+		t.Errorf("client.ts:\n%.2000s", c)
+	}
+
+	// Some operations.
+	out = filepath.Join(t.TempDir(), "some")
+	stderr.Reset()
+	if code := run([]string{"generate", "ts-client", "-out", out, "-paths", "/orders/**", petserverDoc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	c = readFile(t, filepath.Join(out, "client.ts"))
+	if !strings.Contains(c, "  createOrder(") || !strings.Contains(c, "  putLines(") || strings.Contains(c, "  listPets(") {
+		t.Errorf("selected client.ts:\n%.2000s", c)
+	}
+	if m := readFile(t, filepath.Join(out, "models.ts")); strings.Contains(m, "interface Pet ") || !strings.Contains(m, "interface OrderLine ") {
+		t.Errorf("selected models.ts has other types")
+	}
+
+	stderr.Reset()
+	if code := run([]string{"generate", "ts-client", "-out", out, "-tags", "nope", petserverDoc}, &stdout, &stderr); code != exitFailure || !strings.Contains(stderr.String(), "no operation matches") {
+		t.Errorf("nothing selected: exit code %d\nstderr: %s", code, &stderr)
+	}
+	stderr.Reset()
+	if code := run([]string{"generate", "ts-client"}, &stdout, &stderr); code != exitFailure || !strings.Contains(stderr.String(), "expected one document") {
+		t.Errorf("no document: exit code %d\nstderr: %s", code, &stderr)
+	}
+}
+
 // TestGenerateOAIExamples generates a server and a client sharing its
 // types for every example of the OpenAPI Initiative, Swagger 2.0 ones
 // included, and vets them.

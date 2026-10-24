@@ -255,6 +255,29 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   later is followed without changes here.
 - *Next*: a TypeScript client, which uses the same selection.
 
+### M11 – TypeScript clients ✅
+- [x] `models.ts`: a type and a schema descriptor per schema; `runtime.ts`
+  validates and encodes values with the descriptors, by direction
+- [x] `client.ts`: a `Client` with a method per operation, sent by the
+  runtime from an operation descriptor with `fetch`
+- [x] `goapi generate ts-client`, with the selection flags
+- [x] Type-checked under the strictest settings, and run with Node against
+  the generated Go server
+
+**How it went**
+- *No dependencies*: the runtime uses `fetch`, `FormData` and streams, so
+  browsers, Node, Deno and Bun run it; only syntax type stripping erases,
+  so Node runs the tests without compiling.
+- *Descriptors*: schemas and operations are data the runtime interprets,
+  so the encoding rules are in one tested file and the generated code is
+  small.
+- *Type-checking* (TypeScript 7) found an expression returned from a void
+  function, an unused import, a name clash in `index.ts` and an empty
+  `models.ts` that was not a module.
+- *The round trip* found that `FormData` names every `Blob` part a file,
+  so object parts are sent as JSON strings.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

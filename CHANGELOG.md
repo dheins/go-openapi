@@ -4,6 +4,24 @@
 
 ### Added
 
+- `codegen.TypeScript`: the TypeScript of a model, a start on generated
+  TypeScript clients. `models.ts` has a type per schema (interfaces,
+  literal unions with `as const` objects for enums, unions) and a schema
+  descriptor that `runtime.ts`, written alongside, validates (by direction:
+  read-only properties are not required in requests) and encodes values
+  with. The code uses only syntax type stripping erases, and type-checks
+  under the strictest compiler settings.
+- `goapi generate ts-client [-out dir] [-paths -tags -exclude-paths
+  -exclude-tags] file`: a TypeScript client using only `fetch`. `client.ts`
+  has a `Client` class with an async method per operation, request types,
+  responses as unions discriminated by `status`, a descriptor per operation
+  that `runtime.ts` sends (every parameter style, JSON, form, multipart,
+  text and binary bodies, JSON Lines and server-sent events as async
+  iterables, security schemes, typed errors), and `index.ts` re-exports
+  them. Media types the TypeScript runtime cannot send or read yet (XML,
+  positional parts) are reported. Generated clients are type-checked with
+  TypeScript 7 and run with Node against the generated Go server in the
+  tests; CI installs Node 26 and TypeScript for them.
 - `ir.Options.Select` keeps only some operations: those whose paths match
   glob patterns (`*` a segment, `**` any number) or that have given tags,
   less exclusions, with the types and security schemes they use. Names

@@ -70,7 +70,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   request. File parts carry theirs in `oapi.File.Header`. — later
 - Retries, pagination and caching helpers: left to `Doer` middleware
   (`client.WithMiddleware`). — not planned
-- generate a typescript client for integration with front end
+- TypeScript clients: XML and positional multipart bodies and responses,
+  headers of multipart parts (`FormData` cannot set them), and `int64`
+  values beyond 2^53 (they are `number`s). Cookie parameters cannot be
+  sent from browsers, which do not let scripts set `Cookie`. — later
 
 ## Codescan
 
@@ -98,6 +101,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] TypeScript clients: `goapi generate ts-client`, using only `fetch`,
+  with types, validation and the selection flags. (5e4f942, b54ff74,
+  87cdbe6)
 - [x] Clients of some operations: `generate client -paths -tags
   -exclude-paths -exclude-tags`, with only the types they use. (58bd588)
 - [x] Arrays of objects and recursive types in form and multipart bodies,

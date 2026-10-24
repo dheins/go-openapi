@@ -101,6 +101,15 @@ func TestGolden(t *testing.T) {
 					files = append(files, File{Name: path.Join("client", f.Name), Content: f.Content})
 				}
 			}
+			// The TypeScript of the model, in ts.
+			tsFiles, tsWarnings, err := TypeScript(model, TSOptions{Source: opts.Source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, f := range tsFiles {
+				files = append(files, File{Name: path.Join("ts", f.Name), Content: f.Content})
+			}
+			files = append(files, File{Name: "ts/warnings.txt", Content: []byte(strings.Join(append(tsWarnings, ""), "\n"))})
 			var warnings bytes.Buffer
 			for _, w := range model.Warnings {
 				fmt.Fprintf(&warnings, "%d:%d: %s\n", w.Position.Line, w.Position.Column, w.Message)
@@ -116,13 +125,13 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// generatedFiles lists the files of dir and its api, model and client subpackages
+// generatedFiles lists the files of dir and its api, model, client and ts directories
 // that the generator owns, slash-separated and relative to dir: every .go
 // file except tests, plus warnings.txt and openapi.json.
 func generatedFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	var names []string
-	for _, sub := range []string{"", "api", "model", "client"} {
+	for _, sub := range []string{"", "api", "model", "client", "ts"} {
 		entries, err := os.ReadDir(filepath.Join(dir, sub))
 		if os.IsNotExist(err) && sub != "" {
 			continue
@@ -132,7 +141,9 @@ func generatedFiles(t *testing.T, dir string) []string {
 		}
 		for _, e := range entries {
 			n := e.Name()
-			if !e.IsDir() && (n == "warnings.txt" || n == "openapi.json" || (strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go"))) {
+			goFile := strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go")
+			tsFile := strings.HasSuffix(n, ".ts") && !strings.HasSuffix(n, ".test.ts")
+			if !e.IsDir() && (n == "warnings.txt" || n == "openapi.json" || goFile || tsFile) {
 				names = append(names, path.Join(sub, n))
 			}
 		}

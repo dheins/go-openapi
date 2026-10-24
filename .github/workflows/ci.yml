@@ -21,6 +21,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          # Node strips TypeScript types itself from 23.6; the TypeScript
+          # tests (TestTypeScript) run generated clients with it.
+          node-version: '26'
+      - name: TypeScript compiler
+        run: npm install -g typescript@7.0.2
       - name: Vet
         run: go vet ./... ./codegen/testdata/golden/...
       - name: Test
@@ -43,6 +50,13 @@ jobs:
           go generate ./examples/...
           git diff --exit-code
           test -z "$(git status --porcelain examples)" || { git status --porcelain examples; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          # Node strips TypeScript types itself from 23.6; the TypeScript
+          # tests (TestTypeScript) run generated clients with it.
+          node-version: '26'
+      - name: TypeScript compiler
+        run: npm install -g typescript@7.0.2
       - name: Race detector
         run: go test -race ./... ./codegen/testdata/golden/...
       - name: Vulnerabilities
