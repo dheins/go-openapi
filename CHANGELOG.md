@@ -4,6 +4,13 @@
 
 ### Added
 
+- `codegen.TypeScript`: the TypeScript of a model, a start on generated
+  TypeScript clients. `models.ts` has a type per schema (interfaces,
+  literal unions with `as const` objects for enums, unions) and a schema
+  descriptor that `runtime.ts`, written alongside, validates (by direction:
+  read-only properties are not required in requests) and encodes values
+  with. The code uses only syntax type stripping erases, and type-checks
+  under the strictest compiler settings.
 - `ir.Options.Select` keeps only some operations: those whose paths match
   glob patterns (`*` a segment, `**` any number) or that have given tags,
   less exclusions, with the types and security schemes they use. Names
