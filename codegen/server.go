@@ -358,7 +358,9 @@ func (f *fileGen) securityStmts(o *ir.Operation) string {
 		fmt.Fprintf(&b, format, args...)
 		b.WriteByte('\n')
 	}
-	ctxType := f.imp("context", "context") + ".Context"
+	// Only scheme checks name the context type; a requirement that
+	// allows anonymous requests has none.
+	ctx := func() string { return f.imp("context", "context") + ".Context" }
 	w(1, "ctx, err := server.Authorize(server.RequestContext(r), w, []server.Requirement{")
 	for _, req := range o.Security {
 		if len(req) == 0 {
@@ -374,20 +376,20 @@ func (f *fileGen) securityStmts(o *ir.Operation) string {
 			}
 			switch {
 			case s.Type == "apiKey":
-				w(3, "server.APIKeyCheck(r, %q, %q, func(ctx %s, key string) (%s, error) {", s.In, s.ParamName, ctxType, ctxType)
+				w(3, "server.APIKeyCheck(r, %q, %q, func(ctx %s, key string) (%s, error) {", s.In, s.ParamName, ctx(), ctx())
 				w(4, "return sec.%s(ctx, key, %s)", s.Method, scopes)
 			case s.Type == "http" && s.Scheme == "basic":
-				w(3, "server.BasicCheck(r, func(ctx %s, username, password string) (%s, error) {", ctxType, ctxType)
+				w(3, "server.BasicCheck(r, func(ctx %s, username, password string) (%s, error) {", ctx(), ctx())
 				w(4, "return sec.%s(ctx, username, password, %s)", s.Method, scopes)
 			case s.Type == "http" && s.Scheme != "bearer":
-				w(3, "server.AuthorizationCheck(r, %q, func(ctx %s, credentials string) (%s, error) {", s.Scheme, ctxType, ctxType)
+				w(3, "server.AuthorizationCheck(r, %q, func(ctx %s, credentials string) (%s, error) {", s.Scheme, ctx(), ctx())
 				w(4, "return sec.%s(ctx, credentials, %s)", s.Method, scopes)
 			case s.Type == "mutualTLS":
 				tls := f.imp("crypto/tls", "tls")
-				w(3, "server.TLSCheck(r, func(ctx %s, state *%s.ConnectionState) (%s, error) {", ctxType, tls, ctxType)
+				w(3, "server.TLSCheck(r, func(ctx %s, state *%s.ConnectionState) (%s, error) {", ctx(), tls, ctx())
 				w(4, "return sec.%s(ctx, state, %s)", s.Method, scopes)
 			default:
-				w(3, "server.BearerCheck(r, func(ctx %s, token string) (%s, error) {", ctxType, ctxType)
+				w(3, "server.BearerCheck(r, func(ctx %s, token string) (%s, error) {", ctx(), ctx())
 				w(4, "return sec.%s(ctx, token, %s)", s.Method, scopes)
 			}
 			w(3, "}),")

@@ -1,7 +1,7 @@
 # goapi guide
 
 goapi validates OpenAPI 3.0, 3.1 and 3.2 and Swagger 2.0 documents and generates Go models,
-HTTP servers and clients from them. This guide shows how to use each part;
+HTTP servers and clients from them, or documents from Go code. This guide shows how to use each part;
 the [README](../README.md) has the short version,
 [extensions.md](extensions.md) lists the `x-go-*` extensions, and
 [the example](../examples/petstore) is a complete server, with a client in
@@ -19,6 +19,7 @@ its tests.
 - [Server options](#server-options)
 - [Generate a client](#generate-a-client)
 - [Webhooks and callbacks](#webhooks-and-callbacks)
+- [Generate a document from Go code](#generate-a-document-from-go-code)
 - [Running in production](#running-in-production)
 - [Logging](#logging)
 - [Using the libraries directly](#using-the-libraries-directly)
@@ -763,6 +764,129 @@ http.ListenAndServe(":8080", cfg.Handler())
 The handlers decode and check each request before calling the method,
 answer invalid ones with a 400 problem, and send the response variant
 the method returns.
+
+## Generate a document from Go code
+
+`goapi scan` works the other way around: it reads Go packages and writes
+the OpenAPI document their types and `//goapi:` directives describe.
+
+```sh
+goapi scan -out openapi.yaml ./...
+goapi scan -dir ./service -format json .
+```
+
+It runs `go list` and type-checks the packages, so it needs the `go`
+command, and the packages must compile. Problems are reported with their
+file and line. An annotation error means nothing is written, and the
+document is validated before it is written. The document is OpenAPI
+3.1.0, or 3.2.0 when it uses the `QUERY` method, other methods, or tag
+summaries and parents.
+
+### Schemas
+
+A type becomes a schema the way `encoding/json` encodes it:
+
+```go
+// Pet is a pet in the store.            ← the description
+//
+//goapi:schema                           ← in components.schemas even if no operation uses it
+type Pet struct {
+	ID   int64                 `json:"id" goapi:"readOnly"`
+	Name string                `json:"name" goapi:"minLength=1;maxLength=40"`
+	Kind Kind                  `json:"kind"`
+	Tag  oapi.Optional[string] `json:"tag,omitzero"`
+	Born *time.Time            `json:"born"`  // required, may be null
+}
+
+// Kind is the kind of a pet.
+//
+//goapi:enum                             ← its constants are its values
+type Kind string
+
+const (
+	Dog Kind = "dog"
+	Cat Kind = "cat"
+)
+```
+
+| Go | Schema |
+|---|---|
+| a field | a property named by its `json` tag (`-` leaves it out); required unless `omitempty`, `omitzero` or an `oapi.Optional` |
+| a pointer field without `omitempty` / `omitzero` | its type, or `null` |
+| an embedded struct without a JSON name | its fields, in the outer struct |
+| `string`, `bool`, integers, floats | `string`, `boolean`, `integer` (`int32` / `int64`, unsigned with `minimum: 0`), `number` |
+| `time.Time`, `oapi.Date`, `oapi.File`, `[]byte` | `date-time`, `date`, `binary`, base64 |
+| slices, arrays, maps | `array` (fixed-size arrays with their length), `object` with `additionalProperties` |
+| `any`, `json.RawMessage` | any value |
+| a type with `MarshalText` | `string` |
+| `oapi.Nullable[T]` | `T` or `null` |
+| `,string` in the `json` tag | `string` |
+| a named type | a `$ref` to its component, named after the type (the package name is added on a clash, type arguments for a generic instance) |
+
+The `goapi` struct tag adds keywords, separated by `;`, where `\;` is a
+semicolon. They are `minimum`, `maximum`, `exclusiveMinimum`,
+`exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `minItems`,
+`maxItems`, `minProperties`, `maxProperties`, `pattern`, `format`,
+`title`, `description`, `contentMediaType`, `contentEncoding`, `default`,
+`example`, `const`, and `enum` (values separated by `|`). There are also
+the flags `readOnly`, `writeOnly`, `deprecated`, `uniqueItems`,
+`nullable`, `required` and `optional`. Values of a string field are taken
+as they are; other values are JSON. Doc comments become descriptions, and
+a `Deprecated:` paragraph sets `deprecated`.
+
+### Operations
+
+Any function or method can declare an operation; it does not have to be
+the handler's real signature:
+
+```go
+//goapi:operation GET /pets/{id} tags=pets summary="Get a pet"
+//goapi:response 200 Pet
+//goapi:response 404
+//goapi:response default Problem application/problem+json description="An error."
+//goapi:security apiKey
+func (s *Store) GetPet(ctx context.Context, req *PetRequest) (*Pet, error)
+
+type PetRequest struct {
+	ID    int64  `goapi:"in=path;name=id;minimum=1"`
+	Trace string `goapi:"in=header;name=X-Trace;format=uuid"`
+}
+```
+
+| Directive | Meaning |
+|---|---|
+| `//goapi:operation METHOD /path [id=…] [tags=a,b] [summary=…]` | the operation; the operationId defaults to the function's name, with a lower-case first letter, and the doc comment is its description |
+| `//goapi:request T` | the request type; without it, the function's first struct parameter (other than `*http.Request`) |
+| `//goapi:response STATUS [TYPE [MEDIA TYPE]] [description=…]` | a response: a status, a range such as `4XX`, or `default`; `TYPE` is a Go type such as `Pet`, `[]Pet` or `models.Pet`, and the media type is JSON by default |
+| `//goapi:security a b:read,write` | an alternative requirement needing all the schemes it names, with their scopes; `-` allows anonymous requests |
+
+The fields of a request type say where they are with
+`in=path|query|header|cookie|body`. The parameter name defaults to the
+field's (or its `json` tag's); `name`, `style`, `explode`,
+`allowEmptyValue`, `required` and `optional` describe the parameter, and
+the other keys its schema. Path parameters are required and must match
+the path template. Other parameters are optional unless marked
+`required`. The `in=body` field is the request body, sent as
+`mediaType=` (separate several with `|`). A response type whose fields
+are `in=header` and `in=body` gives the headers and the body; any other
+type is the body.
+
+Package comments describe the document:
+
+```go
+//goapi:info title="Pet store" version=1.0.0 description="…"
+//goapi:server https://api.example.com/v1 description=Production
+//goapi:securityScheme apiKey type=apiKey in=header name=X-API-Key
+//goapi:securityScheme bearer type=http scheme=bearer bearerFormat=JWT
+//goapi:securityScheme oauth type=oauth2 flow=clientCredentials tokenUrl=https://… scopes=read,write
+//goapi:security apiKey
+//goapi:tag pets description="Everything about pets"
+package store
+```
+
+Values with spaces are double-quoted, as Go strings. The scanned document
+can be fed to every other command; for example, `goapi generate client`
+gives a typed client of the service the annotations describe.
 
 ## Running in production
 

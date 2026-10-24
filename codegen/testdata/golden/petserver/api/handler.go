@@ -74,6 +74,10 @@ type Handler interface {
 	Admin(ctx context.Context, req *AdminRequest) (AdminResponse, error)
 	// Secure handles GET /secure.
 	Secure(ctx context.Context, req *SecureRequest) (SecureResponse, error)
+	// Public handles GET /public.
+	//
+	// Open to anyone, though other operations are secured.
+	Public(ctx context.Context, req *PublicRequest) (PublicResponse, error)
 	// Subscribe handles POST /subscriptions.
 	//
 	// Asks for pet events, sent to the URL in the body, and pings, sent to the URL in X-Callback.

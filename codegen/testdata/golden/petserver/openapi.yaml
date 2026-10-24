@@ -538,6 +538,15 @@ paths:
       responses:
         "204":
           description: Allowed.
+  /public:
+    get:
+      operationId: public
+      description: Open to anyone, though other operations are secured.
+      security:
+        - {}
+      responses:
+        "204":
+          description: Allowed.
   /subscriptions:
     post:
       operationId: subscribe
