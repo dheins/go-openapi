@@ -23,6 +23,8 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "getPet", Name: "GetPet", Method: "GET", Path: "/pets/{id}"}, "/pets/{p0}", api.HandleGetPet(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "deletePet", Name: "DeletePet", Method: "DELETE", Path: "/pets/{id}"}, "/pets/{p0}", api.HandleDeletePet(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putPhoto", Name: "PutPhoto", Method: "PUT", Path: "/pets/{id}/photo"}, "/pets/{p0}/photo", api.HandlePutPhoto(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "uploadPhoto", Name: "UploadPhoto", Method: "POST", Path: "/pets/{id}/uploads"}, "/pets/{p0}/uploads", api.HandleUploadPhoto(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "subscribe", Name: "Subscribe", Method: "POST", Path: "/subscriptions"}, "/subscriptions", api.HandleSubscribe(cfg, h, sec))
 	cfg.ServeDocument(openAPIDocument)
 	return cfg.Handler()
 }

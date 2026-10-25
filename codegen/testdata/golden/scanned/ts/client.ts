@@ -107,6 +107,41 @@ const putPhotoSpec: OperationSpec = {
   responses: [{ status: "204" }],
 };
 
+/** The inputs of uploadPhoto. */
+export interface UploadPhotoRequest {
+  id: number;
+  body: $m.Upload;
+}
+
+/** The responses of uploadPhoto. */
+export type UploadPhotoResponse =
+  | { status: 204 };
+
+const uploadPhotoSpec: OperationSpec = {
+  method: "POST",
+  path: "/pets/{id}/uploads",
+  params: [{ key: "id", name: "id", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  body: { required: true, media: [{ mediaType: "multipart/form-data", kind: "multipart", key: "body", schema: $ref(() => $m.UploadSchema) }] },
+  responses: [{ status: "204" }],
+};
+
+/** The inputs of subscribe. */
+export interface SubscribeRequest {
+  body: $m.Subscription;
+}
+
+/** The responses of subscribe. */
+export type SubscribeResponse =
+  | { status: 201 };
+
+const subscribeSpec: OperationSpec = {
+  method: "POST",
+  path: "/subscriptions",
+  params: [],
+  body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "body", schema: $ref(() => $m.SubscriptionSchema) }] },
+  responses: [{ status: "201" }],
+};
+
 /** A client of the API, with a method per operation. */
 export class Client {
   readonly #cfg: Config;
@@ -158,5 +193,23 @@ export class Client {
    */
   putPhoto(req: PutPhotoRequest, call?: CallOptions): Promise<PutPhotoResponse> {
     return send(this.#cfg, putPhotoSpec, req, call) as Promise<PutPhotoResponse>;
+  }
+
+  /**
+   * POST /pets/{id}/uploads.
+   *
+   * UploadPhoto stores a pet's photo, with its caption.
+   */
+  uploadPhoto(req: UploadPhotoRequest, call?: CallOptions): Promise<UploadPhotoResponse> {
+    return send(this.#cfg, uploadPhotoSpec, req, call) as Promise<UploadPhotoResponse>;
+  }
+
+  /**
+   * POST /subscriptions.
+   *
+   * Subscribe registers a URL for pet events.
+   */
+  subscribe(req: SubscribeRequest, call?: CallOptions): Promise<SubscribeResponse> {
+    return send(this.#cfg, subscribeSpec, req, call) as Promise<SubscribeResponse>;
   }
 }

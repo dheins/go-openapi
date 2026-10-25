@@ -133,3 +133,41 @@ func (c *Client) PutPhoto(ctx context.Context, req *api.PutPhotoRequest) (api.Pu
 	}
 	return api.ReadPutPhotoResponse(c.cfg, resp)
 }
+
+// UploadPhoto calls POST /pets/{id}/uploads. A nil req sends no parameters
+// or body.
+//
+// UploadPhoto stores a pet's photo, with its caption.
+func (c *Client) UploadPhoto(ctx context.Context, req *api.UploadPhotoRequest) (api.UploadPhotoResponse, error) {
+	if req == nil {
+		req = &api.UploadPhotoRequest{}
+	}
+	hreq, err := api.NewUploadPhotoRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadUploadPhotoResponse(c.cfg, resp)
+}
+
+// Subscribe calls POST /subscriptions. A nil req sends no parameters or
+// body.
+//
+// Subscribe registers a URL for pet events.
+func (c *Client) Subscribe(ctx context.Context, req *api.SubscribeRequest) (api.SubscribeResponse, error) {
+	if req == nil {
+		req = &api.SubscribeRequest{}
+	}
+	hreq, err := api.NewSubscribeRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadSubscribeResponse(c.cfg, resp)
+}

@@ -34,6 +34,14 @@ type Handler interface {
 	//
 	// PutPhoto stores a pet's photo.
 	PutPhoto(ctx context.Context, req *PutPhotoRequest) (PutPhotoResponse, error)
+	// UploadPhoto handles POST /pets/{id}/uploads.
+	//
+	// UploadPhoto stores a pet's photo, with its caption.
+	UploadPhoto(ctx context.Context, req *UploadPhotoRequest) (UploadPhotoResponse, error)
+	// Subscribe handles POST /subscriptions.
+	//
+	// Subscribe registers a URL for pet events.
+	Subscribe(ctx context.Context, req *SubscribeRequest) (SubscribeResponse, error)
 }
 
 // SecurityHandler checks the credentials of requests, with one method per
