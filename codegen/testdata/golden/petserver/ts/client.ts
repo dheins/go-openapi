@@ -356,6 +356,38 @@ const postEventsSpec: OperationSpec = {
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "integer" } }],
 };
 
+/** The inputs of feed. */
+export interface FeedRequest {
+}
+
+/** The responses of feed. */
+export type FeedResponse =
+  | { status: 200; events: AsyncIterable<ServerEvent> };
+
+const feedSpec: OperationSpec = {
+  method: "GET",
+  path: "/pets/feed",
+  params: [],
+  responses: [{ status: "200", mediaType: "text/event-stream", kind: "sse" }],
+};
+
+/** The inputs of postTypedEvents. */
+export interface PostTypedEventsRequest {
+  body: Iterable<ServerEvent> | AsyncIterable<ServerEvent>;
+}
+
+/** The responses of postTypedEvents. */
+export type PostTypedEventsResponse =
+  | { status: 200; body: string[] };
+
+const postTypedEventsSpec: OperationSpec = {
+  method: "POST",
+  path: "/events/typed",
+  params: [],
+  body: { required: true, media: [{ mediaType: "text/event-stream", kind: "sse", key: "body", schema: { kind: "any" } }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: { kind: "string" } } }],
+};
+
 /** The inputs of importLines. */
 export interface ImportLinesRequest {
   body?: Iterable<$m.Pet> | AsyncIterable<$m.Pet>;
@@ -666,6 +698,24 @@ export class Client {
    */
   postEvents(req: PostEventsRequest, call?: CallOptions): Promise<PostEventsResponse> {
     return send(this.#cfg, postEventsSpec, req, call) as Promise<PostEventsResponse>;
+  }
+
+  /**
+   * GET /pets/feed.
+   *
+   * Changes to the pets, as they happen.
+   */
+  feed(req: FeedRequest = {}, call?: CallOptions): Promise<FeedResponse> {
+    return send(this.#cfg, feedSpec, req, call) as Promise<FeedResponse>;
+  }
+
+  /**
+   * POST /events/typed.
+   *
+   * Pets sent as events, one kind of event.
+   */
+  postTypedEvents(req: PostTypedEventsRequest, call?: CallOptions): Promise<PostTypedEventsResponse> {
+    return send(this.#cfg, postTypedEventsSpec, req, call) as Promise<PostTypedEventsResponse>;
   }
 
   /**

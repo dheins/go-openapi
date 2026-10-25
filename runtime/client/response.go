@@ -206,3 +206,29 @@ func Events(resp *http.Response) iter.Seq2[server.Event, error] {
 		}
 	}
 }
+
+// TypedEvents returns the events of a server-sent event response whose
+// data is typed, as they arrive: decode turns each into its TypedEvent,
+// checking its data if c validates responses. An event that does not
+// decode ends the loop with a *InvalidResponse. The body is closed when
+// the loop ends, as with JSONLines.
+func TypedEvents[T any](c *Config, resp *http.Response, decode func(ev server.Event, validate bool) (server.TypedEvent[T], error)) iter.Seq2[server.TypedEvent[T], error] {
+	return func(yield func(server.TypedEvent[T], error) bool) {
+		i := 0
+		for ev, err := range Events(resp) {
+			if err != nil {
+				yield(server.TypedEvent[T]{}, err)
+				return
+			}
+			typed, err := decode(ev, c.ValidateResponses)
+			if err != nil {
+				yield(server.TypedEvent[T]{}, &InvalidResponse{StatusCode: resp.StatusCode, Err: fmt.Errorf("event %d: %w", i, err)})
+				return
+			}
+			if !yield(typed, nil) {
+				return
+			}
+			i++
+		}
+	}
+}

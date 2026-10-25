@@ -178,3 +178,103 @@ func TestCallbackURL(t *testing.T) {
 		t.Errorf("no body: %q", why)
 	}
 }
+
+func TestTypedEvents(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /feed:
+    get:
+      operationId: feed
+      responses:
+        "200":
+          description: ok
+          content:
+            text/event-stream:
+              itemSchema:
+                oneOf:
+                  - properties:
+                      event: {const: added}
+                      data: {type: string, contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
+                  - properties:
+                      event: {enum: [gone]}
+                      data: {contentMediaType: application/json, contentSchema: {type: object, properties: {id: {type: integer}}}}
+                  - properties:
+                      event: {const: ping}
+                      data: {type: string, maxLength: 4}
+  /one:
+    post:
+      operationId: one
+      requestBody:
+        content:
+          text/event-stream:
+            itemSchema:
+              properties:
+                data: {type: string, contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
+      responses: {"204": {description: ok}}
+  /raw:
+    get:
+      operationId: raw
+      responses:
+        "200":
+          description: ok
+          content:
+            text/event-stream:
+              itemSchema:
+                properties:
+                  data: {type: string}
+  /bad:
+    get:
+      operationId: bad
+      responses:
+        "200":
+          description: ok
+          content:
+            text/event-stream:
+              itemSchema:
+                oneOf:
+                  - properties: {event: {const: a}, data: {type: string}}
+                  - properties: {event: {const: a}, data: {type: string}}
+components:
+  schemas:
+    Pet: {type: object, properties: {name: {type: string}}}
+`, Options{Operations: true})
+
+	feed := operationNamed(t, m, "Feed").Responses[0]
+	if feed.Events == nil || feed.Item == nil || feed.Item.Kind != Event {
+		t.Fatalf("feed events = %+v, item %+v", feed.Events, feed.Item)
+	}
+	var kinds []string
+	for _, k := range feed.Events.Kinds {
+		typ := k.Variant.Type.Name
+		if k.Variant.Type.Kind == Named {
+			typ = k.Variant.Type.Type.Name
+		}
+		kinds = append(kinds, fmt.Sprintf("%s:%s:%t", k.Name, typ, k.Text))
+	}
+	// Inline data is named after its kind; a kind without a contentSchema
+	// is text.
+	if want := "added:Pet:false gone:Feed200EventGoneData:false ping:string:true"; strings.Join(kinds, " ") != want || feed.Events.Data.Type.Name != "Feed200EventData" {
+		t.Errorf("kinds %q (union %s), want %q", kinds, feed.Events.Data.Type.Name, want)
+	}
+
+	one := operationNamed(t, m, "One").Body
+	if ev := one.Media[0].Events; ev == nil || len(ev.Kinds) != 0 || ev.Data.Type.Name != "Pet" || one.Value.Kind != Stream || one.Value.Elem.Kind != Event {
+		t.Errorf("one kind: %+v, field %+v", one.Media[0].Events, one.Value)
+	}
+	// Without a JSON contentSchema, events are raw, without a warning; two
+	// kinds of one name are warned about.
+	if raw := operationNamed(t, m, "Raw").Responses[0]; raw.Events != nil || raw.Item != nil {
+		t.Errorf("raw events = %+v", raw.Events)
+	}
+	if bad := operationNamed(t, m, "Bad").Responses[0]; bad.Events != nil {
+		t.Errorf("bad events = %+v", bad.Events)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Message)
+	}
+	if all := strings.Join(warnings, "\n"); !strings.Contains(all, `the event "a" has two kinds`) || strings.Contains(all, "/raw") {
+		t.Errorf("warnings:\n%s", all)
+	}
+}

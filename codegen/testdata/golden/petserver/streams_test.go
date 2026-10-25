@@ -57,6 +57,38 @@ func TestStreamedRequestBodies(t *testing.T) {
 	}
 }
 
+func TestTypedEvents(t *testing.T) {
+	s, h := newTestServer()
+	// Each kind is named after the variant of its data, and its data is
+	// JSON, or the text itself for ping.
+	want := "event: added\ndata: {\"id\":1,\"name\":\"Rex\"}\n\n" +
+		"event: added\ndata: {\"id\":2,\"name\":\"Tom\",\"tag\":\"cat\"}\n\n" +
+		"id: r2\nevent: removed\ndata: {\"id\":2}\n\n" +
+		"event: ping\ndata: hi\n\n"
+	if r := do(t, h, "GET", "/pets/feed", "", ""); r.status != 200 || r.body != want {
+		t.Errorf("feed: %d\n%s", r.status, r.body)
+	}
+
+	r := do(t, h, "POST", "/events/typed", "text/event-stream", "id: 1\ndata: {\"name\":\"Ann\",\ndata: \"tag\":\"x\"}\n\ndata: {\"name\":\"Bo\"}\n\n")
+	got, _ := s.seen["PostTypedEvents"].([]server.TypedEvent[model.Pet])
+	if r.status != 200 || r.body != `["Ann","Bo"]` || len(got) != 2 || got[0].ID != "1" || got[0].Data.Tag.Value != "x" {
+		t.Errorf("typed events: %d %s %+v", r.status, r.body, got)
+	}
+	// Problems point into the event, from its index.
+	r = do(t, h, "POST", "/events/typed", "text/event-stream", "data: {\"name\":\"Cy\"}\n\ndata: {\"name\":\"\"}\n\n")
+	if got := problemErrors(t, r); r.status != 400 || !slices.Equal(got, []string{"body /1/data/name: length must be at least 1"}) {
+		t.Errorf("invalid data: %d %q", r.status, got)
+	}
+	r = do(t, h, "POST", "/events/typed", "text/event-stream", "data: not json\n\n")
+	if got := problemErrors(t, r); r.status != 400 || len(got) != 1 || !strings.HasPrefix(got[0], "body /0/data: ") {
+		t.Errorf("not JSON: %d %q", r.status, got)
+	}
+	// Streams the itemSchema does not type stay server.Events.
+	if r := do(t, h, "POST", "/events", "text/event-stream", "data: not json\n\n"); r.status != 200 || r.body != "1" {
+		t.Errorf("raw events: %d %s", r.status, r.body)
+	}
+}
+
 func TestStreamedLineLimit(t *testing.T) {
 	// MaxBodyBytes limits each line, not the stream.
 	h := NewServer(newStore(), auth{}, server.WithLogger(slog.New(slog.DiscardHandler)), server.WithMaxBodyBytes(32))

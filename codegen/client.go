@@ -590,6 +590,9 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("client.JSONLinesBody(c, r, %s, %s, %s)", ct, value, f.itemValidation(m.Field.Value.Elem))
 		case "sse":
 			stmt = fmt.Sprintf("r.EventsBody(%s)", value)
+			if m.Events != nil {
+				stmt = fmt.Sprintf("client.TypedEventsBody(c, r, %s, %s, %s)", value, f.eventEncoder(m.Events, "Request"), f.itemValidation(m.Events.Data))
+			}
 		}
 		guarded(w, depth, cond, stmt)
 	}
@@ -693,6 +696,10 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 	case "jsonl":
 		w(2, "v.Items = client.JSONLines[%s](resp)", f.goType(r.Item))
 	case "sse":
+		if r.Events != nil {
+			w(2, "v.Events = client.TypedEvents(c, resp, %s)", f.eventDecoder(r.Events, "Response"))
+			break
+		}
 		w(2, "v.Events = client.Events(resp)")
 	default:
 		// Reading the empty body lets the connection be reused.

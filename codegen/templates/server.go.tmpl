@@ -125,7 +125,7 @@ type {{.TypeName}} struct {
 {{- if eq .Kind "sse"}}
 	// Events are sent as server-sent events as they are produced. An
 	// error ends the stream; it cannot change the status any more.
-	Events {{imp "iter" "iter"}}.Seq2[server.Event, error]
+	Events {{imp "iter" "iter"}}.Seq2[{{if .Item}}{{goType .Item}}{{else}}server.Event{{end}}, error]
 {{- end}}
 {{- range .Headers}}
 {{headerDoc .}}

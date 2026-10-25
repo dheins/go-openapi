@@ -4,6 +4,18 @@
 
 ### Added
 
+- Typed server-sent events, from the 3.2 `itemSchema` of
+  `text/event-stream` bodies and responses. An object whose `data` has a
+  JSON `contentMediaType` and a `contentSchema` makes events
+  `server.TypedEvent[T]` (ID, Event, Retry and `Data T`). A `oneOf` of
+  such objects, each with a `const` event name, makes `T` a union of the
+  kinds' data that the event name selects (inline data is named after its
+  kind, and a kind without a `contentSchema` is text). Data is decoded and
+  validated as it is read: a problem in a request stream ends the loop
+  with a 400 pointing into the event (`/2/data/name`), an unknown event
+  name included, and in a response a `*client.InvalidResponse`. Writing
+  names each event after its data's variant. Other event streams stay
+  `server.Event`s. `FuzzStreamBodies` reads typed events too.
 - Security of webhooks and callbacks: their own `security` requirements,
   dropped with a warning before, are applied. The generated `Sender` takes
   `SenderCredentials`, a function per scheme given the target URL as well

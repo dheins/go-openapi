@@ -182,6 +182,18 @@ export interface ImportPetMultipartRequestBody {
 /** The schema of ImportPetMultipartRequestBody, for validation and encoding. */
 export const ImportPetMultipartRequestBodySchema: $Schema = { kind: "object", properties: { photo: { schema: { kind: "file" }, required: true } } };
 
+export interface Feed200EventRemovedData {
+  id: number;
+}
+
+/** The schema of Feed200EventRemovedData, for validation and encoding. */
+export const Feed200EventRemovedDataSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "integer", minimum: 1 }, required: true } } };
+
+export type Feed200EventData = Pet | Feed200EventRemovedData | string;
+
+/** The schema of Feed200EventData, for validation and encoding. */
+export const Feed200EventDataSchema: $Schema = { kind: "union", oneOf: true, variants: [$ref(() => PetSchema), $ref(() => Feed200EventRemovedDataSchema), { kind: "string", maxLength: 8 }] };
+
 export interface PutLinesRequestBody {
   lines: OrderLine[];
   receipt?: Blob;

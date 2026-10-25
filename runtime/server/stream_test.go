@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -101,5 +102,56 @@ func TestEvents(t *testing.T) {
 	out := string(AppendEvent(nil, Event{ID: "1\nevent: x", Event: "e\r", Data: "a\r\nb"}))
 	if out != "id: 1 event: x\nevent: e \ndata: a\ndata: b\n\n" {
 		t.Errorf("appended %q", out)
+	}
+}
+
+func TestTypedEventHelpers(t *testing.T) {
+	ev := TypedEvent[streamPet]{ID: "1", Data: streamPet{Name: "a"}}
+	if got, err := EncodeEvent(ev, "added", ev.Data, oapi.Response); err != nil || got != (Event{ID: "1", Event: "added", Data: `{"name":"a"}`}) {
+		t.Errorf("encoded %+v %v", got, err)
+	}
+	// The event's own name must be its data's kind.
+	ev.Event = "removed"
+	if _, err := EncodeEvent(ev, "added", ev.Data, oapi.Response); err == nil {
+		t.Error("a removed event with added data was encoded")
+	}
+	if _, err := EncodeTextEvent(ev, "ping", "hi"); err == nil {
+		t.Error("a removed event with ping data was encoded")
+	}
+
+	nonEmpty := func(p streamPet) error {
+		if p.Name == "" {
+			return &oapi.ValidationError{Path: "/name", Message: "must not be empty"}
+		}
+		return nil
+	}
+	var errs oapi.ValidationErrors
+	if _, err := EventData(Event{Data: `{"name":""}`}, oapi.Request, true, nonEmpty); !errors.As(err, &errs) || errs[0].Path != "/data/name" {
+		t.Errorf("invalid data: %v", err)
+	}
+	// Without validate, only decoding counts.
+	if _, err := EventData(Event{Data: `{"name":""}`}, oapi.Request, false, nonEmpty); err != nil {
+		t.Errorf("unchecked data: %v", err)
+	}
+	var single *oapi.ValidationError
+	if err := UnknownEvent("x", "added", "ping"); !errors.As(err, &single) || single.Path != "/event" || single.Message != `unknown event "x"; expected "added", "ping"` {
+		t.Errorf("unknown event: %v", err)
+	}
+}
+
+func TestWriteTypedEvents(t *testing.T) {
+	c := NewConfig(WithLogger(slog.New(slog.DiscardHandler)))
+	events := func(yield func(TypedEvent[streamPet], error) bool) {
+		_ = yield(TypedEvent[streamPet]{Data: streamPet{Name: "a"}}, nil) && yield(TypedEvent[streamPet]{Event: "bad"}, nil) &&
+			yield(TypedEvent[streamPet]{Data: streamPet{Name: "c"}}, nil)
+	}
+	// An event that cannot be written ends the stream.
+	encode := func(ev TypedEvent[streamPet]) (Event, error) { return EncodeEvent(ev, "pet", ev.Data, oapi.Response) }
+	w := httptest.NewRecorder()
+	if err := WriteTypedEvents(c, w, httptest.NewRequest("GET", "/", nil), 200, events, nil, encode); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.Body.String(); got != "event: pet\ndata: {\"name\":\"a\"}\n\n" {
+		t.Errorf("written %q", got)
 	}
 }
