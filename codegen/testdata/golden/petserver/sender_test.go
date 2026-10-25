@@ -28,14 +28,23 @@ import (
 type receiver struct {
 	mu   sync.Mutex
 	seen []any
+	// callers are who hookAuth found sent each request, if anyone.
+	callers []any
 	// gone makes pet events answer 410, and fail an error.
 	gone, fail bool
 }
 
-func (r *receiver) record(req any) {
+func (r *receiver) record(ctx context.Context, req any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seen = append(r.seen, req)
+	r.callers = append(r.callers, ctx.Value(callerKey{}))
+}
+
+func (r *receiver) lastCaller() any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.callers[len(r.callers)-1]
 }
 
 func (r *receiver) last() any {
@@ -47,13 +56,13 @@ func (r *receiver) last() any {
 	return r.seen[len(r.seen)-1]
 }
 
-func (r *receiver) PetAdoptedWebhook(_ context.Context, req *api.PetAdoptedWebhookRequest) (api.PetAdoptedWebhookResponse, error) {
-	r.record(req)
+func (r *receiver) PetAdoptedWebhook(ctx context.Context, req *api.PetAdoptedWebhookRequest) (api.PetAdoptedWebhookResponse, error) {
+	r.record(ctx, req)
 	return api.PetAdoptedWebhook200JSONResponse{Body: model.PetAdoptedWebhook200ResponseBody{Ok: oapi.Some(req.Body.By != "nobody")}}, nil
 }
 
-func (r *receiver) SubscribePetEventCallback(_ context.Context, req *api.SubscribePetEventCallbackRequest) (api.SubscribePetEventCallbackResponse, error) {
-	r.record(req)
+func (r *receiver) SubscribePetEventCallback(ctx context.Context, req *api.SubscribePetEventCallbackRequest) (api.SubscribePetEventCallbackResponse, error) {
+	r.record(ctx, req)
 	switch {
 	case r.fail:
 		return nil, problem.New(http.StatusServiceUnavailable, "try later")
@@ -63,9 +72,41 @@ func (r *receiver) SubscribePetEventCallback(_ context.Context, req *api.Subscri
 	return api.SubscribePetEventCallback204Response{}, nil
 }
 
-func (r *receiver) SubscribePingCallback(_ context.Context, req *api.SubscribePingCallbackRequest) (api.SubscribePingCallbackResponse, error) {
-	r.record(req)
+func (r *receiver) SubscribePingCallback(ctx context.Context, req *api.SubscribePingCallbackRequest) (api.SubscribePingCallbackResponse, error) {
+	r.record(ctx, req)
 	return api.SubscribePingCallback200TextResponse{Body: "pong " + strconv.FormatInt(req.N.Value, 10)}, nil
+}
+
+// hookAuth implements ReceiverSecurityHandler: the consumer issued the
+// key "consumer-key" for its webhooks, and accepts the token "token" and
+// the user "api" with the password "pw".
+type hookAuth struct{}
+
+type callerKey struct{}
+
+func (hookAuth) HookKey(ctx context.Context, key string, _ []string) (context.Context, error) {
+	switch key {
+	case "revoked":
+		return nil, problem.New(http.StatusForbidden, "the key was revoked")
+	case "consumer-key":
+	default:
+		return nil, errors.New("unknown key")
+	}
+	return context.WithValue(ctx, callerKey{}, "key"), nil
+}
+
+func (hookAuth) BasicAuth(ctx context.Context, username, password string, _ []string) (context.Context, error) {
+	if username != "api" || password != "pw" {
+		return nil, errors.New("wrong password")
+	}
+	return context.WithValue(ctx, callerKey{}, "basic"), nil
+}
+
+func (hookAuth) HookToken(ctx context.Context, token string, _ []string) (context.Context, error) {
+	if token != "token" {
+		return nil, errors.New("unknown token")
+	}
+	return context.WithValue(ctx, callerKey{}, "token"), nil
 }
 
 // newReceiver serves r's handlers at the paths a consumer would register:
@@ -74,17 +115,20 @@ func (r *receiver) SubscribePingCallback(_ context.Context, req *api.SubscribePi
 func newReceiver(t *testing.T, r *receiver) *httptest.Server {
 	t.Helper()
 	cfg := server.NewConfig(server.WithLogger(slog.New(slog.DiscardHandler)))
-	cfg.Handle(api.PetAdoptedWebhookOperation, "/hooks/adopted", api.HandlePetAdoptedWebhook(cfg, r))
+	cfg.Handle(api.PetAdoptedWebhookOperation, "/hooks/adopted", api.HandlePetAdoptedWebhook(cfg, r, hookAuth{}))
 	cfg.Handle(api.SubscribePetEventCallbackOperation, "/hooks/pets/POST", api.HandleSubscribePetEventCallback(cfg, r))
-	cfg.Handle(api.SubscribePingCallbackOperation, "/ping", api.HandleSubscribePingCallback(cfg, r))
+	cfg.Handle(api.SubscribePingCallbackOperation, "/ping", api.HandleSubscribePingCallback(cfg, r, hookAuth{}))
 	srv := httptest.NewServer(cfg.Handler())
 	t.Cleanup(srv.Close)
 	return srv
 }
 
-func newSender(t *testing.T, opts ...client.Option) *Sender {
+// consumerKey gives the key the consumer issued, wherever it is.
+func consumerKey(context.Context, string) (string, error) { return "consumer-key", nil }
+
+func newSender(t *testing.T, creds SenderCredentials, opts ...client.Option) *Sender {
 	t.Helper()
-	s, err := NewSender(opts...)
+	s, err := NewSender(creds, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +139,7 @@ func TestWebhookRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	r := &receiver{}
 	srv := newReceiver(t, r)
-	s := newSender(t)
+	s := newSender(t, SenderCredentials{HookKey: consumerKey})
 
 	req := &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{ID: 1, Name: "Rex", Secret: oapi.Some("s")}, By: "Ann"}}
 	resp, err := s.PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", req)
@@ -117,7 +161,7 @@ func TestWebhookRoundTrip(t *testing.T) {
 	if r.last() != any(got) {
 		t.Error("an invalid webhook was sent")
 	}
-	_, err = newSender(t, client.WithoutRequestValidation()).PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", invalid)
+	_, err = newSender(t, SenderCredentials{HookKey: consumerKey}, client.WithoutRequestValidation()).PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", invalid)
 	var unexpected *client.UnexpectedResponse
 	if !errors.As(err, &unexpected) || unexpected.StatusCode != 400 || unexpected.Problem == nil || unexpected.Problem.Errors[0].Pointer != "/by" {
 		t.Errorf("rejected webhook: %v", err)
@@ -136,7 +180,7 @@ func TestCallbackRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	r := &receiver{}
 	srv := newReceiver(t, r)
-	s := newSender(t)
+	s := newSender(t, SenderCredentials{HookKey: consumerKey})
 
 	// The subscription, as the API received it, gives the URLs.
 	sub := &api.SubscribeRequest{XCallback: oapi.Some(srv.URL + "/ping"), Body: model.SubscribeRequestBody{URL: srv.URL + "/hooks"}}
@@ -174,7 +218,7 @@ func TestCallbackRoundTrip(t *testing.T) {
 	if _, err := s.SubscribePetEventCallback(ctx, eventURL, noEvent); !errors.As(err, &invalid) {
 		t.Errorf("event without X-Event: %v", err)
 	}
-	_, err = newSender(t, client.WithoutRequestValidation()).SubscribePetEventCallback(ctx, eventURL, noEvent)
+	_, err = newSender(t, SenderCredentials{}, client.WithoutRequestValidation()).SubscribePetEventCallback(ctx, eventURL, noEvent)
 	if !errors.As(err, &unexpected) || unexpected.StatusCode != 400 || unexpected.Problem.Errors[0].Parameter != "X-Event" {
 		t.Errorf("rejected event: %v", err)
 	}
@@ -189,5 +233,111 @@ func TestCallbackRoundTrip(t *testing.T) {
 	// The receiver answers the method it does not serve.
 	if _, err := s.PetAdoptedWebhook(ctx, pingURL, &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{Name: "Rex"}, By: "Ann"}}); !errors.As(err, &unexpected) || unexpected.StatusCode != 405 {
 		t.Errorf("wrong method: %v", err)
+	}
+}
+
+func TestSenderCredentials(t *testing.T) {
+	ctx := context.Background()
+	r := &receiver{}
+	srv := newReceiver(t, r)
+	adopted := &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{Name: "Rex"}, By: "Ann"}}
+
+	// The credentials of the consumer at the target are looked up.
+	var targets []string
+	keys := SenderCredentials{HookKey: func(_ context.Context, target string) (string, error) {
+		targets = append(targets, target)
+		if strings.HasPrefix(target, srv.URL) {
+			return "consumer-key", nil
+		}
+		return "", errors.New("no key for " + target)
+	}}
+	s := newSender(t, keys)
+	if _, err := s.PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); err != nil || len(targets) != 1 || targets[0] != srv.URL+"/hooks/adopted" {
+		t.Errorf("webhook: %v, targets %q", err, targets)
+	}
+	// The error of a credential function is the call's.
+	if _, err := s.PetAdoptedWebhook(ctx, "https://elsewhere.example.com/hooks", adopted); err == nil || !strings.Contains(err.Error(), "no key for https://elsewhere.example.com/hooks") {
+		t.Errorf("unknown consumer: %v", err)
+	}
+	// The other alternative: a scheme the API's operations use too.
+	basic := SenderCredentials{BasicAuth: func(context.Context, string) (string, string, error) { return "api", "pw", nil }}
+	if _, err := newSender(t, basic).PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); err != nil {
+		t.Errorf("basic: %v", err)
+	}
+	// Without credentials the webhook takes, nothing is sent.
+	before := r.last()
+	if _, err := newSender(t, SenderCredentials{}).PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); !errors.Is(err, client.ErrNoCredentials) || r.last() != before {
+		t.Errorf("no credentials: %v", err)
+	}
+
+	// The ping callback takes a token or none.
+	ping := &api.SubscribePingCallbackRequest{N: oapi.Some(int64(1))}
+	if _, err := newSender(t, SenderCredentials{}).SubscribePingCallback(ctx, srv.URL+"/ping", ping); err != nil {
+		t.Errorf("anonymous ping: %v", err)
+	}
+	token := SenderCredentials{HookToken: func(context.Context, string) (string, error) { return "token", nil }}
+	if _, err := newSender(t, token).SubscribePingCallback(ctx, srv.URL+"/ping", ping); err != nil {
+		t.Errorf("ping with a token: %v", err)
+	}
+}
+
+func TestReceiverSecurity(t *testing.T) {
+	ctx := context.Background()
+	r := &receiver{}
+	srv := newReceiver(t, r)
+	adopted := &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{Name: "Rex"}, By: "Ann"}}
+	key := func(k string) *Sender {
+		return newSender(t, SenderCredentials{HookKey: func(context.Context, string) (string, error) { return k, nil }})
+	}
+
+	// The context the security handler returns is the method's.
+	if _, err := key("consumer-key").PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); err != nil || r.lastCaller() != "key" {
+		t.Errorf("accepted key: %v, caller %v", err, r.lastCaller())
+	}
+	calls := len(r.seen)
+
+	// Credentials that are not accepted are 401, without the reason; a
+	// problem the handler returns is sent as it is.
+	var unexpected *client.UnexpectedResponse
+	if _, err := key("wrong").PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); !errors.As(err, &unexpected) ||
+		unexpected.StatusCode != 401 || unexpected.Problem.Detail != "the credentials are not valid" {
+		t.Errorf("wrong key: %v", err)
+	}
+	if _, err := key("revoked").PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); !errors.As(err, &unexpected) ||
+		unexpected.StatusCode != 403 || unexpected.Problem.Detail != "the key was revoked" {
+		t.Errorf("revoked key: %v", err)
+	}
+	// Without credentials, the challenge names the alternative that has one.
+	resp, err := http.Post(srv.URL+"/hooks/adopted", "application/json", strings.NewReader(`{"pet":{"name":"Rex"},"by":"Ann"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), "Basic") {
+		t.Errorf("no credentials: %d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	}
+	if len(r.seen) != calls {
+		t.Errorf("the receiver was called %d times for rejected requests", len(r.seen)-calls)
+	}
+
+	// The ping takes a token or none, but a token it does not accept is
+	// rejected rather than taken as no credentials.
+	ping := &api.SubscribePingCallbackRequest{N: oapi.Some(int64(1))}
+	token := func(tok string) *Sender {
+		return newSender(t, SenderCredentials{HookToken: func(context.Context, string) (string, error) { return tok, nil }})
+	}
+	if _, err := token("token").SubscribePingCallback(ctx, srv.URL+"/ping", ping); err != nil || r.lastCaller() != "token" {
+		t.Errorf("token: %v, caller %v", err, r.lastCaller())
+	}
+	if _, err := newSender(t, SenderCredentials{}).SubscribePingCallback(ctx, srv.URL+"/ping", ping); err != nil || r.lastCaller() != nil {
+		t.Errorf("anonymous: %v, caller %v", err, r.lastCaller())
+	}
+	if _, err := token("bad").SubscribePingCallback(ctx, srv.URL+"/ping", ping); !errors.As(err, &unexpected) || unexpected.StatusCode != 401 {
+		t.Errorf("bad token: %v", err)
+	}
+	// The pet event callback declares no security.
+	event := &api.SubscribePetEventCallbackRequest{XEvent: model.SubscribePetEventCallbackXEventCreated, Body: model.Pet{Name: "Rex"}}
+	if _, err := newSender(t, SenderCredentials{}).SubscribePetEventCallback(ctx, srv.URL+"/hooks/pets/POST", event); err != nil {
+		t.Errorf("unsecured callback: %v", err)
 	}
 }

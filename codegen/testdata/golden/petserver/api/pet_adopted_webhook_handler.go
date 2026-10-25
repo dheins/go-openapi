@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -18,11 +19,27 @@ var PetAdoptedWebhookOperation = server.Operation{ID: "", Name: "PetAdoptedWebho
 
 // HandlePetAdoptedWebhook returns the HTTP handler of PetAdoptedWebhook.
 //
-// It decodes and validates the
+// It checks the credentials with sec, decodes and validates the
 // request, calls h.PetAdoptedWebhook and sends the response it returns.
-func HandlePetAdoptedWebhook(c *server.Config, h WebhookHandler) http.Handler {
+func HandlePetAdoptedWebhook(c *server.Config, h WebhookHandler, sec ReceiverSecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
+		ctx, err := server.Authorize(server.RequestContext(r), w, []server.Requirement{
+			{
+				server.APIKeyCheck(r, "header", "X-Hook-Key", func(ctx context.Context, key string) (context.Context, error) {
+					return sec.HookKey(ctx, key, nil)
+				}),
+			},
+			{
+				server.BasicCheck(r, func(ctx context.Context, username, password string) (context.Context, error) {
+					return sec.BasicAuth(ctx, username, password, nil)
+				}),
+			},
+		})
+		if err != nil {
+			c.HandleError(w, r, err)
+			return
+		}
 		var req PetAdoptedWebhookRequest
 		var b server.Binder
 		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"application/json"}, true); ok {
@@ -41,7 +58,7 @@ func HandlePetAdoptedWebhook(c *server.Config, h WebhookHandler) http.Handler {
 			c.HandleError(w, r, b.Err())
 			return
 		}
-		resp, err := h.PetAdoptedWebhook(server.RequestContext(r), &req)
+		resp, err := h.PetAdoptedWebhook(ctx, &req)
 		if err == nil && resp == nil {
 			err = errors.New("PetAdoptedWebhook returned neither a response nor an error")
 		}

@@ -87,7 +87,7 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 			}
 		}
 		if len(sent) > 0 {
-			if err := og.receiverFile(sent); err != nil {
+			if err := og.receiverFile(sent, m.SenderSchemes); err != nil {
 				return nil, err
 			}
 		}
@@ -123,19 +123,29 @@ func (g *generator) operationFiles(o *ir.Operation) error {
 		return fmt.Errorf("generating the client functions of %s: %w", o.Name, err)
 	}
 	g.add(base+"_client.go", content)
+	// A receiver checks credentials of the webhook's or callback's own
+	// schemes.
+	sec := ""
+	if o.Security != nil {
+		sec = "ReceiverSecurityHandler"
+	}
 	switch o.Kind {
 	case ir.Webhook:
-		return g.handlerFile(handlerData{o, false, "WebhookHandler"})
+		return g.handlerFile(handlerData{o, sec, "WebhookHandler"})
 	case ir.Callback:
-		return g.handlerFile(handlerData{o, false, "CallbackHandler"})
+		return g.handlerFile(handlerData{o, sec, "CallbackHandler"})
 	}
 	return nil
 }
 
 // receiverFile adds receiver.go, the interfaces receivers of the webhooks
-// and callbacks sent implement, to the operations' package.
-func (g *generator) receiverFile(sent []*ir.Operation) error {
-	var data struct{ Webhooks, Callbacks []*ir.Operation }
+// and callbacks sent implement, checking the credentials of schemes, to
+// the operations' package.
+func (g *generator) receiverFile(sent []*ir.Operation, schemes []*ir.SecurityScheme) error {
+	data := struct {
+		Webhooks, Callbacks []*ir.Operation
+		Schemes             []*ir.SecurityScheme
+	}{Schemes: schemes}
 	for _, o := range sent {
 		if o.Kind == ir.Webhook {
 			data.Webhooks = append(data.Webhooks, o)
@@ -202,6 +212,13 @@ func (f *fileGen) senderMethod(o *ir.Operation) string {
 	w(1, "if err != nil {")
 	w(2, "return nil, err")
 	w(1, "}")
+	if o.Security != nil {
+		w(1, "if err := client.Authorize(ctx, hreq, %s); err != nil {", requirementsExpr(o, func(s *ir.SecurityScheme) string {
+			return "s." + senderSchemeFunc(s) + "(target)"
+		}))
+		w(2, "return nil, err")
+		w(1, "}")
+	}
 	w(1, "resp, err := s.cfg.Do(hreq)")
 	w(1, "if err != nil {")
 	w(2, "return nil, err")
@@ -211,14 +228,68 @@ func (f *fileGen) senderMethod(o *ir.Operation) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
+// senderSchemeFunc names the method of Sender returning the client.Scheme
+// of s for a target.
+func senderSchemeFunc(s *ir.SecurityScheme) string { return lowerFirst(s.Method) + "Scheme" }
+
+// senderScheme returns the method of Sender that gives the scheme s with
+// the credentials of a target.
+func (f *fileGen) senderScheme(s *ir.SecurityScheme) string {
+	doc := wrapComment(fmt.Sprintf("%s returns the scheme %q with the credentials for target.", senderSchemeFunc(s), s.Name))
+	if s.Type == "mutualTLS" {
+		return doc + fmt.Sprintf("func (s *Sender) %s(string) client.Scheme {\n\treturn %s\n}", senderSchemeFunc(s), schemeExpr(s, "s.creds."+s.Method))
+	}
+	ctx := f.imp("context", "context")
+	sig, call := "(string, error)", "f(ctx, target)"
+	if s.Type == "http" && s.Scheme == "basic" {
+		sig = "(username, password string, err error)"
+	}
+	return doc + fmt.Sprintf(`func (s *Sender) %s(target string) client.Scheme {
+	var cred func(ctx %s.Context) %s
+	if f := s.creds.%s; f != nil {
+		cred = func(ctx %s.Context) %s { return %s }
+	}
+	return %s
+}`, senderSchemeFunc(s), ctx, sig, s.Method, ctx, sig, call, schemeExpr(s, "cred"))
+}
+
+// senderCredentialType returns the type of the SenderCredentials field of
+// s: that of Credentials, given the target too.
+func (f *fileGen) senderCredentialType(s *ir.SecurityScheme) string {
+	ctx := f.imp("context", "context")
+	switch {
+	case s.Type == "mutualTLS":
+		return "bool"
+	case s.Type == "http" && s.Scheme == "basic":
+		return fmt.Sprintf("func(ctx %s.Context, target string) (username, password string, err error)", ctx)
+	}
+	return fmt.Sprintf("func(ctx %s.Context, target string) (string, error)", ctx)
+}
+
+// requirementsExpr returns the []client.Requirement of o, with the
+// client.Scheme expression of each scheme from scheme.
+func requirementsExpr(o *ir.Operation, scheme func(*ir.SecurityScheme) string) string {
+	reqs := make([]string, len(o.Security))
+	for i, uses := range o.Security {
+		schemes := make([]string, len(uses))
+		for j, u := range uses {
+			schemes[j] = scheme(u.Scheme)
+		}
+		reqs[i] = "{" + strings.Join(schemes, ", ") + "}"
+	}
+	return "[]client.Requirement{" + strings.Join(reqs, ", ") + "}"
+}
+
 func (f *fileGen) clientFuncs() map[string]any {
 	return map[string]any{
-		"clientOps":      f.clientOps,
-		"clientMethod":   f.clientMethod,
-		"senderMethod":   f.senderMethod,
-		"opLabel":        opLabel,
-		"credentialDoc":  credentialDoc,
-		"credentialType": f.credentialType,
+		"clientOps":            f.clientOps,
+		"clientMethod":         f.clientMethod,
+		"senderMethod":         f.senderMethod,
+		"senderScheme":         f.senderScheme,
+		"senderCredentialType": f.senderCredentialType,
+		"opLabel":              opLabel,
+		"credentialDoc":        credentialDoc,
+		"credentialType":       f.credentialType,
 	}
 }
 
@@ -707,10 +778,9 @@ func (f *fileGen) credentialType(s *ir.SecurityScheme) string {
 	return fmt.Sprintf("func(ctx %s.Context) (string, error)", f.imp("context", "context"))
 }
 
-// schemeExpr returns the client.Scheme of security scheme s, from the
-// client's credentials.
-func schemeExpr(s *ir.SecurityScheme) string {
-	cred := "c.creds." + s.Method
+// schemeExpr returns the client.Scheme of security scheme s, with the
+// credentials of cred.
+func schemeExpr(s *ir.SecurityScheme, cred string) string {
 	switch {
 	case s.Type == "apiKey":
 		return fmt.Sprintf("client.APIKey(%q, %q, %s)", s.In, s.ParamName, cred)
@@ -758,15 +828,9 @@ func (f *fileGen) clientMethod(o *ir.Operation) string {
 	w(2, "return nil, err")
 	w(1, "}")
 	if o.Security != nil {
-		reqs := make([]string, len(o.Security))
-		for i, uses := range o.Security {
-			schemes := make([]string, len(uses))
-			for j, u := range uses {
-				schemes[j] = schemeExpr(u.Scheme)
-			}
-			reqs[i] = "{" + strings.Join(schemes, ", ") + "}"
-		}
-		w(1, "if err := client.Authorize(ctx, hreq, []client.Requirement{%s}); err != nil {", strings.Join(reqs, ", "))
+		w(1, "if err := client.Authorize(ctx, hreq, %s); err != nil {", requirementsExpr(o, func(s *ir.SecurityScheme) string {
+			return schemeExpr(s, "c.creds."+s.Method)
+		}))
 		w(2, "return nil, err")
 		w(1, "}")
 	}

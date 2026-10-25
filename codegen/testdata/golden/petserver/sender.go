@@ -9,6 +9,24 @@ import (
 	"github.com/dheins/go-openapi/runtime/client"
 )
 
+// SenderCredentials are the credentials the sender sends, one per security
+// scheme of the webhooks and callbacks. Each is given the target URL, so
+// that it can return the credentials of the consumer there. A request uses
+// the first of its security requirements whose credentials are all set; a
+// field left nil is not set.
+type SenderCredentials struct {
+	// HookToken returns the bearer token. It is for the scheme "hookToken".
+	HookToken func(ctx context.Context, target string) (string, error)
+	// HookKey returns the API key, sent in the header "X-Hook-Key". It is for
+	// the scheme "hookKey".
+	//
+	// The key a consumer issued for its webhooks.
+	HookKey func(ctx context.Context, target string) (string, error)
+	// BasicAuth returns the user name and password of HTTP basic
+	// authentication. It is for the scheme "basicAuth".
+	BasicAuth func(ctx context.Context, target string) (username, password string, err error)
+}
+
 // Sender sends the document's webhooks and callbacks, with a method per
 // webhook and callback, to the URL given with each: one a consumer
 // registered for a webhook, or the URL of a callback (the callback's URL
@@ -18,16 +36,47 @@ import (
 // client.WithResponseValidation; retries, queues and request signing are
 // middleware (client.WithMiddleware).
 type Sender struct {
-	cfg *client.Config
+	cfg   *client.Config
+	creds SenderCredentials
 }
 
-// NewSender returns a sender configured by opts.
-func NewSender(opts ...client.Option) (*Sender, error) {
+// NewSender returns a sender sending creds, configured by opts.
+func NewSender(creds SenderCredentials, opts ...client.Option) (*Sender, error) {
 	cfg, err := client.NewSenderConfig(opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &Sender{cfg: cfg}, nil
+	return &Sender{cfg: cfg, creds: creds}, nil
+}
+
+// hookTokenScheme returns the scheme "hookToken" with the credentials for
+// target.
+func (s *Sender) hookTokenScheme(target string) client.Scheme {
+	var cred func(ctx context.Context) (string, error)
+	if f := s.creds.HookToken; f != nil {
+		cred = func(ctx context.Context) (string, error) { return f(ctx, target) }
+	}
+	return client.Bearer(cred)
+}
+
+// hookKeyScheme returns the scheme "hookKey" with the credentials for
+// target.
+func (s *Sender) hookKeyScheme(target string) client.Scheme {
+	var cred func(ctx context.Context) (string, error)
+	if f := s.creds.HookKey; f != nil {
+		cred = func(ctx context.Context) (string, error) { return f(ctx, target) }
+	}
+	return client.APIKey("header", "X-Hook-Key", cred)
+}
+
+// basicAuthScheme returns the scheme "basicAuth" with the credentials for
+// target.
+func (s *Sender) basicAuthScheme(target string) client.Scheme {
+	var cred func(ctx context.Context) (username, password string, err error)
+	if f := s.creds.BasicAuth; f != nil {
+		cred = func(ctx context.Context) (username, password string, err error) { return f(ctx, target) }
+	}
+	return client.Basic(cred)
 }
 
 // PetAdoptedWebhook sends the webhook "petAdopted" (POST) to target. A nil
@@ -38,6 +87,9 @@ func (s *Sender) PetAdoptedWebhook(ctx context.Context, target string, req *api.
 	}
 	hreq, err := api.NewPetAdoptedWebhookRequest(ctx, s.cfg, target, req)
 	if err != nil {
+		return nil, err
+	}
+	if err := client.Authorize(ctx, hreq, []client.Requirement{{s.hookKeyScheme(target)}, {s.basicAuthScheme(target)}}); err != nil {
 		return nil, err
 	}
 	resp, err := s.cfg.Do(hreq)
@@ -74,6 +126,9 @@ func (s *Sender) SubscribePingCallback(ctx context.Context, target string, req *
 	}
 	hreq, err := api.NewSubscribePingCallbackRequest(ctx, s.cfg, target, req)
 	if err != nil {
+		return nil, err
+	}
+	if err := client.Authorize(ctx, hreq, []client.Requirement{{s.hookTokenScheme(target)}, {}}); err != nil {
 		return nil, err
 	}
 	resp, err := s.cfg.Do(hreq)

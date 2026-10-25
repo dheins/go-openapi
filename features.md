@@ -51,10 +51,9 @@ shipped in.
   (indices are read and written). — later
 - Parameters and response headers with `content` other than JSON. — later
 - Links. — later
-- Security requirements of webhooks and callbacks: the sender does not
-  apply them and receivers do not check them (a warning says so); add
-  credentials or signatures with client middleware and server
-  middleware. — later
+- Signed webhooks (an HMAC of the body in a header): OpenAPI has no
+  security scheme for them, so they are left to client and server
+  middleware, as the guide shows. — not planned
 - Callback URLs with `$url`, `$statusCode` or `$response.*`: no URL
   function is generated, and the sender is given the URL. — later
 - Webhooks and callbacks declared inside webhooks and callbacks. — later
@@ -108,6 +107,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Security of webhooks and callbacks: the sender sends credentials
+  per target (`SenderCredentials`), and receivers check them with a
+  `ReceiverSecurityHandler`. (fc15d59, 22ddd55)
 - [x] Streamed request bodies: JSON Lines and server-sent events read item
   by item by handlers, and sent as they are produced by Go and TypeScript
   clients. (5bbb007, e8f127f, 9fc7627)

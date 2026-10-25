@@ -323,6 +323,26 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   and names that cannot start other fields.
 - *Not done*: see [features.md](../features.md) and [bugs.md](../bugs.md).
 
+### M14 – Security of webhooks and callbacks ✅
+- [x] Their own `security` requirements in the model, with the schemes
+  the API sends credentials of (`SenderSchemes`)
+- [x] `SenderCredentials`, functions given the target as well as the
+  context, and authorization in each `Sender` method
+- [x] `ReceiverSecurityHandler` for the receivers of secured webhooks and
+  callbacks
+
+**How it went**
+- *Per target*: each consumer usually issues its own key, so the
+  credential functions get the URL they send to; the client runtime's
+  schemes are reused through small adapters in the generated sender.
+- *Apart from the API's*: receivers check the schemes webhooks use with
+  their own interface, so a consumer implements none of the API's.
+- *Shared code*: the server and client generators share the receivers,
+  so the sender and the receivers came in one step, as for streamed
+  bodies.
+- *Not done*: HMAC signatures, which OpenAPI cannot declare, are
+  middleware; see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

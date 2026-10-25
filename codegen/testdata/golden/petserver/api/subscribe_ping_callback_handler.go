@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -18,11 +19,23 @@ var SubscribePingCallbackOperation = server.Operation{ID: "", Name: "SubscribePi
 
 // HandleSubscribePingCallback returns the HTTP handler of SubscribePingCallback.
 //
-// It decodes and validates the
+// It checks the credentials with sec, decodes and validates the
 // request, calls h.SubscribePingCallback and sends the response it returns.
-func HandleSubscribePingCallback(c *server.Config, h CallbackHandler) http.Handler {
+func HandleSubscribePingCallback(c *server.Config, h CallbackHandler, sec ReceiverSecurityHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
+		ctx, err := server.Authorize(server.RequestContext(r), w, []server.Requirement{
+			{
+				server.BearerCheck(r, func(ctx context.Context, token string) (context.Context, error) {
+					return sec.HookToken(ctx, token, nil)
+				}),
+			},
+			{},
+		})
+		if err != nil {
+			c.HandleError(w, r, err)
+			return
+		}
 		var req SubscribePingCallbackRequest
 		var b server.Binder
 		query := r.URL.Query()
@@ -46,7 +59,7 @@ func HandleSubscribePingCallback(c *server.Config, h CallbackHandler) http.Handl
 			c.HandleError(w, r, b.Err())
 			return
 		}
-		resp, err := h.SubscribePingCallback(server.RequestContext(r), &req)
+		resp, err := h.SubscribePingCallback(ctx, &req)
 		if err == nil && resp == nil {
 			err = errors.New("SubscribePingCallback returned neither a response nor an error")
 		}

@@ -4,6 +4,15 @@
 
 ### Added
 
+- Security of webhooks and callbacks: their own `security` requirements,
+  dropped with a warning before, are applied. The generated `Sender` takes
+  `SenderCredentials`, a function per scheme given the target URL as well
+  as the context, so that it can send the credentials of the consumer
+  there, and authorizes each request like a client
+  (`client.ErrNoCredentials` when no requirement can be met). Receivers
+  check them with a `ReceiverSecurityHandler`, a method per scheme the
+  webhooks and callbacks use, apart from the API's `SecurityHandler`.
+  `ir.Model.SenderSchemes` lists those schemes.
 - Streamed request bodies: JSON Lines (`application/jsonl`,
   `application/x-ndjson`, items from `itemSchema` or an array's `items`)
   and server-sent events (`text/event-stream`), answered with 415 before.
@@ -242,6 +251,10 @@
 
 ### Changed
 
+- When a webhook or callback declares security, `NewSender` takes the
+  `SenderCredentials` first, and the receiver's `HandleX` function takes a
+  `ReceiverSecurityHandler` last. Documents whose webhooks and callbacks
+  declare none generate the same code as before.
 - Server-sent events are read with the line ends of the format (CRLF, LF
   or CR, not only LF), `retry` takes digits only, and line ends in an
   event's ID or name are written as spaces, so that they cannot start

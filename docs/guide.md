@@ -876,9 +876,51 @@ The sender is configured like a client, except that it has no base URL.
 It checks requests before sending them (`client.WithoutRequestValidation`
 turns that off), checks responses with `client.WithResponseValidation`,
 and returns the same errors. Responses the webhook does not declare are
-`*client.UnexpectedResponse`s. Retries, delivery queues and request
-signatures are `client.WithMiddleware`, and security requirements of
-webhooks and callbacks are not applied (a warning says so).
+`*client.UnexpectedResponse`s. Retries and delivery queues are
+`client.WithMiddleware`.
+
+A webhook or callback that declares `security` is sent with credentials
+of its schemes; the document's top-level `security` is for the API's own
+operations and does not apply. `NewSender` then takes `SenderCredentials`,
+a function per scheme that is also given the target, since each consumer
+usually issues its own key:
+
+```go
+s, err := gen.NewSender(gen.SenderCredentials{
+	HookKey: func(ctx context.Context, target string) (string, error) {
+		return keys.For(ctx, target) // the key the consumer at target issued
+	},
+})
+```
+
+As with a client, a request uses the first of its requirements whose
+credentials are all set, `{}` allows sending none, and with none to use
+the call returns `client.ErrNoCredentials` without sending anything. A
+credential function's error is the call's.
+
+Signed webhooks, with an HMAC of the body in a header as many APIs send
+them, are not a security scheme OpenAPI can declare; sign them with
+middleware:
+
+```go
+sign := client.WithMiddleware(func(next client.Doer) client.Doer {
+	return client.DoerFunc(func(r *http.Request) (*http.Response, error) {
+		var body []byte
+		if r.Body != nil {
+			var err error
+			if body, err = io.ReadAll(r.Body); err != nil {
+				return nil, err
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		mac := hmac.New(sha256.New, secretFor(r.URL))
+		mac.Write(body)
+		r.Header.Set("X-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+		return next.Do(r)
+	})
+})
+s, err := gen.NewSender(creds, sign)
+```
 
 ### Receiving them
 
@@ -900,6 +942,52 @@ http.ListenAndServe(":8080", cfg.Handler())
 The handlers decode and check each request before calling the method,
 answer invalid ones with a 400 problem, and send the response variant
 the method returns.
+
+The handler of a webhook or callback that declares `security` also takes
+an `api.ReceiverSecurityHandler`, with a method per scheme the webhooks
+and callbacks use, like the server's `SecurityHandler`. It is a separate
+interface, so a consumer does not implement the API's own schemes:
+
+```go
+type hooks struct{}
+
+func (hooks) HookKey(ctx context.Context, key string, _ []string) (context.Context, error) {
+	if key != myIssuedKey {
+		return nil, errors.New("unknown key") // 401, without the reason
+	}
+	return ctx, nil
+}
+
+cfg.Handle(api.PetAdoptedWebhookOperation, "/hooks/adopted", api.HandlePetAdoptedWebhook(cfg, h, hooks{}))
+```
+
+Requests without credentials get a 401 unless the webhook allows
+anonymous requests, a `*problem.Problem` the method returns (such as a
+403) is sent as it is, and the context it returns is the receiver
+method's. A signature is checked with server middleware, which receivers
+get through `server.Config`:
+
+```go
+verify := func(op server.Operation, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "the body could not be read", http.StatusBadRequest)
+			return
+		}
+		mac := hmac.New(sha256.New, secret)
+		mac.Write(body)
+		want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		if !hmac.Equal([]byte(r.Header.Get("X-Signature")), []byte(want)) {
+			http.Error(w, "the signature is not valid", http.StatusUnauthorized)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		next.ServeHTTP(w, r)
+	})
+}
+cfg := server.NewConfig(server.WithMiddleware(verify))
+```
 
 ## Generate a document from Go code
 
