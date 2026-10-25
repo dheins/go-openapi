@@ -1,6 +1,7 @@
 package codescan
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -303,6 +304,199 @@ func (s *scanner) operations(doc *oas.Document) {
 			s.report(u.pos, Error, "goapi:security: no goapi:securityScheme declares %q", u.name)
 		}
 	}
+	for _, l := range s.linkTargets {
+		if _, ok := ids[l.name]; !ok {
+			s.report(l.pos, Error, "goapi:link: no operation has the operationId %q", l.name)
+		}
+	}
+}
+
+// link adds the link a //goapi:link directive declares to a response of
+// op: link STATUS NAME operationId=ID|operationRef=REF [requestBody=EXPR]
+// [description=…], and a parameter per other key.
+func (s *scanner) link(d directive, op *oas.Operation) {
+	if len(d.args) != 2 {
+		s.report(d.pos, Error, "goapi:link takes a status and a name, then operationId= and the parameters")
+		return
+	}
+	resp, ok := op.Responses.Items.Get(d.args[0])
+	if !ok {
+		s.report(d.pos, Error, "goapi:link: the function declares no goapi:response %s", d.args[0])
+		return
+	}
+	l := &oas.Link{}
+	for _, e := range d.kv {
+		switch e.key {
+		case "operationId":
+			l.OperationID = e.value
+		case "operationRef":
+			l.OperationRef = e.value
+		case "description":
+			l.Description = e.value
+		case "requestBody":
+			l.RequestBody = linkValue(e.value)
+		default:
+			if l.Parameters == nil {
+				l.Parameters = &oas.OrderedMap[json.RawMessage]{}
+			}
+			l.Parameters.Set(e.key, linkValue(e.value))
+		}
+	}
+	if (l.OperationID == "") == (l.OperationRef == "") {
+		s.report(d.pos, Error, "goapi:link: give one of operationId and operationRef")
+		return
+	}
+	if l.OperationID != "" {
+		s.linkTargets = append(s.linkTargets, schemeUse{name: l.OperationID, pos: d.pos})
+	}
+	if resp.Links == nil {
+		resp.Links = &oas.OrderedMap[*oas.Link]{}
+	}
+	if _, dup := resp.Links.Get(d.args[1]); dup {
+		s.report(d.pos, Error, "goapi:link: response %s already has a link %q", d.args[0], d.args[1])
+		return
+	}
+	resp.Links.Set(d.args[1], l)
+}
+
+// linkValue is the value of a link parameter or request body: JSON as it
+// is, anything else (a runtime expression) as a string.
+func linkValue(v string) json.RawMessage {
+	if json.Valid([]byte(v)) {
+		return json.RawMessage(v)
+	}
+	data, _ := json.Marshal(v)
+	return data
+}
+
+// example adds the example a //goapi:example directive gives:
+// example request|STATUS [MEDIA TYPE] [name=…] [summary=…]
+// [description=…] JSON, the JSON being the rest of the line. With a
+// name, it is one of the media type's examples; without, its example.
+func (s *scanner) example(d directive, op *oas.Operation) {
+	ex, err := parseExample(d.raw)
+	if err != nil {
+		s.report(d.pos, Error, "goapi:example: %v", err)
+		return
+	}
+	var content *oas.OrderedMap[*oas.MediaType]
+	switch ex.target {
+	case "request":
+		if op.RequestBody == nil {
+			s.report(d.pos, Error, "goapi:example: the request has no body")
+			return
+		}
+		content = op.RequestBody.Content
+	default:
+		resp, ok := op.Responses.Items.Get(ex.target)
+		if !ok {
+			s.report(d.pos, Error, "goapi:example: %q is neither request nor a status the function declares a goapi:response for", ex.target)
+			return
+		}
+		if resp.Content == nil {
+			s.report(d.pos, Error, "goapi:example: response %s has no body", ex.target)
+			return
+		}
+		content = resp.Content
+	}
+	if ex.mediaType == "" {
+		if content.Len() > 1 {
+			s.report(d.pos, Error, "goapi:example: %s has several media types; name one", ex.target)
+			return
+		}
+		for mt := range content.All() {
+			ex.mediaType = mt
+		}
+	}
+	media, ok := content.Get(ex.mediaType)
+	if !ok {
+		s.report(d.pos, Error, "goapi:example: %s has no media type %s", ex.target, ex.mediaType)
+		return
+	}
+	if ex.name == "" {
+		if ex.summary != "" || ex.description != "" {
+			s.report(d.pos, Error, "goapi:example: summary and description are for a named example")
+			return
+		}
+		if media.Example != nil {
+			s.report(d.pos, Error, "goapi:example: %s %s already has an example; name them", ex.target, ex.mediaType)
+			return
+		}
+		media.Example = ex.value
+		return
+	}
+	if media.Examples == nil {
+		media.Examples = &oas.OrderedMap[*oas.Example]{}
+	}
+	if _, dup := media.Examples.Get(ex.name); dup {
+		s.report(d.pos, Error, "goapi:example: %s %s already has an example %q", ex.target, ex.mediaType, ex.name)
+		return
+	}
+	media.Examples.Set(ex.name, &oas.Example{Summary: ex.summary, Description: ex.description, Value: ex.value})
+}
+
+// exampleDirective is a //goapi:example directive, parsed.
+type exampleDirective struct {
+	target, mediaType          string
+	name, summary, description string
+	value                      json.RawMessage
+}
+
+// parseExample parses the text of a //goapi:example directive: a target,
+// then optionally a media type and keys, then JSON to the end.
+func parseExample(raw string) (exampleDirective, error) {
+	var ex exampleDirective
+	rest := strings.TrimSpace(raw)
+	word := func() string {
+		i := strings.IndexAny(rest, " \t")
+		if i < 0 {
+			i = len(rest)
+		}
+		w := rest[:i]
+		rest = strings.TrimSpace(rest[i:])
+		return w
+	}
+	ex.target = word()
+	if ex.target != "request" && !validStatus(ex.target) {
+		return ex, fmt.Errorf("%q is neither request nor a status code, range (4XX) or default", ex.target)
+	}
+	for rest != "" && !json.Valid([]byte(rest)) {
+		if strings.ContainsAny(rest[:1], `{["-0123456789`) {
+			return ex, fmt.Errorf("the value is not JSON: %s", rest)
+		}
+		key, value, isKey := strings.Cut(word(), "=")
+		if !isKey {
+			if ex.mediaType != "" || ex.name != "" || !strings.Contains(key, "/") {
+				return ex, fmt.Errorf("%q is neither a media type, a key nor JSON", key)
+			}
+			ex.mediaType = key
+			continue
+		}
+		if strings.HasPrefix(value, `"`) {
+			// A quoted value may hold spaces: take it from the text.
+			quoted, err := strconv.QuotedPrefix(value + " " + rest)
+			if err != nil {
+				return ex, fmt.Errorf("%s: %v", key, err)
+			}
+			rest = strings.TrimSpace(strings.TrimPrefix(value+" "+rest, quoted))
+			value, _ = strconv.Unquote(quoted)
+		}
+		switch key {
+		case "name":
+			ex.name = value
+		case "summary":
+			ex.summary = value
+		case "description":
+			ex.description = value
+		default:
+			return ex, fmt.Errorf("unknown key %q", key)
+		}
+	}
+	if rest == "" {
+		return ex, fmt.Errorf("no JSON value after %s", ex.target)
+	}
+	ex.value = json.RawMessage(rest)
+	return ex, nil
 }
 
 // declared is what a function with goapi directives declares: an
@@ -440,8 +634,12 @@ func (s *scanner) operation(fd *funcDecl) (*declared, bool) {
 	defer s.at(fd.decl.Pos())()
 
 	var reqType types.Type
+	var later []directive
 	for _, d := range fd.ds {
 		switch d.name {
+		case "link", "example":
+			// Once the responses and the request are known.
+			later = append(later, d)
 		case "operation", "webhook", "callback":
 		case "request":
 			if len(d.args) != 1 || len(d.kv) > 0 {
@@ -470,6 +668,13 @@ func (s *scanner) operation(fd *funcDecl) (*declared, bool) {
 		path = ""
 	}
 	s.request(op, reqType, path, d.kind, opDir.pos)
+	for _, ld := range later {
+		if ld.name == "link" {
+			s.link(ld, op)
+		} else {
+			s.example(ld, op)
+		}
+	}
 	if op.Responses.Items.Len() == 0 {
 		switch d.kind {
 		case "operation":

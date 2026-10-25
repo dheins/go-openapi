@@ -110,3 +110,37 @@ func callbackTwice() {}
 //goapi:callback same event POST
 //goapi:response 204
 func callbackWithoutURL() {}
+
+// BodyReq has a body.
+type BodyReq struct {
+	Body string `goapi:"in=body;mediaType=application/json|text/plain"`
+}
+
+//goapi:operation POST /examples
+//goapi:response 200 string
+//goapi:response 204
+//goapi:example 200 {"unterminated":
+//goapi:example 300 1
+//goapi:example 201 1
+//goapi:example 204 1
+//goapi:example request 1
+//goapi:example request text/csv 1
+//goapi:example request application/json color=red 1
+//goapi:example request application/json summary=lonely 1
+//goapi:example 200
+//goapi:example 200 2
+//goapi:example 200 3
+//goapi:example 200 name=a 4
+//goapi:example 200 name=a 5
+func examples(req BodyReq) {}
+
+//goapi:operation GET /links
+//goapi:response 200
+//goapi:link 201 next operationId=examples
+//goapi:link 200 nowhere
+//goapi:link 200 both operationId=examples operationRef=#/paths/~1links/get
+//goapi:link 200 missing operationId=nosuchop
+//goapi:link 200 next operationId=examples
+//goapi:link 200 next operationId=examples
+//goapi:link 200
+func links() {}

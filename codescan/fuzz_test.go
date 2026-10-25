@@ -1,6 +1,7 @@
 package codescan
 
 import (
+	"encoding/json"
 	"go/ast"
 	"strings"
 	"testing"
@@ -50,6 +51,8 @@ func FuzzDirectives(f *testing.F) {
 	f.Add(`goapi:operation GET /pets/{id} tags=pets summary="List pets"`)
 	f.Add(`goapi:response default Problem application/problem+json description="An \"error\"."`)
 	f.Add(`goapi:security oauth:read,write bearer`)
+	f.Add(`goapi:example request application/json name=rex summary="A \"dog\"" {"name": "Rex"}`)
+	f.Add(`goapi:link 201 GetPet operationId=getPet id=$response.body#/id`)
 	f.Fuzz(func(t *testing.T, s string) {
 		if strings.ContainsAny(s, "\n\r") {
 			return
@@ -61,6 +64,12 @@ func FuzzDirectives(f *testing.F) {
 		for _, d := range ds {
 			if d.name == "" {
 				t.Fatalf("%q: a directive without a name", s)
+			}
+			if d.name == "example" {
+				// Its text is parsed apart; it parses, or is an error.
+				if ex, err := parseExample(d.raw); err == nil && !json.Valid(ex.value) {
+					t.Fatalf("%q: the example %q is not JSON", s, ex.value)
+				}
 			}
 			for _, e := range d.kv {
 				if !validKey(e.key) {

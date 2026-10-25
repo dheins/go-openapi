@@ -81,6 +81,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/Pet'
+            examples:
+              rex:
+                summary: A dog, with "tags"
+                value:
+                  name: Rex
+              tom:
+                value:
+                  name: Tom
           application/xml:
             schema:
               $ref: '#/components/schemas/Pet'
@@ -92,12 +100,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+          links:
+            GetPet:
+              operationId: getPet
+              parameters:
+                id: $response.body#/id
+              description: The new pet.
         4XX:
           description: Client error.
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+              example:
+                title: Conflict
       deprecated: true
     additionalOperations:
       PURGE:
@@ -130,6 +146,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+              example:
+                id: 1
+                name: Rex
+                tags:
+                  - good dog
         "404":
           description: Not Found.
       security:

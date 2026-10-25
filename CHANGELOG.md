@@ -10,6 +10,11 @@
   with the same request, response and security directives. A callback
   goes to the operation with that operationId. Path parameters, unknown
   operations and methods declared twice are reported.
+- Links and examples in `codescan`: `//goapi:link <status> <name>
+  operationId=<id> <param>=<expression>…` adds a link to a response,
+  checked against the scanned operationIds, and `//goapi:example
+  <request|status> [<media type>] [name=…] [summary=…] <JSON>` an example
+  of a body, with the JSON as the rest of the line, unquoted.
 - Typed server-sent events, from the 3.2 `itemSchema` of
   `text/event-stream` bodies and responses. An object whose `data` has a
   JSON `contentMediaType` and a `contentSchema` makes events

@@ -32,6 +32,23 @@
 # testdata/badops/badops.go:98:1: error: goapi:callback: no goapi:operation has the operationId "nosuchop"
 # testdata/badops/badops.go:106:1: error: the callback "event" of same has two POST operations at {$request.body#/url}
 # testdata/badops/badops.go:110:1: error: goapi:callback takes the operationId of its operation, a name, a method and a URL expression
+# testdata/badops/badops.go:122:1: error: goapi:example: the value is not JSON: {"unterminated":
+# testdata/badops/badops.go:123:1: error: goapi:example: "300" is neither request nor a status the function declares a goapi:response for
+# testdata/badops/badops.go:124:1: error: goapi:example: "201" is neither request nor a status the function declares a goapi:response for
+# testdata/badops/badops.go:125:1: error: goapi:example: response 204 has no body
+# testdata/badops/badops.go:126:1: error: goapi:example: request has several media types; name one
+# testdata/badops/badops.go:127:1: error: goapi:example: request has no media type text/csv
+# testdata/badops/badops.go:128:1: error: goapi:example: unknown key "color"
+# testdata/badops/badops.go:129:1: error: goapi:example: summary and description are for a named example
+# testdata/badops/badops.go:130:1: error: goapi:example: no JSON value after 200
+# testdata/badops/badops.go:132:1: error: goapi:example: 200 application/json already has an example; name them
+# testdata/badops/badops.go:134:1: error: goapi:example: 200 application/json already has an example "a"
+# testdata/badops/badops.go:139:1: error: goapi:link: the function declares no goapi:response 201
+# testdata/badops/badops.go:140:1: error: goapi:link: give one of operationId and operationRef
+# testdata/badops/badops.go:141:1: error: goapi:link: give one of operationId and operationRef
+# testdata/badops/badops.go:142:1: error: goapi:link: no operation has the operationId "nosuchop"
+# testdata/badops/badops.go:144:1: error: goapi:link: response 200 already has a link "next"
+# testdata/badops/badops.go:145:1: error: goapi:link takes a status and a name, then operationId= and the parameters
 openapi: 3.1.0
 info:
   title: Bad
@@ -82,6 +99,42 @@ paths:
               responses:
                 "204":
                   description: No Content.
+  /examples:
+    post:
+      operationId: examples
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+          text/plain:
+            schema:
+              type: string
+        required: true
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: string
+              example: 2
+              examples:
+                a:
+                  value: 4
+        "204":
+          description: No Content.
+  /links:
+    get:
+      operationId: links
+      responses:
+        "200":
+          description: OK.
+          links:
+            missing:
+              operationId: nosuchop
+            next:
+              operationId: examples
 webhooks:
   hook:
     post:

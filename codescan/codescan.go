@@ -161,6 +161,8 @@ type scanner struct {
 	// names requirements use.
 	schemes    map[string]bool
 	schemeUses []schemeUse
+	// linkTargets are the operationIds links name.
+	linkTargets []schemeUse
 	// uses32 says that the document uses what only 3.2 has.
 	uses32 bool
 	// checks run once every schema is built.

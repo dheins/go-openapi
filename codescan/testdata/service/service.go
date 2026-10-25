@@ -58,6 +58,7 @@ type GetPetRequest struct {
 //
 //goapi:operation GET /pets/{id} tags=pets
 //goapi:response 200 models.Pet
+//goapi:example 200 {"id": 1, "name": "Rex", "tags": ["good dog"]}
 //goapi:response 404
 //goapi:security bearer
 //goapi:security oauth:read
@@ -78,7 +79,11 @@ type CreatePetRequest struct {
 //goapi:operation POST /pets id=addPet
 //goapi:request CreatePetRequest
 //goapi:response 201 models.Pet
+//goapi:link 201 GetPet operationId=getPet id=$response.body#/id description="The new pet."
 //goapi:response 4XX Problem application/problem+json
+//goapi:example request application/json name=rex summary="A dog, with \"tags\"" {"name": "Rex"}
+//goapi:example request application/json name=tom {"name": "Tom"}
+//goapi:example 4XX {"title": "Conflict"}
 func CreatePet(w http.ResponseWriter, r *http.Request) {}
 
 // PhotoRequest holds the inputs of photo operations.
