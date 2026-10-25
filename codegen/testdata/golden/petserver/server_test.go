@@ -20,6 +20,7 @@ import (
 	"net/textproto"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -29,6 +30,9 @@ import (
 
 // store implements Handler with an in-memory list of pets.
 type store struct {
+	// mu is held by the handlers of streamed bodies: when a client stops
+	// sending one, it returns before the handler does.
+	mu     sync.Mutex
 	pets   []model.Pet
 	nextID int64
 	// seen records the last request each method received.
@@ -260,6 +264,56 @@ func (s *store) Watch(context.Context, *api.WatchRequest) (api.WatchResponse, er
 			}
 		}
 	}}, nil
+}
+
+func (s *store) ImportLines(_ context.Context, req *api.ImportLinesRequest) (api.ImportLinesResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seen["ImportLines"] = req
+	var n int64
+	add := func(p model.Pet) {
+		p.ID = s.nextID
+		s.nextID++
+		s.pets = append(s.pets, p)
+		n++
+	}
+	if req.JSONBody.Set {
+		for _, p := range req.JSONBody.Value {
+			add(p)
+		}
+		return api.ImportLines200JSONResponse{Body: n}, nil
+	}
+	for p, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		add(p)
+	}
+	return api.ImportLines200JSONResponse{Body: n}, nil
+}
+
+func (s *store) PostEvents(_ context.Context, req *api.PostEventsRequest) (api.PostEventsResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var events []server.Event
+	for ev, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, ev)
+	}
+	s.seen["PostEvents"] = events
+	return api.PostEvents200JSONResponse{Body: int64(len(events))}, nil
+}
+
+// Echo sends each pet back as it arrives, while the rest is still being
+// sent.
+func (s *store) Echo(_ context.Context, req *api.EchoRequest) (api.EchoResponse, error) {
+	items := req.Body
+	if items == nil {
+		items = func(func(model.Pet, error) bool) {}
+	}
+	return api.Echo200JSONLinesResponse{Items: items}, nil
 }
 
 type result struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -19,13 +20,15 @@ import (
 // parameters and body. The first error is kept and returned by
 // Config.Build.
 type Request struct {
-	method      string
-	path        strings.Builder
-	query       url.Values
-	rawQuery    string
-	header      http.Header
-	cookies     []*http.Cookie
-	body        []byte
+	method   string
+	path     strings.Builder
+	query    url.Values
+	rawQuery string
+	header   http.Header
+	cookies  []*http.Cookie
+	body     []byte
+	// stream, if not nil, writes the body as it is sent.
+	stream      func(io.Writer) error
 	contentType string
 	accept      []string
 	err         error

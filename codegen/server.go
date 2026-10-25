@@ -3,6 +3,7 @@ package codegen
 import (
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -448,6 +449,11 @@ func (f *fileGen) bindStmts(o *ir.Operation, cfg string) string {
 
 	if body := o.Body; body != nil {
 		f.bindBody(w, o, body, cfg)
+		if slices.ContainsFunc(body.Media, func(m *ir.BodyMedia) bool { return isStream(m.Kind) }) &&
+			slices.ContainsFunc(o.Responses, func(r *ir.Response) bool { return isStream(r.Kind) }) {
+			// The handler may answer with a stream while it reads one.
+			w(1, "server.FullDuplex(w)")
+		}
 	}
 
 	w(1, "if b.Failed() {")
@@ -464,72 +470,126 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 	for _, m := range body.Media {
 		mediaTypes = append(mediaTypes, m.MediaType)
 	}
-	w(1, "if body, mediaType, ok := %s.ReadBody(w, r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
+	streamed := slices.ContainsFunc(body.Media, func(m *ir.BodyMedia) bool { return isStream(m.Kind) })
+	plain := slices.DeleteFunc(slices.Clone(body.Media), func(m *ir.BodyMedia) bool { return isStream(m.Kind) })
+	// shift is how much deeper the cases of buffered bodies are.
+	shift := 0
+	if !streamed {
+		w(1, "if body, mediaType, ok := %s.ReadBody(w, r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
+	} else {
+		// A stream is read by the handler, so the body is only read here
+		// for the other media types.
+		w(1, "if mediaType, ok := %s.BodyMediaType(r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
+	}
 	if len(body.Media) > 1 {
 		w(2, "req.ContentType = mediaType")
 	}
-	w(2, "switch mediaType {")
-	for _, m := range body.Media {
+	if streamed {
+		w(2, "switch mediaType {")
+		for _, m := range body.Media {
+			if !isStream(m.Kind) {
+				continue
+			}
+			w(2, "case %q:", m.MediaType)
+			if m.Kind == "jsonl" {
+				w(3, "req.%s = server.JSONLinesBody(%s, r, %s)", m.Field.Name, cfg, f.itemValidation(m.Field.Value.Elem))
+			} else {
+				w(3, "req.%s = server.EventsBody(%s, r)", m.Field.Name, cfg)
+			}
+		}
+		if len(plain) > 0 {
+			w(2, "default:")
+			w(3, "if body, ok := %s.ReadAll(w, r, &b, %t); ok {", cfg, body.Required)
+			shift = 2
+		}
+	}
+	pw := func(depth int, format string, args ...any) { w(depth+shift, format, args...) }
+	if len(plain) > 0 {
+		pw(2, "switch mediaType {")
+	}
+	for _, m := range plain {
 		field := "req." + m.Field.Name
 		// Only form and multipart bodies name the value type; computing it
 		// records its import.
 		elem := func() string { return f.goType(m.Field.Value) }
 		validate := func(depth int) {
 			if stmts := f.validation(field, m.Field.Type, depth); stmts != "" {
-				w(depth, "var errs oapi.ValidationErrors")
-				w(0, "%s", strings.TrimSuffix(stmts, "\n"))
-				w(depth, "b.Body(errs.Err())")
+				pw(depth, "var errs oapi.ValidationErrors")
+				pw(0, "%s", strings.TrimSuffix(stmts, "\n"))
+				pw(depth, "b.Body(errs.Err())")
 			}
 		}
-		w(2, "case %q:", m.MediaType)
+		pw(2, "case %q:", m.MediaType)
 		switch m.Kind {
 		case "json":
-			w(3, "if err := %s.DecodeRequest(body, &%s); err != nil {", f.imp(oapiImport, "oapi"), field)
-			w(4, "b.Body(err)")
-			w(3, "} else {")
+			pw(3, "if err := %s.DecodeRequest(body, &%s); err != nil {", f.imp(oapiImport, "oapi"), field)
+			pw(4, "b.Body(err)")
+			pw(3, "} else {")
 			validate(4)
-			w(3, "}")
+			pw(3, "}")
 		case "parts":
 			_, sub, _ := strings.Cut(m.MediaType, "/")
 			parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", partsLiteral(m.Parts))
-			w(3, "if v, err := server.DecodeParts[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", f.goType(sliceElem(m.Field.Value)), parts)
-			w(4, "b.Body(err)")
-			w(3, "} else {")
+			pw(3, "if v, err := server.DecodeParts[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", f.goType(sliceElem(m.Field.Value)), parts)
+			pw(4, "b.Body(err)")
+			pw(3, "} else {")
 			// v is a []T; the field may hold a named slice type.
-			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, f.goType(m.Field.Value)+"(v)"))
+			pw(4, "%s = %s", field, wrapValue(f, m.Field.Type, f.goType(m.Field.Value)+"(v)"))
 			validate(4)
-			w(3, "}")
+			pw(3, "}")
 		case "xml":
 			shape := f.declareVar(lowerFirst(o.Name)+"XMLShape", xmlNodeLiteral(m.XML))
-			w(3, "if v, err := server.DecodeXML[%s](body, %s); err != nil {", elem(), shape)
-			w(4, "b.Body(err)")
-			w(3, "} else {")
-			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
+			pw(3, "if v, err := server.DecodeXML[%s](body, %s); err != nil {", elem(), shape)
+			pw(4, "b.Body(err)")
+			pw(3, "} else {")
+			pw(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
 			validate(4)
-			w(3, "}")
+			pw(3, "}")
 		case "form", "multipart":
 			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional, m.Shape))
 			if m.Kind == "form" {
-				w(3, "if fields, err := server.FormFields(body); err != nil {")
-				w(4, "b.Body(err)")
-				w(3, "} else if v, err := server.DecodeFields[%s](fields, %s); err != nil {", elem(), props)
+				pw(3, "if fields, err := server.FormFields(body); err != nil {")
+				pw(4, "b.Body(err)")
+				pw(3, "} else if v, err := server.DecodeFields[%s](fields, %s); err != nil {", elem(), props)
 			} else {
-				w(3, "if v, err := server.DecodeMultipart[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", elem(), props)
+				pw(3, "if v, err := server.DecodeMultipart[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", elem(), props)
 			}
-			w(4, "b.Body(err)")
-			w(3, "} else {")
-			w(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
+			pw(4, "b.Body(err)")
+			pw(3, "} else {")
+			pw(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
 			validate(4)
-			w(3, "}")
+			pw(3, "}")
 		case "text":
-			w(3, "%s = %s", field, wrapValue(f, m.Field.Type, "string(body)"))
+			pw(3, "%s = %s", field, wrapValue(f, m.Field.Type, "string(body)"))
 			validate(3)
 		case "binary":
-			w(3, "%s = %s", field, wrapValue(f, m.Field.Type, "body"))
+			pw(3, "%s = %s", field, wrapValue(f, m.Field.Type, "body"))
 		}
 	}
-	w(2, "}")
+	if len(plain) > 0 {
+		pw(2, "}")
+	}
+	if streamed {
+		if len(plain) > 0 {
+			w(3, "}")
+		}
+		w(2, "}")
+	}
 	w(1, "}")
+}
+
+// isStream reports whether a body kind is read or written item by item.
+func isStream(kind string) bool { return kind == "jsonl" || kind == "sse" }
+
+// itemValidation returns a function checking an item of a stream of
+// type r, or a nil one of its type if items have nothing to check.
+func (f *fileGen) itemValidation(r *ir.Ref) string {
+	typ := f.goType(r)
+	stmts := f.validation("item", r, 1)
+	if stmts == "" {
+		return "(func(" + typ + ") error)(nil)"
+	}
+	return "func(item " + typ + ") error {\nvar errs oapi.ValidationErrors\n" + stmts + "return errs.Err()\n}"
 }
 
 // partsLiteral renders how positional parts are read and written as a

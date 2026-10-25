@@ -434,8 +434,8 @@ its own (use `deepObject`, or `explode: false` for the last).
 Supported request bodies: JSON (`application/json`, `*+json`), XML
 (`application/xml`, `text/xml`, `*+xml`),
 `application/x-www-form-urlencoded`, `multipart/form-data`, other
-multipart types (see below), `text/*` (a string) and anything else as
-bytes. In a multipart body, a part is a file,
+multipart types (see below), JSON Lines and server-sent events (streams,
+see below), `text/*` (a string) and anything else as bytes. In a multipart body, a part is a file,
 an `oapi.File` with the part's name, content type, headers and data, when
 its schema is `format: binary` (3.0) or, the 3.1 way, a string with a
 `contentMediaType` or a schema without a type; a part need not have a file
@@ -457,6 +457,47 @@ that arrived is set, so a handler for such an operation must look at
 media type other than the first that is neither JSON, form, multipart nor
 text and has a schema describing structured data, such as XML, is
 answered with 415, since nothing would check its bytes.
+
+### Streamed request bodies
+
+JSON Lines (`application/jsonl`, `application/x-ndjson`) and server-sent
+event (`text/event-stream`) bodies are not read before your method is
+called: the field is an `iter.Seq2` that reads an item each time the loop
+asks for one. Items are those of the media type's `itemSchema` (3.2), or
+of an array `schema`; events are `server.Event`s.
+
+```go
+func (s *store) ImportLines(ctx context.Context, req *api.ImportLinesRequest) (api.ImportLinesResponse, error) {
+	var n int64
+	for pet, err := range req.Body {
+		if err != nil {
+			return nil, err // a *server.BindError: 400 or 413
+		}
+		s.add(pet)
+		n++
+	}
+	return api.ImportLines200JSONResponse{Body: n}, nil
+}
+```
+
+- **Validation:** each item is decoded and validated as it is read. An
+  invalid one ends the loop with a `*server.BindError` whose problem
+  points into it from its index (`body /2/name: ...`); return it to send
+  the 400. The items before it were read, so the handler decides what to
+  keep of them.
+- **Limits:** `WithMaxBodyBytes` limits each line (413 above it), not the
+  stream, so a stream can last as long as the `http.Server` timeouts
+  allow. Set `ReadTimeout` accordingly, or limit it with
+  `http.ResponseController.SetReadDeadline`.
+- **Absent bodies:** a stream is not read ahead, so only a request
+  without a body (`Content-Length: 0`) counts as missing.
+- **Several media types:** next to others, the stream gets its own field
+  (`JSONLinesBody`, `EventsBody`), and the body is read before your method
+  only for the other media types.
+- **Both ways:** an operation that streams its request and its response
+  is made full duplex, so a handler can return a stream of what it is
+  still reading, even over HTTP/1.1.
+- The items can be ranged over once; nil means no body was sent.
 
 ### XML
 
@@ -707,6 +748,14 @@ ends. A response whose stream is not ranged over keeps its connection, so
 range over it (and break to stop early). Every other response body is read
 and closed by the method.
 
+A streamed request body is the same `iter.Seq2` as on the server, written
+as the transport reads it, so items can be produced while the request is
+being sent. Each item is checked as it is written (unless request
+validation is off): an invalid one ends the request with a
+`*client.InvalidRequest` pointing into it from its index, and an error
+the iterator yields ends it with that error. A stream cannot be sent
+twice, so retry middleware must not retry these requests.
+
 Each operation's client functions are also exported from its operations
 package, `api.NewGetPetRequest(ctx, cfg, req)` and
 `api.ReadGetPetResponse(cfg, resp)`, for sending requests your own way
@@ -759,6 +808,7 @@ if (resp.status === 200) {
 - **Requests:**
   - Request properties are named after the parameters, in camel case (`petId`, `xRequestID`), plus `body` (or one property per body type) and `contentType`.
   - The runtime writes every parameter style the Go client does, and JSON, form, multipart (`FormData`, with `Blob`s or `File`s as files) and text or binary bodies.
+  - JSON Lines and server-sent event bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
 - **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines are `items` and server-sent events `events`, both `AsyncIterable`s that stop the stream when you `break`.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
@@ -1022,7 +1072,7 @@ srv := &http.Server{
 	Addr:              ":8080",
 	Handler:           gen.NewServer(h, sec, server.WithLogger(logger)),
 	ReadHeaderTimeout: 5 * time.Second,
-	ReadTimeout:       30 * time.Second,
+	ReadTimeout:       30 * time.Second, // longer, or 0, for streamed request bodies
 	WriteTimeout:      30 * time.Second, // longer, or 0, for streaming responses
 	IdleTimeout:       2 * time.Minute,
 }

@@ -282,18 +282,22 @@ components:
 	for _, bm := range o.Body.Media {
 		media = append(media, bm.MediaType+"="+bm.Kind)
 	}
-	// A form cannot carry the binary photo and request streams are not
-	// supported: both are answered with 415. text/plain is a different
-	// kind than the first (structured) media type and gets its own field.
-	if strings.Join(media, " ") != "application/json=json multipart/form-data=multipart text/plain=text" {
+	// A form cannot carry the binary photo: it is answered with 415.
+	// text/plain is a different kind than the first (structured) media
+	// type and gets its own field, as does the stream of Pets.
+	if strings.Join(media, " ") != "application/json=json multipart/form-data=multipart text/plain=text application/jsonl=jsonl" {
 		t.Fatalf("body media = %v", media)
 	}
 	var fields []string
 	for _, f := range o.Body.Fields {
 		fields = append(fields, fmt.Sprintf("%s:%d", f.Name, len(f.Media)))
 	}
-	if strings.Join(fields, " ") != "Body:2 TextBody:1" || o.Body.Fields[1].Type.Kind != Optional {
+	if strings.Join(fields, " ") != "Body:2 TextBody:1 JSONLinesBody:1" || o.Body.Fields[1].Type.Kind != Optional {
 		t.Errorf("body fields = %v", fields)
+	}
+	// A stream is not wrapped: nil is no body.
+	if lines := o.Body.Fields[2].Type; lines.Kind != Stream || lines.Elem.Kind != Named || lines.Elem.Type.Name != "Pet" {
+		t.Errorf("stream field = %+v", lines)
 	}
 	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] <nil> [] []  } {photo file false [] <nil> [] []  } {tags string true [] <nil> [] []  }]" {
 		t.Errorf("multipart properties = %s", props)
@@ -302,11 +306,8 @@ components:
 	for _, w := range m.Warnings {
 		warnings = append(warnings, w.Message)
 	}
-	all := strings.Join(warnings, "\n")
-	for _, want := range []string{"form bodies must be objects", "application/jsonl are not supported yet"} {
-		if !strings.Contains(all, want) {
-			t.Errorf("no warning mentioning %q in:\n%s", want, all)
-		}
+	if all := strings.Join(warnings, "\n"); !strings.Contains(all, "form bodies must be objects") || strings.Contains(all, "jsonl") {
+		t.Errorf("warnings:\n%s", all)
 	}
 	var variants []string
 	for _, r := range o.Responses {

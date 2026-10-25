@@ -16,7 +16,10 @@ import (
 
 // oapiImport is the package generated code uses for Optional, Nullable,
 // Date and validation helpers.
-const oapiImport = "github.com/dheins/go-openapi/oapi"
+const (
+	oapiImport   = "github.com/dheins/go-openapi/oapi"
+	serverImport = "github.com/dheins/go-openapi/runtime/server"
+)
 
 type builder struct {
 	spec  *loader.Spec
@@ -805,6 +808,10 @@ func (b *builder) objectParts(top, s *oas.Schema, seen map[*oas.Schema]bool, uni
 
 // optional wraps the type of an optional property.
 func (b *builder) optional(r *Ref) *Ref {
+	if r.Kind == Stream {
+		// nil already means absent.
+		return r
+	}
 	if !b.opts.OptionalPointers {
 		return &Ref{Kind: Optional, Elem: r}
 	}

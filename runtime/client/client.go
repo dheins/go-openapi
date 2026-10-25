@@ -206,7 +206,10 @@ func (c *Config) BuildTo(ctx context.Context, target string, r *Request) (*http.
 // httpRequest makes the HTTP request of r to u: its body and headers.
 func (r *Request) httpRequest(ctx context.Context, u *url.URL) (*http.Request, error) {
 	var body io.Reader
-	if r.body != nil {
+	switch {
+	case r.stream != nil:
+		body = &streamBody{write: r.stream}
+	case r.body != nil:
 		body = bytes.NewReader(r.body)
 	}
 	req, err := http.NewRequestWithContext(ctx, r.method, u.String(), body)

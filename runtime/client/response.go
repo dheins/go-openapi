@@ -3,7 +3,6 @@ package client
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -200,42 +199,10 @@ func Events(resp *http.Response) iter.Seq2[server.Event, error] {
 		defer resp.Body.Close()
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
-		var ev server.Event
-		var data []string
-		pending := false
-		for sc.Scan() {
-			line := sc.Text()
-			if line == "" {
-				if pending {
-					ev.Data = strings.Join(data, "\n")
-					if !yield(ev, nil) {
-						return
-					}
-				}
-				ev, data, pending = server.Event{}, nil, false
-				continue
+		for ev, err := range server.ScanEvents(sc) {
+			if !yield(ev, err) {
+				return
 			}
-			if strings.HasPrefix(line, ":") {
-				continue
-			}
-			name, value, _ := strings.Cut(line, ":")
-			value = strings.TrimPrefix(value, " ")
-			pending = true
-			switch name {
-			case "id":
-				ev.ID = value
-			case "event":
-				ev.Event = value
-			case "data":
-				data = append(data, value)
-			case "retry":
-				if n, err := strconv.Atoi(value); err == nil {
-					ev.Retry = n
-				}
-			}
-		}
-		if err := sc.Err(); err != nil && !errors.Is(err, io.EOF) {
-			yield(server.Event{}, err)
 		}
 	}
 }

@@ -4,6 +4,25 @@
 
 ### Added
 
+- Streamed request bodies: JSON Lines (`application/jsonl`,
+  `application/x-ndjson`, items from `itemSchema` or an array's `items`)
+  and server-sent events (`text/event-stream`), answered with 415 before.
+  The request field is an `iter.Seq2` the handler ranges over
+  (`server.JSONLinesBody`, `server.EventsBody`): each item is decoded and
+  validated as it is read, and a problem ends the loop with a
+  `*server.BindError` to return (400 with pointers from the item's index,
+  413 for a line longer than `MaxBodyBytes`, which limits lines, not the
+  stream). A body that may be a stream is matched by
+  `Config.BodyMediaType` and read only for its other media types
+  (`Config.ReadAll`). An operation streaming both ways is full duplex
+  (`server.FullDuplex`). Generated Go clients send the iterator as it
+  produces items (`client.JSONLinesBody`, `Request.EventsBody`), checking
+  each one when requests are validated. TypeScript clients take an
+  `Iterable`, such as an array, sent at once, or an `AsyncIterable`,
+  streamed as it yields (`duplex: "half"`); items are checked as they are
+  written, and an invalid one or an error of the iterator rejects the
+  call with it. `FuzzStreamBodies` reads streams and checks that what is
+  read writes back the same.
 - Unions in `codescan`: `//goapi:oneOf` or `//goapi:anyOf` on an interface
   makes it a union of the scanned packages' named types that implement it,
   by value or pointer. `discriminator=<property>` adds a discriminator
@@ -223,6 +242,11 @@
 
 ### Changed
 
+- Server-sent events are read with the line ends of the format (CRLF, LF
+  or CR, not only LF), `retry` takes digits only, and line ends in an
+  event's ID or name are written as spaces, so that they cannot start
+  other fields (`server.ScanEvents`, `server.AppendEvent`, used by
+  `client.Events` and `server.WriteEvents`).
 - `loader.ErrSwagger2` is removed, since 2.0 documents load, and
   `Source.Version` returns "2.0" for them.
 - Requires Go 1.27.3, whose `crypto/x509` distrusts compromised

@@ -339,6 +339,61 @@ const watchSpec: OperationSpec = {
   responses: [{ status: "200", mediaType: "text/event-stream", kind: "sse" }],
 };
 
+/** The inputs of postEvents. */
+export interface PostEventsRequest {
+  body: Iterable<ServerEvent> | AsyncIterable<ServerEvent>;
+}
+
+/** The responses of postEvents. */
+export type PostEventsResponse =
+  | { status: 200; body: number };
+
+const postEventsSpec: OperationSpec = {
+  method: "POST",
+  path: "/events",
+  params: [],
+  body: { required: true, media: [{ mediaType: "text/event-stream", kind: "sse", key: "body", schema: { kind: "any" } }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "integer" } }],
+};
+
+/** The inputs of importLines. */
+export interface ImportLinesRequest {
+  body?: Iterable<$m.Pet> | AsyncIterable<$m.Pet>;
+  jsonBody?: $m.Pet[];
+  /** The media type to send the body as; by default the first of the
+   * property that is set. */
+  contentType?: "application/jsonl" | "application/json";
+}
+
+/** The responses of importLines. */
+export type ImportLinesResponse =
+  | { status: 200; body: number };
+
+const importLinesSpec: OperationSpec = {
+  method: "POST",
+  path: "/pets/lines",
+  params: [],
+  body: { required: true, media: [{ mediaType: "application/jsonl", kind: "jsonl", key: "body", schema: $ref(() => $m.PetSchema) }, { mediaType: "application/json", kind: "json", key: "jsonBody", schema: { kind: "array", items: $ref(() => $m.PetSchema) } }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "integer" } }],
+};
+
+/** The inputs of echo. */
+export interface EchoRequest {
+  body?: Iterable<$m.Pet> | AsyncIterable<$m.Pet>;
+}
+
+/** The responses of echo. */
+export type EchoResponse =
+  | { status: 200; items: AsyncIterable<$m.Pet> };
+
+const echoSpec: OperationSpec = {
+  method: "POST",
+  path: "/echo",
+  params: [],
+  body: { required: false, media: [{ mediaType: "application/x-ndjson", kind: "jsonl", key: "body", schema: $ref(() => $m.PetSchema) }] },
+  responses: [{ status: "200", mediaType: "application/jsonl", kind: "jsonl", item: $ref(() => $m.PetSchema) }],
+};
+
 /** The inputs of upload. */
 export interface UploadRequest {
   body?: { [key: string]: unknown };
@@ -602,6 +657,33 @@ export class Client {
   /** GET /events. */
   watch(req: WatchRequest = {}, call?: CallOptions): Promise<WatchResponse> {
     return send(this.#cfg, watchSpec, req, call) as Promise<WatchResponse>;
+  }
+
+  /**
+   * POST /events.
+   *
+   * Events read as they arrive.
+   */
+  postEvents(req: PostEventsRequest, call?: CallOptions): Promise<PostEventsResponse> {
+    return send(this.#cfg, postEventsSpec, req, call) as Promise<PostEventsResponse>;
+  }
+
+  /**
+   * POST /pets/lines.
+   *
+   * Pets added one by one as they arrive, or all at once.
+   */
+  importLines(req: ImportLinesRequest = {}, call?: CallOptions): Promise<ImportLinesResponse> {
+    return send(this.#cfg, importLinesSpec, req, call) as Promise<ImportLinesResponse>;
+  }
+
+  /**
+   * POST /echo.
+   *
+   * Each pet sent back as it arrives.
+   */
+  echo(req: EchoRequest = {}, call?: CallOptions): Promise<EchoResponse> {
+    return send(this.#cfg, echoSpec, req, call) as Promise<EchoResponse>;
   }
 
   /** POST /upload. */

@@ -290,6 +290,8 @@ const (
 	Nullable
 	// Pointer is *Elem.
 	Pointer
+	// Stream is iter.Seq2[Elem, error]: a request body read item by item.
+	Stream
 	// Any is any.
 	Any
 )

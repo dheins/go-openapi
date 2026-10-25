@@ -371,6 +371,8 @@ func (f *fileGen) goType(r *ir.Ref) string {
 		return f.imp(oapiImport, "oapi") + ".Nullable[" + f.goType(r.Elem) + "]"
 	case ir.Pointer:
 		return "*" + f.goType(r.Elem)
+	case ir.Stream:
+		return f.imp("iter", "iter") + ".Seq2[" + f.goType(r.Elem) + ", error]"
 	}
 	return "any"
 }

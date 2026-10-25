@@ -13,7 +13,7 @@ import (
 // tsBodyKinds are the request body kinds the TypeScript runtime sends,
 // and tsResponseKinds the response kinds it reads.
 var (
-	tsBodyKinds     = []string{"json", "form", "multipart", "text", "binary"}
+	tsBodyKinds     = []string{"json", "form", "multipart", "text", "binary", "jsonl", "sse"}
 	tsResponseKinds = []string{"", "json", "text", "binary", "jsonl", "sse"}
 )
 
@@ -180,6 +180,11 @@ func (g *tsGen) bodyType(m *ir.BodyMedia) string {
 		return "string"
 	case "binary":
 		return "Blob | ArrayBuffer | Uint8Array<ArrayBuffer> | string"
+	case "jsonl":
+		item := g.tsType(m.Field.Value.Elem)
+		return "Iterable<" + item + "> | AsyncIterable<" + item + ">"
+	case "sse":
+		return "Iterable<ServerEvent> | AsyncIterable<ServerEvent>"
 	}
 	return g.tsType(m.Field.Value)
 }
@@ -286,7 +291,12 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 	if len(media) > 0 {
 		var ms []string
 		for _, m := range media {
-			ms = append(ms, fmt.Sprintf("{ mediaType: %s, kind: %q, key: %s, schema: %s }", jsString(m.MediaType), m.Kind, jsString(tsCamel(m.Field.Name)), g.schema(m.Field.Value)))
+			schema := m.Field.Value
+			if schema.Kind == ir.Stream {
+				// The runtime checks and encodes each item.
+				schema = schema.Elem
+			}
+			ms = append(ms, fmt.Sprintf("{ mediaType: %s, kind: %q, key: %s, schema: %s }", jsString(m.MediaType), m.Kind, jsString(tsCamel(m.Field.Name)), g.schema(schema)))
 		}
 		spec += fmt.Sprintf("  body: { required: %t, media: [%s] },\n", o.Body.Required, strings.Join(ms, ", "))
 	}

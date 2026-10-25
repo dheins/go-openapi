@@ -195,3 +195,32 @@ test("security", { skip }, async () => {
   assert.equal((await rejects(client({ credentials: { apiKey: "good" } }).secure(), UnexpectedResponseError)).status, 500);
   assert.equal((await rejects(client({ credentials: { apiKey: "bad" } }).secure(), UnexpectedResponseError)).status, 401);
 });
+
+test("streamed request bodies", { skip }, async () => {
+  const c = client();
+  // An array is sent at once, an async iterable as it yields.
+  assert.deepEqual(await c.importLines({ body: [{ name: "Ann" }, { name: "Bo" }] }), { status: 200, body: 2 });
+  async function* slowly() {
+    yield { name: "Cy" };
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    yield { name: "Di" };
+  }
+  assert.deepEqual(await c.importLines({ body: slowly() }), { status: 200, body: 2 });
+
+  // Items are checked as they are written, with pointers from their index.
+  const before = await rejects(c.importLines({ body: [{ name: "Ed" }, { name: "" }] }), InvalidRequestError);
+  assert.deepEqual(before.issues.map((i) => i.pointer), ["/1/name"]);
+  async function* invalid() {
+    yield { name: "Fi" };
+    yield { name: "" };
+  }
+  const streamed = await rejects(c.importLines({ body: invalid() }), InvalidRequestError);
+  assert.deepEqual(streamed.issues.map((i) => i.pointer), ["/1/name"]);
+  async function* failing() {
+    yield { name: "Gus" };
+    throw new Error("stop");
+  }
+  await assert.rejects(c.importLines({ body: failing() }), /stop/);
+
+  assert.deepEqual(await c.postEvents({ body: [{ event: "a", data: "1\n2" }, { id: "7", data: "x" }] }), { status: 200, body: 2 });
+});

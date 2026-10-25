@@ -419,9 +419,10 @@ export interface ParamSpec {
 
 export interface BodyMediaSpec {
   readonly mediaType: string;
-  readonly kind: "json" | "form" | "multipart" | "text" | "binary";
+  readonly kind: "json" | "form" | "multipart" | "text" | "binary" | "jsonl" | "sse";
   /** The request property holding a body of this media type. */
   readonly key: string;
+  /** The schema of the body, or of each item of a stream. */
   readonly schema: Schema;
 }
 
@@ -684,6 +685,10 @@ interface Built {
   headers: Headers;
   cookies: string[];
   body?: BodyInit;
+  /** The body is a stream, which fetch sends as it is read. */
+  streamed?: boolean;
+  /** Why the stream failed: fetch reports it as an error of its own. */
+  failure?: unknown;
 }
 
 function buildParams(op: OperationSpec, req: Values, b: Built): void {
@@ -739,7 +744,9 @@ function fileName(v: Blob): string | undefined {
   return typeof File !== "undefined" && v instanceof File ? v.name : undefined;
 }
 
-function buildBody(op: OperationSpec, req: Values, b: Built): void {
+// buildBody sets the body of b; checkItems says to validate the items of a
+// stream, which checkRequest leaves to it.
+function buildBody(op: OperationSpec, req: Values, b: Built, checkItems: boolean): void {
   const body = op.body;
   if (body === undefined) {
     return;
@@ -800,7 +807,87 @@ function buildBody(op: OperationSpec, req: Values, b: Built): void {
       b.headers.set("Content-Type", v instanceof Blob && v.type !== "" && media.mediaType.includes("*") ? v.type : media.mediaType);
       b.body = v as BodyInit;
       break;
+    case "jsonl":
+    case "sse": {
+      b.headers.set("Content-Type", media.mediaType);
+      const line = media.kind === "sse" ? (ev: unknown) => eventText(ev as ServerEvent) : jsonLine(media.schema, checkItems);
+      if (typeof v === "object" && v !== null && Symbol.asyncIterator in v) {
+        b.body = itemStream(v as AsyncIterable<unknown>, line, b);
+        b.streamed = true;
+      } else {
+        // An Iterable, such as an array, is sent at once, which every
+        // fetch can do.
+        let out = "";
+        let i = 0;
+        for (const item of v as Iterable<unknown>) {
+          out += line(item, i++);
+        }
+        b.body = out;
+      }
+      break;
+    }
   }
+}
+
+// jsonLine returns a function writing an item of a JSON Lines body,
+// validating it first if checkItems is set.
+function jsonLine(schema: Schema, checkItems: boolean): (item: unknown, i: number) => string {
+  return (item, i) => {
+    if (checkItems) {
+      const issues = validate(schema, item, "request", `/${i}`).map((x) => ({ ...x, in: "body" }));
+      if (issues.length > 0) {
+        throw new InvalidRequestError(issues);
+      }
+    }
+    return JSON.stringify(encode(schema, item, "request")) + "\n";
+  };
+}
+
+// eventText writes an event in the text/event-stream format. Line ends in
+// its id and name, which would start other fields, are sent as spaces.
+function eventText(ev: ServerEvent): string {
+  const oneLine = (s: string) => s.replace(/\r\n|\r|\n/g, " ");
+  let out = "";
+  if (ev.id !== undefined && ev.id !== "") {
+    out += `id: ${oneLine(ev.id)}\n`;
+  }
+  if (ev.event !== undefined && ev.event !== "") {
+    out += `event: ${oneLine(ev.event)}\n`;
+  }
+  if (ev.retry !== undefined && ev.retry > 0) {
+    out += `retry: ${Math.floor(ev.retry)}\n`;
+  }
+  for (const l of ev.data.split(/\r\n|\r|\n/)) {
+    out += `data: ${l}\n`;
+  }
+  return out + "\n";
+}
+
+// itemStream is a body that writes the items as fetch reads it. An item
+// that cannot be written, or an error of the iterator, fails the request
+// with that error, recorded in b.
+function itemStream(items: AsyncIterable<unknown>, line: (item: unknown, i: number) => string, b: Built): ReadableStream<Uint8Array> {
+  const it = items[Symbol.asyncIterator]();
+  const encoder = new TextEncoder();
+  let i = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await it.next();
+        if (next.done === true) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(encoder.encode(line(next.value, i++)));
+      } catch (e) {
+        b.failure = e;
+        controller.error(e);
+      }
+    },
+    async cancel() {
+      await it.return?.();
+    },
+  });
 }
 
 // check validates the parameters and body of a request, as the server
@@ -824,7 +911,8 @@ function checkRequest(op: OperationSpec, req: Values): void {
     if (given.length === 0 && op.body.required) {
       issues.push({ in: "body", pointer: "", message: "the request body is missing" });
     }
-    for (const m of given.filter((m, i, all) => all.findIndex((n) => n.key === m.key) === i)) {
+    // The items of a stream are checked as they are written.
+    for (const m of given.filter((m, i, all) => all.findIndex((n) => n.key === m.key) === i && m.kind !== "jsonl" && m.kind !== "sse")) {
       for (const i of validate(m.schema, req[m.key], "request")) {
         issues.push({ ...i, in: "body" });
       }
@@ -909,7 +997,7 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
   }
   const b: Built = { path: "", query: new URLSearchParams(), headers: new Headers(), cookies: [] };
   buildParams(op, values, b);
-  buildBody(op, values, b);
+  buildBody(op, values, b, cfg.validateRequests);
   await authorize(op, cfg.credentials, b);
   const accept = [...new Set(op.responses.flatMap((r) => (r.mediaType ? [r.mediaType] : [])))];
   if (accept.length > 0) {
@@ -934,10 +1022,20 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
   if (b.body !== undefined) {
     init.body = b.body;
   }
+  if (b.streamed === true) {
+    // Required to send a stream; not yet in every RequestInit type.
+    Object.assign(init, { duplex: "half" });
+  }
   if (call.signal !== undefined) {
     init.signal = call.signal;
   }
-  return readResponse(cfg, op, await cfg.fetch(url, init));
+  let resp: Response;
+  try {
+    resp = await cfg.fetch(url, init);
+  } catch (e) {
+    throw b.failure ?? e;
+  }
+  return readResponse(cfg, op, resp);
 }
 
 // mediaType returns the media type of a response, lower case, without

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -128,6 +130,58 @@ func FuzzXMLToJSON(f *testing.F) {
 		back, err := XMLToJSON(doc, petXML)
 		if err != nil || string(back) != string(out) {
 			t.Fatalf("%q\n-> %s\n-> %s\n-> %s (%v)", data, out, doc, back, err)
+		}
+	})
+}
+
+// FuzzStreamBodies checks that reading streamed request bodies never
+// panics, and that what is read is written back as a stream that reads
+// the same: JSON Lines items, and server-sent events.
+func FuzzStreamBodies(f *testing.F) {
+	f.Add([]byte("{\"a\":1}\n\n[1,2]\n\"x\"\n"))
+	f.Add([]byte("event: a\r\ndata: 1\rdata: 2\n\n: c\nretry: 30\nid: 7\ndata\n\n"))
+	c := NewConfig(WithMaxBodyBytes(1 << 10))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		read := func(body []byte) ([]any, error) {
+			var items []any
+			for item, err := range JSONLinesBody[any](c, httptest.NewRequest("POST", "/", bytes.NewReader(body)), nil) {
+				if err != nil {
+					return items, err
+				}
+				items = append(items, item)
+			}
+			return items, nil
+		}
+		items, _ := read(data)
+		var lines []byte
+		for _, item := range items {
+			line, err := oapi.EncodeRequest(item)
+			if err != nil {
+				t.Fatalf("encoding %v: %v", item, err)
+			}
+			lines = append(append(lines, line...), '\n')
+		}
+		if back, err := read(lines); err != nil || !reflect.DeepEqual(back, items) {
+			t.Fatalf("%q\n-> %q\n-> %v (%v)", data, lines, back, err)
+		}
+
+		readEvents := func(body []byte) []Event {
+			var events []Event
+			for ev, err := range EventsBody(c, httptest.NewRequest("POST", "/", bytes.NewReader(body))) {
+				if err != nil {
+					break
+				}
+				events = append(events, ev)
+			}
+			return events
+		}
+		events := readEvents(data)
+		var stream []byte
+		for _, ev := range events {
+			stream = AppendEvent(stream, ev)
+		}
+		if back := readEvents(stream); !slices.Equal(back, events) {
+			t.Fatalf("%q\n-> %q\n-> %+v, want %+v", data, stream, back, events)
 		}
 	})
 }
