@@ -107,3 +107,55 @@ func (s *Server) GetPhoto(w http.ResponseWriter, r *http.Request) {}
 //goapi:response 204
 //goapi:security apiKey bearer
 func (s *Server) Purge(ctx context.Context) error { return nil }
+
+// AdoptedEvent is sent when a pet is adopted.
+type AdoptedEvent struct {
+	Pet models.Pet `json:"pet"`
+	By  string     `json:"by" goapi:"minLength=1"`
+}
+
+// AdoptedRequest is the request of the adopted webhook.
+type AdoptedRequest struct {
+	Event   AdoptedEvent `goapi:"in=body"`
+	Attempt int32        `goapi:"in=header;name=X-Attempt"`
+}
+
+// PetAdopted tells a consumer that a pet was adopted.
+//
+//goapi:webhook petAdopted POST tags=pets
+//goapi:response 204
+//goapi:response 410 description="The consumer is gone."
+//goapi:security bearer
+func (s *Server) PetAdopted(ctx context.Context, req *AdoptedRequest) error { return nil }
+
+// SubscribeRequest asks for pet events at a URL.
+type SubscribeRequest struct {
+	Body struct {
+		URL string `json:"url" goapi:"format=uri"`
+	} `goapi:"in=body"`
+}
+
+// Subscribe registers a URL for pet events.
+//
+//goapi:operation POST /subscriptions
+//goapi:response 201
+func (s *Server) Subscribe(ctx context.Context, req *SubscribeRequest) error { return nil }
+
+// PetEvent is a pet event sent to a subscriber.
+type PetEvent struct {
+	Pet models.Pet `goapi:"in=body"`
+}
+
+// NotifyPet sends a subscriber a pet event, at the URL it gave.
+//
+//goapi:callback subscribe petEvent POST {$request.body#/url}/pets
+//goapi:response 204
+//goapi:security apiKey
+//goapi:security -
+func (s *Server) NotifyPet(ctx context.Context, req *PetEvent) error { return nil }
+
+// PingSubscriber checks that a subscriber is there.
+//
+//goapi:callback subscribe petEvent GET {$request.body#/url}/pets id=pingSubscriber
+//goapi:response 200
+func (s *Server) PingSubscriber(ctx context.Context) error { return nil }

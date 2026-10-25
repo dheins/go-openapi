@@ -65,3 +65,48 @@ func second() {}
 //goapi:operation GET /dup
 //goapi:response 200
 func third() {}
+
+// HookReq has a path field, which webhooks and callbacks do not have.
+type HookReq struct {
+	ID int64 `goapi:"in=path;name=id"`
+}
+
+//goapi:webhook hook POST
+//goapi:response 204
+func hookWithPath(req HookReq) {}
+
+//goapi:webhook hook
+//goapi:response 204
+func hookWithoutMethod() {}
+
+//goapi:webhook again POST
+//goapi:response 204
+func hookOnce() {}
+
+//goapi:webhook again POST
+//goapi:response 204
+func hookTwice() {}
+
+//goapi:webhook quiet POST
+func hookWithoutResponse() {}
+
+//goapi:operation GET /both
+//goapi:webhook both GET
+//goapi:response 200
+func both() {}
+
+//goapi:callback nosuchop event POST {$request.body#/url}
+//goapi:response 204
+func orphanCallback() {}
+
+//goapi:callback same event POST {$request.body#/url}
+//goapi:response 204
+func callbackOnce() {}
+
+//goapi:callback same event POST {$request.body#/url} id=callbackAgain
+//goapi:response 204
+func callbackTwice() {}
+
+//goapi:callback same event POST
+//goapi:response 204
+func callbackWithoutURL() {}

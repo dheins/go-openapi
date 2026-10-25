@@ -10,7 +10,7 @@
 # testdata/badops/badops.go:19:2: error: field M: mediaType is for in=body
 # testdata/badops/badops.go:20:2: error: field E: explode is true or false, not "maybe"
 # testdata/badops/badops.go:25:2: error: field Q: a response field is in=header or in=body, not "query"
-# testdata/badops/badops.go:28:1: error: goapi:response without goapi:operation
+# testdata/badops/badops.go:28:1: error: goapi:response without goapi:operation, goapi:webhook or goapi:callback
 # testdata/badops/badops.go:32:1: error: goapi:operation is given twice
 # testdata/badops/badops.go:36:1: error: goapi:operation: "FETCH!" is not an HTTP method
 # testdata/badops/badops.go:40:1: error: goapi:operation: the path "nopath" does not start with /
@@ -24,6 +24,14 @@
 # testdata/badops/badops.go:54:1: error: goapi:operation GET /quiet declares no goapi:response
 # testdata/badops/badops.go:61:1: error: operationId "same" is already used at testdata/badops/badops.go:57:1
 # testdata/badops/badops.go:65:1: error: GET /dup is declared twice
+# testdata/badops/badops.go:71:2: error: field ID: a webhook has no path parameters
+# testdata/badops/badops.go:78:1: error: goapi:webhook takes a name and a method
+# testdata/badops/badops.go:86:1: error: the webhook "again" has two POST operations
+# testdata/badops/badops.go:90:1: error: goapi:webhook quiet declares no goapi:response
+# testdata/badops/badops.go:94:1: error: goapi:operation and goapi:webhook on one function
+# testdata/badops/badops.go:98:1: error: goapi:callback: no goapi:operation has the operationId "nosuchop"
+# testdata/badops/badops.go:106:1: error: the callback "event" of same has two POST operations at {$request.body#/url}
+# testdata/badops/badops.go:110:1: error: goapi:callback takes the operationId of its operation, a name, a method and a URL expression
 openapi: 3.1.0
 info:
   title: Bad
@@ -66,3 +74,24 @@ paths:
       responses:
         "200":
           description: OK.
+      callbacks:
+        event:
+          '{$request.body#/url}':
+            post:
+              operationId: callbackOnce
+              responses:
+                "204":
+                  description: No Content.
+webhooks:
+  hook:
+    post:
+      operationId: hookWithPath
+      responses:
+        "204":
+          description: No Content.
+  again:
+    post:
+      operationId: hookOnce
+      responses:
+        "204":
+          description: No Content.

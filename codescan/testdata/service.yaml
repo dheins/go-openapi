@@ -181,6 +181,75 @@ paths:
       responses:
         "204":
           description: No Content.
+  /subscriptions:
+    post:
+      description: Subscribe registers a URL for pet events.
+      operationId: subscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                url:
+                  type: string
+                  format: uri
+              type: object
+              required:
+                - url
+        required: true
+      responses:
+        "201":
+          description: Created.
+      callbacks:
+        petEvent:
+          '{$request.body#/url}/pets':
+            get:
+              description: PingSubscriber checks that a subscriber is there.
+              operationId: pingSubscriber
+              responses:
+                "200":
+                  description: OK.
+            post:
+              description: NotifyPet sends a subscriber a pet event, at the URL it gave.
+              operationId: notifyPet
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/Pet'
+                required: true
+              responses:
+                "204":
+                  description: No Content.
+              security:
+                - apiKey: []
+                - {}
+webhooks:
+  petAdopted:
+    post:
+      tags:
+        - pets
+      description: PetAdopted tells a consumer that a pet was adopted.
+      operationId: petAdopted
+      parameters:
+        - name: X-Attempt
+          in: header
+          schema:
+            type: integer
+            format: int32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdoptedEvent'
+        required: true
+      responses:
+        "204":
+          description: No Content.
+        "410":
+          description: The consumer is gone.
+      security:
+        - bearer: []
 components:
   schemas:
     Pet:
@@ -319,6 +388,18 @@ components:
         - title
         - status
       description: Problem is an error.
+    AdoptedEvent:
+      properties:
+        pet:
+          $ref: '#/components/schemas/Pet'
+        by:
+          type: string
+          minLength: 1
+      type: object
+      required:
+        - pet
+        - by
+      description: AdoptedEvent is sent when a pet is adopted.
   securitySchemes:
     apiKey:
       type: apiKey

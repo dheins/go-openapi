@@ -4,6 +4,12 @@
 
 ### Added
 
+- Webhooks and callbacks in `codescan`: `//goapi:webhook <name> METHOD`
+  and `//goapi:callback <operationId> <name> METHOD <url-expression>` on
+  a function declare them as `//goapi:operation` declares an operation,
+  with the same request, response and security directives. A callback
+  goes to the operation with that operationId. Path parameters, unknown
+  operations and methods declared twice are reported.
 - Typed server-sent events, from the 3.2 `itemSchema` of
   `text/event-stream` bodies and responses. An object whose `data` has a
   JSON `contentMediaType` and a `contentSchema` makes events

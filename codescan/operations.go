@@ -250,35 +250,97 @@ type schemeUse struct {
 // doc, in package and source order.
 func (s *scanner) operations(doc *oas.Document) {
 	ids := map[string]token.Pos{}
+	parents := map[string]*oas.Operation{}
+	var callbacks []*declared
 	for _, fd := range s.funcs {
-		op, method, path, ok := s.operation(fd)
+		d, ok := s.operation(fd)
 		if !ok {
 			continue
 		}
-		if prev, dup := ids[op.OperationID]; dup {
-			s.report(fd.ds[0].pos, Error, "operationId %q is already used at %s", op.OperationID, s.where(prev))
+		if prev, dup := ids[d.op.OperationID]; dup {
+			s.report(d.pos, Error, "operationId %q is already used at %s", d.op.OperationID, s.where(prev))
 			continue
 		}
-		ids[op.OperationID] = fd.ds[0].pos
-		if doc.Paths == nil {
-			doc.Paths = &oas.Paths{}
+		ids[d.op.OperationID] = d.pos
+		var item *oas.PathItem
+		switch d.kind {
+		case "operation":
+			parents[d.op.OperationID] = d.op
+			if doc.Paths == nil {
+				doc.Paths = &oas.Paths{}
+			}
+			item = pathItem(&doc.Paths.Items, d.path)
+		case "webhook":
+			if doc.Webhooks == nil {
+				doc.Webhooks = &oas.OrderedMap[*oas.PathItem]{}
+			}
+			item = pathItem(doc.Webhooks, d.name)
+		case "callback":
+			// Once every operation is known.
+			callbacks = append(callbacks, d)
+			continue
 		}
-		item, ok := doc.Paths.Items.Get(path)
+		s.place(item, d)
+	}
+	for _, d := range callbacks {
+		parent := parents[d.parent]
+		if parent == nil {
+			s.report(d.pos, Error, "goapi:callback: no goapi:operation has the operationId %q", d.parent)
+			continue
+		}
+		if parent.Callbacks == nil {
+			parent.Callbacks = &oas.OrderedMap[*oas.Callback]{}
+		}
+		cb, ok := parent.Callbacks.Get(d.name)
 		if !ok {
-			item = &oas.PathItem{}
-			doc.Paths.Items.Set(path, item)
+			cb = &oas.Callback{}
+			parent.Callbacks.Set(d.name, cb)
 		}
-		if !setOperation(item, method, op) {
-			s.report(fd.ds[0].pos, Error, "%s %s is declared twice", method, path)
-		}
-		if !slices.Contains(methods, method) || method == "QUERY" {
-			s.uses32 = true
-		}
+		s.place(pathItem(&cb.Items, d.path), d)
 	}
 	for _, u := range s.schemeUses {
 		if !s.schemes[u.name] {
 			s.report(u.pos, Error, "goapi:security: no goapi:securityScheme declares %q", u.name)
 		}
+	}
+}
+
+// declared is what a function with goapi directives declares: an
+// operation at path, a webhook called name, or a callback called name of
+// the operation parent, at the URL expression path.
+type declared struct {
+	kind         string
+	op           *oas.Operation
+	method, path string
+	name, parent string
+	pos          token.Pos
+}
+
+// pathItem returns the path item of key in items, adding one if needed.
+func pathItem(items *oas.OrderedMap[*oas.PathItem], key string) *oas.PathItem {
+	item, ok := items.Get(key)
+	if !ok {
+		item = &oas.PathItem{}
+		items.Set(key, item)
+	}
+	return item
+}
+
+// place puts the operation d declares in item, as its method.
+func (s *scanner) place(item *oas.PathItem, d *declared) {
+	if !setOperation(item, d.method, d.op) {
+		switch d.kind {
+		case "webhook":
+			s.report(d.pos, Error, "the webhook %q has two %s operations", d.name, d.method)
+		case "callback":
+			s.report(d.pos, Error, "the callback %q of %s has two %s operations at %s", d.name, d.parent, d.method, d.path)
+		default:
+			s.report(d.pos, Error, "%s %s is declared twice", d.method, d.path)
+		}
+		return
+	}
+	if !slices.Contains(methods, d.method) || d.method == "QUERY" {
+		s.uses32 = true
 	}
 }
 
@@ -305,35 +367,59 @@ func setOperation(item *oas.PathItem, method string, op *oas.Operation) bool {
 	return true
 }
 
-// operation maps a function with goapi directives to the operation it
-// declares, its method and its path.
-func (s *scanner) operation(fd *funcDecl) (*oas.Operation, string, string, bool) {
+// declarations are the directives that say what a function declares,
+// with the arguments each takes.
+var declarations = map[string]string{
+	"operation": "a method and a path",
+	"webhook":   "a name and a method",
+	"callback":  "the operationId of its operation, a name, a method and a URL expression",
+}
+
+// operation maps a function with goapi directives to the operation,
+// webhook or callback it declares.
+func (s *scanner) operation(fd *funcDecl) (*declared, bool) {
 	var opDir *directive
 	for i, d := range fd.ds {
-		if d.name == "operation" {
-			if opDir != nil {
-				s.report(d.pos, Error, "goapi:operation is given twice")
-				return nil, "", "", false
-			}
-			opDir = &fd.ds[i]
+		if _, ok := declarations[d.name]; !ok {
+			continue
 		}
+		if opDir != nil {
+			if opDir.name == d.name {
+				s.report(d.pos, Error, "goapi:%s is given twice", d.name)
+			} else {
+				s.report(d.pos, Error, "goapi:%s and goapi:%s on one function", opDir.name, d.name)
+			}
+			return nil, false
+		}
+		opDir = &fd.ds[i]
 	}
 	if opDir == nil {
-		s.report(fd.ds[0].pos, Error, "goapi:%s without goapi:operation", fd.ds[0].name)
-		return nil, "", "", false
+		s.report(fd.ds[0].pos, Error, "goapi:%s without goapi:operation, goapi:webhook or goapi:callback", fd.ds[0].name)
+		return nil, false
 	}
-	if len(opDir.args) != 2 {
-		s.report(opDir.pos, Error, "goapi:operation takes a method and a path")
-		return nil, "", "", false
+	args := map[string]int{"operation": 2, "webhook": 2, "callback": 4}[opDir.name]
+	if len(opDir.args) != args {
+		s.report(opDir.pos, Error, "goapi:%s takes %s", opDir.name, declarations[opDir.name])
+		return nil, false
 	}
-	method, path := strings.ToUpper(opDir.args[0]), opDir.args[1]
-	if !validMethod(method) {
-		s.report(opDir.pos, Error, "goapi:operation: %q is not an HTTP method", opDir.args[0])
-		return nil, "", "", false
+	d := &declared{kind: opDir.name, pos: opDir.pos}
+	var methodArg string
+	switch d.kind {
+	case "operation":
+		methodArg, d.path = opDir.args[0], opDir.args[1]
+	case "webhook":
+		d.name, methodArg = opDir.args[0], opDir.args[1]
+	case "callback":
+		d.parent, d.name, methodArg, d.path = opDir.args[0], opDir.args[1], opDir.args[2], opDir.args[3]
 	}
-	if !strings.HasPrefix(path, "/") {
-		s.report(opDir.pos, Error, "goapi:operation: the path %q does not start with /", path)
-		return nil, "", "", false
+	d.method = strings.ToUpper(methodArg)
+	if !validMethod(d.method) {
+		s.report(opDir.pos, Error, "goapi:%s: %q is not an HTTP method", d.kind, methodArg)
+		return nil, false
+	}
+	if d.kind == "operation" && !strings.HasPrefix(d.path, "/") {
+		s.report(opDir.pos, Error, "goapi:operation: the path %q does not start with /", d.path)
+		return nil, false
 	}
 	name := fd.decl.Name.Name
 	op := &oas.Operation{OperationID: strings.ToLower(name[:1]) + name[1:], Responses: &oas.Responses{}}
@@ -347,15 +433,16 @@ func (s *scanner) operation(fd *funcDecl) (*oas.Operation, string, string, bool)
 		case "tags":
 			op.Tags = strings.Split(e.value, ",")
 		default:
-			s.report(opDir.pos, Error, "goapi:operation: unknown key %q", e.key)
+			s.report(opDir.pos, Error, "goapi:%s: unknown key %q", d.kind, e.key)
 		}
 	}
+	d.op = op
 	defer s.at(fd.decl.Pos())()
 
 	var reqType types.Type
 	for _, d := range fd.ds {
 		switch d.name {
-		case "operation":
+		case "operation", "webhook", "callback":
 		case "request":
 			if len(d.args) != 1 || len(d.kv) > 0 {
 				s.report(d.pos, Error, "goapi:request takes a type")
@@ -377,12 +464,22 @@ func (s *scanner) operation(fd *funcDecl) (*oas.Operation, string, string, bool)
 	if reqType == nil {
 		reqType = requestParam(fd)
 	}
-	s.request(op, reqType, path, opDir.pos)
-	if op.Responses.Items.Len() == 0 {
-		s.report(opDir.pos, Error, "goapi:operation %s %s declares no goapi:response", method, path)
-		return nil, "", "", false
+	path := d.path
+	if d.kind != "operation" {
+		// A webhook or callback has no path parameters.
+		path = ""
 	}
-	return op, method, path, true
+	s.request(op, reqType, path, d.kind, opDir.pos)
+	if op.Responses.Items.Len() == 0 {
+		switch d.kind {
+		case "operation":
+			s.report(opDir.pos, Error, "goapi:operation %s %s declares no goapi:response", d.method, d.path)
+		default:
+			s.report(opDir.pos, Error, "goapi:%s %s declares no goapi:response", d.kind, d.name)
+		}
+		return nil, false
+	}
+	return d, true
 }
 
 func validMethod(m string) bool {
@@ -432,8 +529,9 @@ func requestParam(fd *funcDecl) types.Type {
 }
 
 // request adds the parameters and body of the request type t to op, and
-// checks them against the path's parameters.
-func (s *scanner) request(op *oas.Operation, t types.Type, path string, pos token.Pos) {
+// checks them against the path's parameters. kind is what op is, an
+// operation, a webhook or a callback, which have none.
+func (s *scanner) request(op *oas.Operation, t types.Type, path, kind string, pos token.Pos) {
 	declared := map[string]bool{}
 	for _, m := range pathParam.FindAllStringSubmatch(path, -1) {
 		declared[m[1]] = true
@@ -468,6 +566,10 @@ func (s *scanner) request(op *oas.Operation, t types.Type, path string, pos toke
 			case "path", "query", "header", "cookie":
 				if p := s.parameter(f, tag, entries, in); p != nil {
 					if in == "path" {
+						if kind != "operation" {
+							s.report(f.Pos(), Error, "field %s: a %s has no path parameters", f.Name(), kind)
+							continue
+						}
 						if !declared[p.Name] {
 							s.report(f.Pos(), Error, "path parameter %q is not in the path %s", p.Name, path)
 							continue
