@@ -74,11 +74,6 @@ checked off under [Fixed](#fixed), by the release they shipped in.
 - **Errors in a stream cannot change the status.** JSON Lines and
   server-sent event responses send 200 before the first item; a later error
   only ends the stream and is logged.
-- **TypeScript clients read server-sent events more loosely.** Their
-  parser ends lines at LF (dropping a CR before it) but not at a lone CR,
-  and skips events without data, while the Go runtime follows the format
-  (CRLF, LF or CR) and keeps them. Servers that end lines with CR alone
-  are rare. *Workaround:* none needed for servers that use LF.
 - **Optional authentication still rejects bad credentials.** When an
   operation allows anonymous access (`security: [{}, {apiKey: []}]`), a
   request carrying invalid credentials gets 401 instead of being treated as
@@ -88,6 +83,10 @@ checked off under [Fixed](#fixed), by the release they shipped in.
 
 Unreleased:
 
+- [x] **TypeScript clients read server-sent events more loosely.** Their
+  parser ended lines only at LF and skipped events without data; it
+  follows the format now, as the Go runtime does: CRLF, LF or CR, events
+  without data kept, an event the stream ends inside dropped.
 - [x] **Duplicate keys were accepted silently.** A YAML or JSON mapping
   that repeated a key (two `/pets:` entries under `paths`) loaded without
   an error, and one of the definitions was dropped. It is a loading error

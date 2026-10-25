@@ -89,7 +89,7 @@ export class Client {
 
 	body := b.String()
 	imports := []string{"config", "send", "type CallOptions", "type ClientOptions", "type Config", "type OperationSpec"}
-	for _, name := range []string{"BasicCredential", "Credential", "ServerEvent"} {
+	for _, name := range []string{"BasicCredential", "Credential", "ServerEvent", "NamedEvent"} {
 		if strings.Contains(body, name) {
 			imports = append(imports, "type "+name)
 		}
@@ -184,9 +184,42 @@ func (g *tsGen) bodyType(m *ir.BodyMedia) string {
 		item := g.tsType(m.Field.Value.Elem)
 		return "Iterable<" + item + "> | AsyncIterable<" + item + ">"
 	case "sse":
-		return "Iterable<ServerEvent> | AsyncIterable<ServerEvent>"
+		ev := g.eventType(m.Events)
+		return "Iterable<" + ev + "> | AsyncIterable<" + ev + ">"
 	}
 	return g.tsType(m.Field.Value)
+}
+
+// eventType renders the type of the events es types, or ServerEvent for
+// raw ones: a NamedEvent per kind, which their name tells apart.
+func (g *tsGen) eventType(es *ir.EventStream) string {
+	switch {
+	case es == nil:
+		return "ServerEvent"
+	case len(es.Kinds) == 0:
+		return "ServerEvent<" + g.tsType(es.Data) + ">"
+	}
+	var kinds []string
+	for _, k := range es.Kinds {
+		kinds = append(kinds, fmt.Sprintf("NamedEvent<%s, %s>", jsString(k.Name), g.tsType(k.Variant.Type)))
+	}
+	return strings.Join(kinds, " | ")
+}
+
+// eventsSpec renders the EventsSpec of es.
+func (g *tsGen) eventsSpec(es *ir.EventStream) string {
+	if len(es.Kinds) == 0 {
+		return "{ data: " + g.schema(es.Data) + " }"
+	}
+	var kinds []string
+	for _, k := range es.Kinds {
+		s := fmt.Sprintf("%s: { schema: %s", jsString(k.Name), g.schema(k.Variant.Type))
+		if k.Text {
+			s += ", text: true"
+		}
+		kinds = append(kinds, s+" }")
+	}
+	return "{ kinds: { " + strings.Join(kinds, ", ") + " } }"
 }
 
 // responseType renders the union of the response variants of o.
@@ -221,7 +254,11 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 		case "jsonl":
 			fields = append(fields, "items: AsyncIterable<"+g.tsType(r.Item)+">")
 		case "sse":
-			fields = append(fields, "events: AsyncIterable<ServerEvent>")
+			ev := g.eventType(r.Events)
+			if r.Events != nil && len(r.Events.Kinds) > 0 {
+				ev = "(" + ev + ")"
+			}
+			fields = append(fields, "events: AsyncIterable<"+ev+">")
 		}
 		if len(r.Headers) > 0 {
 			var hs []string
@@ -296,7 +333,11 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 				// The runtime checks and encodes each item.
 				schema = schema.Elem
 			}
-			ms = append(ms, fmt.Sprintf("{ mediaType: %s, kind: %q, key: %s, schema: %s }", jsString(m.MediaType), m.Kind, jsString(tsCamel(m.Field.Name)), g.schema(schema)))
+			ev := ""
+			if m.Events != nil {
+				ev = ", events: " + g.eventsSpec(m.Events)
+			}
+			ms = append(ms, fmt.Sprintf("{ mediaType: %s, kind: %q, key: %s, schema: %s%s }", jsString(m.MediaType), m.Kind, jsString(tsCamel(m.Field.Name)), g.schema(schema), ev))
 		}
 		spec += fmt.Sprintf("  body: { required: %t, media: [%s] },\n", o.Body.Required, strings.Join(ms, ", "))
 	}
@@ -318,6 +359,10 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 			s += ", schema: " + g.schema(r.Body)
 		case "jsonl":
 			s += ", item: " + g.schema(r.Item)
+		case "sse":
+			if r.Events != nil {
+				s += ", events: " + g.eventsSpec(r.Events)
+			}
 		}
 		if perStatus[r.Status] > 1 {
 			s += ", withContentType: true"

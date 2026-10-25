@@ -87,6 +87,9 @@ func TestTypeScriptClient(t *testing.T) {
 	if i := slices.Index(names, "Bo"); i < 1 || len(names) < i+3 || !slices.Equal(names[i-1:i+3], []string{"Ann", "Bo", "Cy", "Di"}) {
 		t.Errorf("imported pets = %q", names)
 	}
+	if got := s.seen["PostTypedEvents"].([]server.TypedEvent[model.Pet]); len(got) != 2 || got[0].Data.Name != "Cy" || got[1].Data.Name != "Di" {
+		t.Errorf("typed events = %+v", got)
+	}
 	if got := s.seen["PostEvents"].([]server.Event); !slices.Equal(got, []server.Event{{Event: "a", Data: "1\n2"}, {ID: "7", Data: "x"}}) {
 		t.Errorf("events = %+v", got)
 	}

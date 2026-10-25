@@ -424,7 +424,16 @@ export interface BodyMediaSpec {
   readonly key: string;
   /** The schema of the body, or of each item of a stream. */
   readonly schema: Schema;
+  /** How the data of server-sent events is typed, if it is. */
+  readonly events?: EventsSpec;
 }
+
+/** The data of typed server-sent events: of one schema, or of one per
+ * kind of event, which the event's name selects. Data is JSON, or text
+ * for a kind marked so. */
+export type EventsSpec =
+  | { readonly data: Schema }
+  | { readonly kinds: { readonly [event: string]: { readonly schema: Schema; readonly text?: boolean } } };
 
 export interface HeaderSpec {
   readonly key: string;
@@ -443,6 +452,8 @@ export interface ResponseSpec {
   readonly schema?: Schema;
   /** The schema of each item, for JSON Lines. */
   readonly item?: Schema;
+  /** How the data of server-sent events is typed, if it is. */
+  readonly events?: EventsSpec;
   readonly headers?: readonly HeaderSpec[];
   /** Several media types share the status: the variant names its own. */
   readonly withContentType?: boolean;
@@ -530,10 +541,19 @@ export class NoCredentialsError extends Error {
   }
 }
 
-/** A server-sent event. */
-export interface ServerEvent {
+/** A server-sent event, whose data is a T: the text itself, or the JSON
+ * value of a typed stream. */
+export interface ServerEvent<T = string> {
   event?: string;
-  data: string;
+  data: T;
+  id?: string;
+  retry?: number;
+}
+
+/** An event of a stream of named kinds: its name E says what its data is. */
+export interface NamedEvent<E extends string, T> {
+  event: E;
+  data: T;
   id?: string;
   retry?: number;
 }
@@ -810,7 +830,10 @@ function buildBody(op: OperationSpec, req: Values, b: Built, checkItems: boolean
     case "jsonl":
     case "sse": {
       b.headers.set("Content-Type", media.mediaType);
-      const line = media.kind === "sse" ? (ev: unknown) => eventText(ev as ServerEvent) : jsonLine(media.schema, checkItems);
+      const line =
+        media.kind === "jsonl"
+          ? jsonLine(media.schema, checkItems)
+          : (ev: unknown, i: number) => eventText(media.events === undefined ? (ev as ServerEvent) : typedEvent(media.events, ev as ServerEvent<unknown>, i, checkItems));
       if (typeof v === "object" && v !== null && Symbol.asyncIterator in v) {
         b.body = itemStream(v as AsyncIterable<unknown>, line, b);
         b.streamed = true;
@@ -841,6 +864,35 @@ function jsonLine(schema: Schema, checkItems: boolean): (item: unknown, i: numbe
     }
     return JSON.stringify(encode(schema, item, "request")) + "\n";
   };
+}
+
+// eventsSchema returns the schema of the data of ev and whether that data
+// is text, or why it has none.
+function eventsSchema(spec: EventsSpec, name: string | undefined): { schema: Schema; text: boolean } | string {
+  if ("data" in spec) {
+    return { schema: spec.data, text: false };
+  }
+  const kind = name === undefined ? undefined : spec.kinds[name];
+  if (kind === undefined) {
+    return `unknown event ${JSON.stringify(name ?? "")}; expected ${Object.keys(spec.kinds).map((k) => JSON.stringify(k)).join(", ")}`;
+  }
+  return { schema: kind.schema, text: kind.text === true };
+}
+
+// typedEvent returns ev, the i-th event of a request, with its data
+// written as its kind says, validating it first if checkItems is set.
+function typedEvent(spec: EventsSpec, ev: ServerEvent<unknown>, i: number, checkItems: boolean): ServerEvent {
+  const kind = eventsSchema(spec, ev.event);
+  if (typeof kind === "string") {
+    throw new InvalidRequestError([{ in: "body", pointer: `/${i}/event`, message: kind }]);
+  }
+  if (checkItems) {
+    const issues = validate(kind.schema, ev.data, "request", `/${i}/data`).map((x) => ({ ...x, in: "body" }));
+    if (issues.length > 0) {
+      throw new InvalidRequestError(issues);
+    }
+  }
+  return { ...ev, data: kind.text ? text(ev.data) : JSON.stringify(encode(kind.schema, ev.data, "request")) };
 }
 
 // eventText writes an event in the text/event-stream format. Line ends in
@@ -1168,7 +1220,7 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
       out["items"] = jsonLines(resp);
       break;
     case "sse":
-      out["events"] = serverEvents(resp);
+      out["events"] = spec.events === undefined ? serverEvents(resp) : typedEvents(cfg, spec.events, resp);
       break;
     default:
       // Read the empty body so the connection can be reused.
@@ -1177,11 +1229,15 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
   return out;
 }
 
-async function* lines(resp: Response): AsyncGenerator<string> {
+// lines yields the lines of a response as they arrive, ended by LF (a CR
+// before it is dropped) or, with cr, also by a CR alone, as in
+// text/event-stream.
+async function* lines(resp: Response, cr = false): AsyncGenerator<string> {
   if (resp.body === null) {
     return;
   }
   const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
+  const end = cr ? /\r\n|\r|\n/ : /\r?\n/;
   let buffer = "";
   try {
     for (;;) {
@@ -1190,11 +1246,20 @@ async function* lines(resp: Response): AsyncGenerator<string> {
         break;
       }
       buffer += value;
-      let i: number;
-      while ((i = buffer.indexOf("\n")) >= 0) {
-        yield buffer.slice(0, i).replace(/\r$/, "");
-        buffer = buffer.slice(i + 1);
+      let m: RegExpExecArray | null;
+      while ((m = end.exec(buffer)) !== null) {
+        if (m[0] === "\r" && m.index === buffer.length - 1) {
+          // A LF may follow in the next chunk.
+          break;
+        }
+        yield buffer.slice(0, m.index);
+        buffer = buffer.slice(m.index + m[0].length);
       }
+    }
+    if (buffer.endsWith("\r") && cr) {
+      buffer = buffer.slice(0, -1);
+      yield buffer;
+      buffer = "";
     }
     if (buffer !== "") {
       yield buffer;
@@ -1214,23 +1279,28 @@ async function* jsonLines(resp: Response): AsyncGenerator<unknown> {
   }
 }
 
-/** The events of a server-sent events response, as they arrive. */
+/** The events of a server-sent events response, as they arrive. An
+ * event is dispatched by a blank line, so one the stream ends inside is
+ * dropped. */
 async function* serverEvents(resp: Response): AsyncGenerator<ServerEvent> {
   let event: ServerEvent = { data: "" };
   let data: string[] = [];
-  for await (const line of lines(resp)) {
+  let pending = false;
+  for await (const line of lines(resp, true)) {
     if (line === "") {
-      if (data.length > 0) {
+      if (pending) {
         event.data = data.join("\n");
         yield event;
       }
       event = { data: "" };
       data = [];
+      pending = false;
       continue;
     }
     if (line.startsWith(":")) {
       continue;
     }
+    pending = true;
     const colon = line.indexOf(":");
     const field = colon < 0 ? line : line.slice(0, colon);
     const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
@@ -1251,8 +1321,34 @@ async function* serverEvents(resp: Response): AsyncGenerator<ServerEvent> {
         break;
     }
   }
-  if (data.length > 0) {
-    event.data = data.join("\n");
-    yield event;
+}
+
+/** The events of a typed server-sent events response, as they arrive,
+ * their data parsed as its kind says and, with validateResponses,
+ * validated. An event that does not parse ends the stream with an
+ * InvalidResponseError. */
+async function* typedEvents(cfg: Config, spec: EventsSpec, resp: Response): AsyncGenerator<ServerEvent<unknown>> {
+  let i = 0;
+  for await (const ev of serverEvents(resp)) {
+    const kind = eventsSchema(spec, ev.event);
+    if (typeof kind === "string") {
+      throw new InvalidResponseError(resp.status, `event ${i}: ${kind}`);
+    }
+    let data: unknown = ev.data;
+    if (!kind.text) {
+      try {
+        data = JSON.parse(ev.data);
+      } catch (e) {
+        throw new InvalidResponseError(resp.status, `event ${i}: ${String(e)}`);
+      }
+    }
+    if (cfg.validateResponses) {
+      const issues = validate(kind.schema, data, "response", `/${i}/data`);
+      if (issues.length > 0) {
+        throw new InvalidResponseError(resp.status, issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+      }
+    }
+    yield { ...ev, data };
+    i++;
   }
 }

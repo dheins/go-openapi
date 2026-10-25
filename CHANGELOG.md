@@ -15,7 +15,11 @@
   with a 400 pointing into the event (`/2/data/name`), an unknown event
   name included, and in a response a `*client.InvalidResponse`. Writing
   names each event after its data's variant. Other event streams stay
-  `server.Event`s. `FuzzStreamBodies` reads typed events too.
+  `server.Event`s. In TypeScript clients, events are `ServerEvent<T>`, or
+  a union of `NamedEvent<"name", T>` discriminated by `event` for named
+  kinds, parsed and (with `validateResponses`) validated as they arrive,
+  and validated and encoded when sent. `FuzzStreamBodies` reads typed
+  events too.
 - Security of webhooks and callbacks: their own `security` requirements,
   dropped with a warning before, are applied. The generated `Sender` takes
   `SenderCredentials`, a function per scheme given the target URL as well
@@ -239,6 +243,9 @@
 
 ### Fixed
 
+- TypeScript clients read server-sent events as the format defines them:
+  lines end with CRLF, LF or CR (a lone CR did not end one), events
+  without data are kept, and an event the stream ends inside is dropped.
 - Multipart parts of declared properties that are not files were left out
   when they had a file name, which browsers' `FormData` gives every `Blob`
   part; they are read as the property's value.
