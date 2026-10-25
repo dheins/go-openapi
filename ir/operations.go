@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -187,8 +188,30 @@ type BodyMedia struct {
 	// XML describes the document, for xml, and Parts the parts, for parts.
 	XML   *XMLNode
 	Parts *Parts
+	// Events types the events of an sse body, if its itemSchema does.
+	Events *EventStream
 	// Field is the request field the body is decoded into.
 	Field *BodyField
+}
+
+// EventStream describes server-sent events whose data the itemSchema of
+// their media type types: as JSON of one schema, or of one per named kind
+// of event.
+type EventStream struct {
+	// Data is the type of the data of every event: the schema's, or a
+	// oneOf union of the kinds'.
+	Data *Ref
+	// Kinds are the named kinds, in document order; none for one kind.
+	Kinds []EventKind
+}
+
+// EventKind is a kind of event, named by the event field, and the variant
+// of the Data union its data is. Text means its data is the text itself,
+// a string, rather than JSON.
+type EventKind struct {
+	Name    string
+	Variant *Variant
+	Text    bool
 }
 
 // Response is one declared response, a variant the handler can return.
@@ -202,11 +225,13 @@ type Response struct {
 	Doc      string
 	// MediaType is the media type of the body, or "" for none, and Kind
 	// how it is written: json, xml, text, binary, jsonl (JSON Lines, a
-	// stream of Item values) or sse (a stream of server-sent events).
+	// stream of Item values) or sse (a stream of server-sent events,
+	// typed by Events if Item is set).
 	MediaType string
 	Kind      string
 	Body      *Ref
 	Item      *Ref
+	Events    *EventStream
 	// XML describes the document, for xml, and Parts the parts, for parts.
 	XML   *XMLNode
 	Parts *Parts
@@ -765,6 +790,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 	for mt, m := range rb.Content.All() {
 		schema := m.Deref().Schema
 		kind := bodyKind(mt, schema)
+		var events *EventStream
 		if kind == "jsonl" {
 			// The schema of the items, which the field is a stream of.
 			schema = streamItem(m.Deref())
@@ -797,8 +823,13 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 				hint = o.Name + strings.TrimSuffix(field.Name, "Body") + "RequestBody"
 			}
 			field.Value = b.bodyValue(kind, schema, hint)
+			if kind == "sse" {
+				if events = b.eventStream(m.Deref(), strings.TrimSuffix(hint, "Body")+"Event"); events != nil {
+					field.Value = &Ref{Kind: Stream, Elem: &Ref{Kind: Event, Elem: events.Data}}
+				}
+			}
 		}
-		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field}
+		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field, Events: events}
 		if kind == "parts" {
 			media.Parts = b.parts(field.Value, m.Deref())
 		}
@@ -846,6 +877,123 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 	}
 	body.Value, body.Type = body.Fields[0].Value, body.Fields[0].Type
 	return body
+}
+
+// eventStream returns how the itemSchema of an event-stream media type
+// types its events, or nil for raw events. One kind is an object whose
+// data has a JSON contentSchema. Named kinds are a oneOf or anyOf of
+// objects with a const event and data, typed by a JSON contentSchema or,
+// without one, as a string; their data is a union of the kinds' that the
+// event name selects. hint names the types.
+func (b *builder) eventStream(media *oas.MediaType, hint string) *EventStream {
+	item := deref(media.ItemSchema)
+	if item == nil {
+		return nil
+	}
+	if data, ok := eventData(item); ok && data.ContentSchema != nil {
+		return &EventStream{Data: b.use(data.ContentSchema, hint+"Data", nil)}
+	}
+	members, path := item.OneOf, "oneOf"
+	if len(members) == 0 {
+		members, path = item.AnyOf, "anyOf"
+	}
+	if len(members) == 0 {
+		return nil
+	}
+	union := &oas.Schema{}
+	var names []string
+	var text []bool
+	for i, m := range members {
+		m = deref(m)
+		name, named := eventName(m)
+		data, ok := eventData(m)
+		switch {
+		case !named || !ok:
+			b.warnAt(item, []string{path, strconv.Itoa(i)}, "a kind of event needs a const event name and a data property; the events are not typed")
+			return nil
+		case slices.Contains(names, name):
+			b.warnAt(item, []string{path, strconv.Itoa(i)}, fmt.Sprintf("the event %q has two kinds; the events are not typed", name))
+			return nil
+		}
+		plain := data.ContentSchema == nil
+		switch types, _ := splitTypes(data); {
+		case !plain:
+			data = data.ContentSchema
+		case len(types) == 0:
+			// Data is text.
+			d := *data
+			d.Type = oas.Types{"string"}
+			data = &d
+		case !slices.Equal(types, []string{"string"}):
+			b.warnAt(item, []string{path, strconv.Itoa(i), "properties", "data"}, "the data of an event is text, or JSON with a contentSchema; the events are not typed")
+			return nil
+		}
+		names = append(names, name)
+		text = append(text, plain)
+		union.OneOf = append(union.OneOf, data)
+	}
+	for i, data := range union.OneOf {
+		if !text[i] {
+			// Inline data is named after its kind, before the union would
+			// name it after its position.
+			b.use(data, hint+GoName(names[i])+"Data", nil)
+		}
+	}
+	ref := b.use(union, hint+"Data", nil)
+	t := ref.Type
+	if len(t.Variants) != len(names) {
+		// A null kind, which an event cannot be.
+		b.warnAt(item, []string{path}, "a kind of event has null data; the events are not typed")
+		return nil
+	}
+	t.Location, _ = b.spec.Location(item)
+	t.Doc = describeSchema(item)
+	events := &EventStream{Data: ref}
+	for i, name := range names {
+		events.Kinds = append(events.Kinds, EventKind{Name: name, Variant: t.Variants[i], Text: text[i]})
+	}
+	return events
+}
+
+// eventData returns the schema of the data property of an event, and
+// whether it has one. Its contentSchema types the data only with a JSON
+// contentMediaType.
+func eventData(s *oas.Schema) (*oas.Schema, bool) {
+	if s == nil || s.Properties == nil {
+		return nil, false
+	}
+	data, ok := s.Properties.Get("data")
+	data = deref(data)
+	if !ok || data == nil {
+		return nil, false
+	}
+	if data.ContentSchema != nil && !isJSONMediaType(data.ContentMediaType) {
+		plain := *data
+		plain.ContentSchema = nil
+		return &plain, true
+	}
+	return data, true
+}
+
+// eventName returns the name the event property of a kind of event
+// requires: its const, or the one value of its enum.
+func eventName(s *oas.Schema) (string, bool) {
+	if s.Properties == nil {
+		return "", false
+	}
+	ev, ok := s.Properties.Get("event")
+	if ev = deref(ev); !ok || ev == nil {
+		return "", false
+	}
+	raw := ev.Const
+	if raw == nil && len(ev.Enum) == 1 {
+		raw = ev.Enum[0]
+	}
+	var name string
+	if raw == nil || json.Unmarshal(raw, &name) != nil {
+		return "", false
+	}
+	return name, true
 }
 
 // streamItem returns the schema of the items of a JSON Lines body: its
@@ -1170,6 +1318,9 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			v.Item = b.use(streamItem(media), o.Name+statusName+"Item", nil)
 			suffix = "JSONLines"
 		case "sse":
+			if v.Events = b.eventStream(media, o.Name+statusName+"Event"); v.Events != nil {
+				v.Item = &Ref{Kind: Event, Elem: v.Events.Data}
+			}
 			suffix = "Events"
 		default:
 			b.warnAt(m, nil, fmt.Sprintf("response %s of type %s is not supported yet and cannot be returned", status, mt))

@@ -503,9 +503,12 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 				continue
 			}
 			w(2, "case %q:", m.MediaType)
-			if m.Kind == "jsonl" {
+			switch {
+			case m.Kind == "jsonl":
 				w(3, "req.%s = server.JSONLinesBody(%s, r, %s)", m.Field.Name, cfg, f.itemValidation(m.Field.Value.Elem))
-			} else {
+			case m.Events != nil:
+				w(3, "req.%s = server.TypedEventsBody(%s, r, %s)", m.Field.Name, cfg, f.eventDecoder(m.Events, "Request"))
+			default:
 				w(3, "req.%s = server.EventsBody(%s, r)", m.Field.Name, cfg)
 			}
 		}
@@ -588,6 +591,81 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 		w(2, "}")
 	}
 	w(1, "}")
+}
+
+// eventDecoder returns a function turning a server.Event of es into its
+// server.TypedEvent, decoding its data in direction dir (Request or
+// Response): of the kind its name selects, for named kinds.
+func (f *fileGen) eventDecoder(es *ir.EventStream, dir string) string {
+	srv, oapi := f.imp(serverImport, "server"), f.imp(oapiImport, "oapi")
+	typ := f.goType(es.Data)
+	var b strings.Builder
+	fmt.Fprintf(&b, "func(ev %s.Event, validate bool) (%s.TypedEvent[%s], error) {\n", srv, srv, typ)
+	fmt.Fprintf(&b, "out := %s.TypedEvent[%s]{ID: ev.ID, Event: ev.Event, Retry: ev.Retry}\n", srv, typ)
+	if len(es.Kinds) == 0 {
+		fmt.Fprintf(&b, "data, err := %s.EventData(ev, %s.%s, validate, %s)\n", srv, oapi, dir, f.itemValidation(es.Data))
+		b.WriteString("out.Data = data\nreturn out, err\n}")
+		return b.String()
+	}
+	union := es.Data.Type
+	models := func(name string) string { return f.qualify(f.gen.lay.modelsImport, f.gen.lay.modelsPkg, name) }
+	var names []string
+	b.WriteString("switch ev.Event {\n")
+	for _, k := range es.Kinds {
+		names = append(names, strconv.Quote(k.Name))
+		v := k.Variant
+		data := "data"
+		switch {
+		case v.WrapperStruct:
+			data = models(v.Wrapper) + "{Value: data}"
+		case v.Wrapper != "":
+			data = models(v.Wrapper) + "(data)"
+		}
+		fmt.Fprintf(&b, "case %q:\n", k.Name)
+		if k.Text {
+			fmt.Fprintf(&b, "data, err := %s.EventText(ev, validate, %s)\n", srv, f.itemValidation(v.Type))
+		} else {
+			fmt.Fprintf(&b, "data, err := %s.EventData(ev, %s.%s, validate, %s)\n", srv, oapi, dir, f.itemValidation(v.Type))
+		}
+		b.WriteString("if err != nil {\nreturn out, err\n}\n")
+		fmt.Fprintf(&b, "out.Data = %s(%s)\n", models(union.Sealed.Constructor), data)
+	}
+	fmt.Fprintf(&b, "default:\nreturn out, %s.UnknownEvent(ev.Event, %s)\n}\nreturn out, nil\n}", srv, strings.Join(names, ", "))
+	return b.String()
+}
+
+// eventEncoder returns a function turning a server.TypedEvent of es into
+// the server.Event to send, its data encoded in direction dir (Request or
+// Response) and, for named kinds, named after its variant; nil, for the
+// runtime's own, for one kind.
+func (f *fileGen) eventEncoder(es *ir.EventStream, dir string) string {
+	if len(es.Kinds) == 0 {
+		return "nil"
+	}
+	srv, oapi := f.imp(serverImport, "server"), f.imp(oapiImport, "oapi")
+	models := func(name string) string { return f.qualify(f.gen.lay.modelsImport, f.gen.lay.modelsPkg, name) }
+	var b strings.Builder
+	fmt.Fprintf(&b, "func(ev %s.TypedEvent[%s]) (%s.Event, error) {\n", srv, f.goType(es.Data), srv)
+	b.WriteString("switch v := ev.Data.Value().(type) {\n")
+	for _, k := range es.Kinds {
+		v := k.Variant
+		stored := f.goType(v.Type)
+		if v.Wrapper != "" {
+			stored = models(v.Wrapper)
+		}
+		fmt.Fprintf(&b, "case %s:\n", stored)
+		if k.Text {
+			text := f.unwrap(v, "v")
+			if f.goType(v.Type) != "string" {
+				text = "string(" + text + ")"
+			}
+			fmt.Fprintf(&b, "return %s.EncodeTextEvent(ev, %q, %s)\n", srv, k.Name, text)
+		} else {
+			fmt.Fprintf(&b, "return %s.EncodeEvent(ev, %q, %s, %s.%s)\n", srv, k.Name, f.unwrap(v, "v"), oapi, dir)
+		}
+	}
+	fmt.Fprintf(&b, "}\nreturn %s.Event{}, %s.New(\"the event has no data\")\n}", srv, f.imp("errors", "errors"))
+	return b.String()
 }
 
 // isStream reports whether a body kind is read or written item by item.
@@ -984,6 +1062,10 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "jsonl":
 		w(1, "return server.WriteJSONLines(c, w, req, %s, %s, r.Items, %s)", status, contentType, header)
 	case "sse":
+		if r.Events != nil {
+			w(1, "return server.WriteTypedEvents(c, w, req, %s, r.Events, %s, %s)", status, header, f.eventEncoder(r.Events, "Response"))
+			break
+		}
 		w(1, "return server.WriteEvents(c, w, req, %s, r.Events, %s)", status, header)
 	default:
 		w(1, "return server.WriteEmpty(w, %s, %s)", status, header)

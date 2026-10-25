@@ -33,9 +33,10 @@ shipped in.
 
 ## Server
 
-- Typed server-sent events: the `data` of events as the `itemSchema`
-  describes it, for requests and responses (they are `server.Event`s with
-  string data today). — later
+- Typed server-sent events beyond the two shapes the 3.2 spec uses (one
+  kind, or a oneOf of kinds with a const event name): kinds told apart by
+  other fields, `id` and `retry` schemas, and data of other media
+  types than JSON and text. — later
 - Streamed request bodies that can be sent again, for retry middleware
   (a stream is sent once today). — later
 - Typed positional parts (`prefixItems` with `prefixEncoding`; such
@@ -107,6 +108,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Typed server-sent events: data from the 3.2 `itemSchema`, one kind or
+  named kinds, in servers and Go and TypeScript clients. (8ae2e3c,
+  3833106, d98139d)
 - [x] Security of webhooks and callbacks: the sender sends credentials
   per target (`SenderCredentials`), and receivers check them with a
   `ReceiverSecurityHandler`. (fc15d59, 22ddd55)

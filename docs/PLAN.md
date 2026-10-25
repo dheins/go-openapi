@@ -343,6 +343,29 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
 - *Not done*: HMAC signatures, which OpenAPI cannot declare, are
   middleware; see [features.md](../features.md).
 
+### M15 – Typed server-sent events ✅
+- [x] One kind (data with a JSON `contentSchema`) and named kinds (a
+  `oneOf` with `const` event names, text for kinds without a
+  `contentSchema`) from the 3.2 `itemSchema`
+- [x] `server.TypedEvent[T]`, read and validated item by item, and named
+  after the data's variant when written, in servers and Go clients
+- [x] `ServerEvent<T>` and `NamedEvent` unions in TypeScript clients
+
+**How it went**
+- *A synthesized union*: the data of named kinds is a oneOf of the kinds'
+  schemas built like the model's other unions, so wrappers, validation
+  and the generic constructor came for free; inline data is named after
+  its kind, not its position.
+- *Inline code*: encoders and decoders are generated where they are used,
+  so each file has only those it needs.
+- *Fuzzing*: the round trip found that escaping (`&` as `\u0026`) can
+  make a line longer than the limit it was read under; what is written
+  back is read with a larger one.
+- *Found on the way*: the TypeScript event parser did not end lines at a
+  lone CR and skipped events without data (bugs.md); it follows the
+  format now.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

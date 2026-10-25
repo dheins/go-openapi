@@ -296,6 +296,9 @@ const (
 	Pointer
 	// Stream is iter.Seq2[Elem, error]: a request body read item by item.
 	Stream
+	// Event is server.TypedEvent[Elem]: a server-sent event whose data is
+	// an Elem.
+	Event
 	// Any is any.
 	Any
 )

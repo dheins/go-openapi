@@ -520,6 +520,78 @@ paths:
             application/json:
               schema:
                 type: integer
+  /pets/feed:
+    get:
+      operationId: feed
+      description: Changes to the pets, as they happen.
+      responses:
+        "200":
+          description: The changes.
+          content:
+            text/event-stream:
+              itemSchema:
+                oneOf:
+                  - type: object
+                    required: [event, data]
+                    properties:
+                      event:
+                        const: added
+                      data:
+                        type: string
+                        contentMediaType: application/json
+                        contentSchema:
+                          $ref: "#/components/schemas/Pet"
+                  - type: object
+                    required: [event, data]
+                    properties:
+                      event:
+                        const: removed
+                      data:
+                        type: string
+                        contentMediaType: application/json
+                        contentSchema:
+                          type: object
+                          required: [id]
+                          properties:
+                            id:
+                              type: integer
+                              format: int64
+                              minimum: 1
+                  - type: object
+                    required: [event]
+                    properties:
+                      event:
+                        const: ping
+                      data:
+                        type: string
+                        maxLength: 8
+  /events/typed:
+    post:
+      operationId: postTypedEvents
+      description: Pets sent as events, one kind of event.
+      requestBody:
+        required: true
+        content:
+          text/event-stream:
+            itemSchema:
+              type: object
+              properties:
+                id:
+                  type: string
+                data:
+                  type: string
+                  contentMediaType: application/json
+                  contentSchema:
+                    $ref: "#/components/schemas/Pet"
+      responses:
+        "200":
+          description: The names of the pets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
   /pets/lines:
     post:
       operationId: importLines

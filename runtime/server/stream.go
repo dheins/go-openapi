@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"mime"
@@ -151,6 +152,141 @@ func EventsBody(c *Config, r *http.Request) iter.Seq2[Event, error] {
 			}
 		}
 	}
+}
+
+// TypedEvent is a server-sent event whose data is a T, sent as JSON. For
+// a stream of named kinds of event, Event names the kind: it is set when
+// reading, and may be left "" when writing, as the data's variant names
+// it.
+type TypedEvent[T any] struct {
+	ID    string
+	Event string
+	Retry int
+	Data  T
+}
+
+// EventData decodes the data of ev in direction dir into a T, checking it
+// with check if validate is set. Problems are located in the event, as
+// "/data/name".
+func EventData[T any](ev Event, dir oapi.Direction, validate bool, check func(T) error) (T, error) {
+	var v T
+	err := oapi.DecodeValue([]byte(ev.Data), &v, dir)
+	if err == nil && validate && check != nil {
+		err = check(v)
+	}
+	if err != nil {
+		var errs oapi.ValidationErrors
+		errs.Nested("/data", err)
+		return v, errs.Err()
+	}
+	return v, nil
+}
+
+// EventText returns the data of ev, text, as a T, checking it with check
+// if validate is set, with problems located as EventData's.
+func EventText[T ~string](ev Event, validate bool, check func(T) error) (T, error) {
+	v := T(ev.Data)
+	if validate && check != nil {
+		if err := check(v); err != nil {
+			var errs oapi.ValidationErrors
+			errs.Nested("/data", err)
+			return v, errs.Err()
+		}
+	}
+	return v, nil
+}
+
+// EncodeTextEvent returns ev with text as its data, of the kind of event
+// kind, as EncodeEvent does for JSON.
+func EncodeTextEvent[T any](ev TypedEvent[T], kind, text string) (Event, error) {
+	if ev.Event != "" && ev.Event != kind {
+		return Event{}, fmt.Errorf("the event %q holds the data of %q", ev.Event, kind)
+	}
+	return Event{ID: ev.ID, Event: kind, Retry: ev.Retry, Data: text}, nil
+}
+
+// UnknownEvent is the error of an event named none of the kinds of its
+// stream.
+func UnknownEvent(name string, kinds ...string) error {
+	quoted := make([]string, len(kinds))
+	for i, k := range kinds {
+		quoted[i] = strconv.Quote(k)
+	}
+	return &oapi.ValidationError{Path: "/event", Message: fmt.Sprintf("unknown event %q; expected %s", name, strings.Join(quoted, ", "))}
+}
+
+// EncodeEvent returns ev with data, its data, as JSON in direction dir.
+// kind is the name of the data's kind of event, or "" for a stream of one
+// kind; ev.Event, if set, must be it.
+func EncodeEvent[T any](ev TypedEvent[T], kind string, data any, dir oapi.Direction) (Event, error) {
+	name := ev.Event
+	switch {
+	case kind == "":
+	case name == "":
+		name = kind
+	case name != kind:
+		return Event{}, fmt.Errorf("the event %q holds the data of %q", name, kind)
+	}
+	b, err := oapi.EncodeValue(data, dir)
+	if err != nil {
+		return Event{}, err
+	}
+	return Event{ID: ev.ID, Event: name, Retry: ev.Retry, Data: string(b)}, nil
+}
+
+// TypedEventsBody returns the events of a request body whose data is
+// typed, read as the handler ranges over them like EventsBody's. decode
+// turns each into its TypedEvent: it chooses the kind by the event's
+// name, then decodes and validates the data. A problem ends the loop with
+// a *BindError, 400 with pointers into the event from its index
+// ("/2/data/name"). The events can be ranged over once.
+func TypedEventsBody[T any](c *Config, r *http.Request, decode func(ev Event, validate bool) (TypedEvent[T], error)) iter.Seq2[TypedEvent[T], error] {
+	events := EventsBody(c, r)
+	return func(yield func(TypedEvent[T], error) bool) {
+		i := 0
+		for ev, err := range events {
+			if err != nil {
+				yield(TypedEvent[T]{}, err)
+				return
+			}
+			typed, err := decode(ev, true)
+			if err != nil {
+				var errs oapi.ValidationErrors
+				errs.Nested("/"+strconv.Itoa(i), err)
+				var b Binder
+				b.Body(errs.Err())
+				yield(TypedEvent[T]{}, b.Err())
+				return
+			}
+			if !yield(typed, nil) {
+				return
+			}
+			i++
+		}
+	}
+}
+
+// WriteTypedEvents streams events as WriteEvents does, each written by
+// encode, or with its data as JSON if encode is nil. An event that cannot
+// be written ends the stream, and is logged.
+func WriteTypedEvents[T any](c *Config, w http.ResponseWriter, r *http.Request, status int, events iter.Seq2[TypedEvent[T], error], header http.Header, encode func(TypedEvent[T]) (Event, error)) error {
+	if events == nil {
+		return errors.New("streaming response without events")
+	}
+	if encode == nil {
+		encode = func(ev TypedEvent[T]) (Event, error) { return EncodeEvent(ev, "", ev.Data, oapi.Response) }
+	}
+	return WriteEvents(c, w, r, status, func(yield func(Event, error) bool) {
+		for typed, err := range events {
+			var ev Event
+			if err == nil {
+				ev, err = encode(typed)
+			}
+			if !yield(ev, err) || err != nil {
+				return
+			}
+		}
+	}, header)
 }
 
 func (c *Config) streamScanner(body io.Reader) *bufio.Scanner {

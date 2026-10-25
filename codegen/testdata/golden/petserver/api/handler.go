@@ -72,6 +72,14 @@ type Handler interface {
 	//
 	// Events read as they arrive.
 	PostEvents(ctx context.Context, req *PostEventsRequest) (PostEventsResponse, error)
+	// Feed handles GET /pets/feed.
+	//
+	// Changes to the pets, as they happen.
+	Feed(ctx context.Context, req *FeedRequest) (FeedResponse, error)
+	// PostTypedEvents handles POST /events/typed.
+	//
+	// Pets sent as events, one kind of event.
+	PostTypedEvents(ctx context.Context, req *PostTypedEventsRequest) (PostTypedEventsResponse, error)
 	// ImportLines handles POST /pets/lines.
 	//
 	// Pets added one by one as they arrive, or all at once.

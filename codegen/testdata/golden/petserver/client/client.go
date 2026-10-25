@@ -434,6 +434,43 @@ func (c *Client) PostEvents(ctx context.Context, req *api.PostEventsRequest) (ap
 	return api.ReadPostEventsResponse(c.cfg, resp)
 }
 
+// Feed calls GET /pets/feed. A nil req sends no parameters or body.
+//
+// Changes to the pets, as they happen.
+func (c *Client) Feed(ctx context.Context, req *api.FeedRequest) (api.FeedResponse, error) {
+	if req == nil {
+		req = &api.FeedRequest{}
+	}
+	hreq, err := api.NewFeedRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadFeedResponse(c.cfg, resp)
+}
+
+// PostTypedEvents calls POST /events/typed. A nil req sends no parameters
+// or body.
+//
+// Pets sent as events, one kind of event.
+func (c *Client) PostTypedEvents(ctx context.Context, req *api.PostTypedEventsRequest) (api.PostTypedEventsResponse, error) {
+	if req == nil {
+		req = &api.PostTypedEventsRequest{}
+	}
+	hreq, err := api.NewPostTypedEventsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPostTypedEventsResponse(c.cfg, resp)
+}
+
 // ImportLines calls POST /pets/lines. A nil req sends no parameters or
 // body.
 //

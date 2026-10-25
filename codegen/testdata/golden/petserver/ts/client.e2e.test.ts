@@ -224,3 +224,53 @@ test("streamed request bodies", { skip }, async () => {
 
   assert.deepEqual(await c.postEvents({ body: [{ event: "a", data: "1\n2" }, { id: "7", data: "x" }] }), { status: 200, body: 2 });
 });
+
+test("typed server-sent events", { skip }, async () => {
+  const c = client();
+  // Each event's data is parsed as its kind says; ping's is text.
+  const feed = await c.feed();
+  const got: string[] = [];
+  for await (const ev of feed.events) {
+    switch (ev.event) {
+      case "added":
+        got.push(`added ${ev.data.name}`);
+        break;
+      case "removed":
+        got.push(`removed ${ev.data.id} ${ev.id}`);
+        break;
+      case "ping":
+        got.push(`ping ${ev.data}`);
+        break;
+    }
+  }
+  assert.equal(got[0], "added Rex");
+  assert.deepEqual(got.slice(-2), ["removed 2 r2", "ping hi"]);
+
+  // An event that does not parse, or validate, ends the stream.
+  const fake = (body: string) =>
+    client({ validateResponses: true, fetch: async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }) });
+  const drain = async (body: string) => {
+    for await (const _ of (await fake(body).feed()).events) {
+      // Read to the end.
+    }
+  };
+  for (const body of ["event: other\ndata: 1\n\n", "event: added\ndata: not json\n\n", 'event: removed\ndata: {"id":0}\n\n']) {
+    await rejects(drain(body), InvalidResponseError);
+  }
+  // Lines may end with CR alone, and an event needs no data.
+  const events = [];
+  for await (const ev of (await fake("event: ping\r\rid: 9\nevent: ping\ndata: x\r\n\r\n").feed()).events) {
+    events.push(ev);
+  }
+  assert.deepEqual(events, [{ event: "ping", data: "" }, { id: "9", event: "ping", data: "x" }]);
+
+  // Request events: an array at once, an async generator as it yields.
+  assert.deepEqual(await c.postTypedEvents({ body: [{ id: "1", data: { name: "Ann" } }, { data: { name: "Bo" } }] }), { status: 200, body: ["Ann", "Bo"] });
+  async function* more() {
+    yield { data: { name: "Cy" } };
+    yield { data: { name: "Di" } };
+  }
+  assert.deepEqual(await c.postTypedEvents({ body: more() }), { status: 200, body: ["Cy", "Di"] });
+  const invalid = await rejects(c.postTypedEvents({ body: [{ data: { name: "Ed" } }, { data: { name: "" } }] }), InvalidRequestError);
+  assert.deepEqual(invalid.issues.map((i) => i.pointer), ["/1/data/name"]);
+});

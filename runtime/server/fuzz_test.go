@@ -136,13 +136,18 @@ func FuzzXMLToJSON(f *testing.F) {
 
 // FuzzStreamBodies checks that reading streamed request bodies never
 // panics, and that what is read is written back as a stream that reads
-// the same: JSON Lines items, and server-sent events.
+// the same: JSON Lines items, server-sent events, and events with JSON
+// data.
 func FuzzStreamBodies(f *testing.F) {
 	f.Add([]byte("{\"a\":1}\n\n[1,2]\n\"x\"\n"))
 	f.Add([]byte("event: a\r\ndata: 1\rdata: 2\n\n: c\nretry: 30\nid: 7\ndata\n\n"))
+	f.Add([]byte("event: added\ndata: {\"a\":\ndata: [1,2]}\n\nid: x\ndata: \"s\"\n\n"))
 	c := NewConfig(WithMaxBodyBytes(1 << 10))
+	// What is written back is read with a larger limit: escaping (of & as
+	// \u0026, for one) can make a line longer than it was.
+	big := NewConfig(WithMaxBodyBytes(1 << 20))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		read := func(body []byte) ([]any, error) {
+		read := func(c *Config, body []byte) ([]any, error) {
 			var items []any
 			for item, err := range JSONLinesBody[any](c, httptest.NewRequest("POST", "/", bytes.NewReader(body)), nil) {
 				if err != nil {
@@ -152,7 +157,7 @@ func FuzzStreamBodies(f *testing.F) {
 			}
 			return items, nil
 		}
-		items, _ := read(data)
+		items, _ := read(c, data)
 		var lines []byte
 		for _, item := range items {
 			line, err := oapi.EncodeRequest(item)
@@ -161,7 +166,7 @@ func FuzzStreamBodies(f *testing.F) {
 			}
 			lines = append(append(lines, line...), '\n')
 		}
-		if back, err := read(lines); err != nil || !reflect.DeepEqual(back, items) {
+		if back, err := read(big, lines); err != nil || !reflect.DeepEqual(back, items) {
 			t.Fatalf("%q\n-> %q\n-> %v (%v)", data, lines, back, err)
 		}
 
@@ -182,6 +187,33 @@ func FuzzStreamBodies(f *testing.F) {
 		}
 		if back := readEvents(stream); !slices.Equal(back, events) {
 			t.Fatalf("%q\n-> %q\n-> %+v, want %+v", data, stream, back, events)
+		}
+
+		decode := func(ev Event, validate bool) (TypedEvent[any], error) {
+			v, err := EventData[any](ev, oapi.Request, validate, nil)
+			return TypedEvent[any]{ID: ev.ID, Event: ev.Event, Retry: ev.Retry, Data: v}, err
+		}
+		readTyped := func(c *Config, body []byte) []TypedEvent[any] {
+			var typed []TypedEvent[any]
+			for ev, err := range TypedEventsBody(c, httptest.NewRequest("POST", "/", bytes.NewReader(body)), decode) {
+				if err != nil {
+					break
+				}
+				typed = append(typed, ev)
+			}
+			return typed
+		}
+		typed := readTyped(c, data)
+		stream = nil
+		for _, ev := range typed {
+			raw, err := EncodeEvent(ev, "", ev.Data, oapi.Request)
+			if err != nil {
+				t.Fatalf("encoding %+v: %v", ev, err)
+			}
+			stream = AppendEvent(stream, raw)
+		}
+		if back := readTyped(big, stream); !reflect.DeepEqual(back, typed) {
+			t.Fatalf("%q\n-> %q\n-> %+v, want %+v", data, stream, back, typed)
 		}
 	})
 }

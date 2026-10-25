@@ -130,6 +130,47 @@ func (r *Request) EventsBody(events iter.Seq2[server.Event, error]) {
 	}
 }
 
+// TypedEventsBody sets the body to events as server-sent events, each
+// written by encode, or with its data as JSON if encode is nil, and, if c
+// validates requests, its data checked with check first. An invalid
+// event, or an error events yields, ends the request with that error: a
+// *InvalidRequest, with pointers into the event from its index
+// ("/2/data/name"), for an invalid one.
+func TypedEventsBody[T any](c *Config, r *Request, events iter.Seq2[server.TypedEvent[T], error], encode func(server.TypedEvent[T]) (server.Event, error), check func(T) error) {
+	if !c.ValidateRequests {
+		check = nil
+	}
+	if encode == nil {
+		encode = func(ev server.TypedEvent[T]) (server.Event, error) {
+			return server.EncodeEvent(ev, "", ev.Data, oapi.Request)
+		}
+	}
+	r.EventsBody(func(yield func(server.Event, error) bool) {
+		i := 0
+		for typed, err := range events {
+			if err == nil && check != nil {
+				if verr := check(typed.Data); verr != nil {
+					var errs oapi.ValidationErrors
+					errs.Nested("/"+strconv.Itoa(i)+"/data", verr)
+					var b server.Binder
+					b.Body(errs.Err())
+					err = &InvalidRequest{Problem: b.Problem()}
+				}
+			}
+			var ev server.Event
+			if err == nil {
+				if ev, err = encode(typed); err != nil {
+					err = fmt.Errorf("body: event %d: %w", i, err)
+				}
+			}
+			if !yield(ev, err) || err != nil {
+				return
+			}
+			i++
+		}
+	})
+}
+
 // streamBody is a request body written as the transport reads it. The
 // writer starts on the first read, so a request that is never sent
 // leaves nothing running, and Close stops it.

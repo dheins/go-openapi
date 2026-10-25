@@ -306,6 +306,38 @@ func (s *store) PostEvents(_ context.Context, req *api.PostEventsRequest) (api.P
 	return api.PostEvents200JSONResponse{Body: int64(len(events))}, nil
 }
 
+// Feed announces every pet, removes Tom and pings: one event of each
+// kind, the variant naming the kind.
+func (s *store) Feed(context.Context, *api.FeedRequest) (api.FeedResponse, error) {
+	return api.Feed200EventsResponse{Events: func(yield func(server.TypedEvent[model.Feed200EventData], error) bool) {
+		for _, p := range s.pets {
+			if !yield(server.TypedEvent[model.Feed200EventData]{Data: model.NewFeed200EventData(p)}, nil) {
+				return
+			}
+		}
+		removed := model.NewFeed200EventData(model.Feed200EventRemovedData{ID: 2})
+		ping := model.NewFeed200EventData(model.Feed200EventDataString("hi"))
+		_ = yield(server.TypedEvent[model.Feed200EventData]{ID: "r2", Data: removed}, nil) &&
+			yield(server.TypedEvent[model.Feed200EventData]{Data: ping}, nil)
+	}}, nil
+}
+
+func (s *store) PostTypedEvents(_ context.Context, req *api.PostTypedEventsRequest) (api.PostTypedEventsResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var events []server.TypedEvent[model.Pet]
+	names := []string{}
+	for ev, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, ev)
+		names = append(names, ev.Data.Name)
+	}
+	s.seen["PostTypedEvents"] = events
+	return api.PostTypedEvents200JSONResponse{Body: names}, nil
+}
+
 // Echo sends each pet back as it arrives, while the rest is still being
 // sent.
 func (s *store) Echo(_ context.Context, req *api.EchoRequest) (api.EchoResponse, error) {
