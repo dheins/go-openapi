@@ -157,6 +157,8 @@ components:
         born:
           type: string
           format: date
+        diet:
+          $ref: '#/components/schemas/Diet'
       type: object
       required:
         - id
@@ -169,6 +171,42 @@ components:
         - dog
         - cat
       description: Kind is the kind of a pet.
+    Diet:
+      oneOf:
+        - $ref: '#/components/schemas/Herbivore'
+        - $ref: '#/components/schemas/Carnivore'
+      required:
+        - type
+      description: Diet is what a pet eats.
+      discriminator:
+        propertyName: type
+        mapping:
+          Herbivore: '#/components/schemas/Herbivore'
+          meat: '#/components/schemas/Carnivore'
+    Herbivore:
+      properties:
+        type:
+          type: string
+        plants:
+          items:
+            type: string
+          type: array
+      type: object
+      required:
+        - type
+      description: Herbivore eats plants.
+    Carnivore:
+      properties:
+        type:
+          type: string
+        prey:
+          type: string
+          minLength: 1
+      type: object
+      required:
+        - type
+        - prey
+      description: Carnivore eats meat.
     Problem:
       properties:
         title:
