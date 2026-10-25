@@ -75,4 +75,16 @@ func TestTypeScriptClient(t *testing.T) {
 	if got := s.seen["Subscribe"].(*api.SubscribeRequest); got.XCallback.Value != "https://hooks.example.com/ping" {
 		t.Errorf("subscribe = %+v", got)
 	}
+	// The pets of the array, then those of the async iterable. (Items sent
+	// before an invalid one or an error may have been read too.)
+	var names []string
+	for _, p := range s.pets {
+		names = append(names, p.Name)
+	}
+	if i := slices.Index(names, "Bo"); i < 1 || len(names) < i+3 || !slices.Equal(names[i-1:i+3], []string{"Ann", "Bo", "Cy", "Di"}) {
+		t.Errorf("imported pets = %q", names)
+	}
+	if got := s.seen["PostEvents"].([]server.Event); !slices.Equal(got, []server.Event{{Event: "a", Data: "1\n2"}, {ID: "7", Data: "x"}}) {
+		t.Errorf("events = %+v", got)
+	}
 }

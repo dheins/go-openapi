@@ -17,8 +17,12 @@
   (`Config.ReadAll`). An operation streaming both ways is full duplex
   (`server.FullDuplex`). Generated Go clients send the iterator as it
   produces items (`client.JSONLinesBody`, `Request.EventsBody`), checking
-  each one when requests are validated. `FuzzStreamBodies` reads streams
-  and checks that what is read writes back the same.
+  each one when requests are validated. TypeScript clients take an
+  `Iterable`, such as an array, sent at once, or an `AsyncIterable`,
+  streamed as it yields (`duplex: "half"`); items are checked as they are
+  written, and an invalid one or an error of the iterator rejects the
+  call with it. `FuzzStreamBodies` reads streams and checks that what is
+  read writes back the same.
 - Unions in `codescan`: `//goapi:oneOf` or `//goapi:anyOf` on an interface
   makes it a union of the scanned packages' named types that implement it,
   by value or pointer. `discriminator=<property>` adds a discriminator

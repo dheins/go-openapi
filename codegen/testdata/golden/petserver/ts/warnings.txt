@@ -4,6 +4,3 @@ PutCard: the TypeScript client cannot send application/xml bodies yet; the opera
 BatchPets: the TypeScript client cannot send multipart/mixed bodies yet; the operation is left out
 UploadBundle: the TypeScript client cannot send multipart/related bodies yet; the operation is left out
 PutNotes: the TypeScript client cannot send multipart/alternative bodies yet; the operation is left out
-PostEvents: the TypeScript client cannot send text/event-stream bodies yet; the operation is left out
-ImportLines: the TypeScript client cannot send application/jsonl bodies yet
-Echo: the TypeScript client cannot send application/x-ndjson bodies yet
