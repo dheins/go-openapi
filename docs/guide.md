@@ -920,6 +920,43 @@ the flags `readOnly`, `writeOnly`, `deprecated`, `uniqueItems`,
 as they are; other values are JSON. Doc comments become descriptions, and
 a `Deprecated:` paragraph sets `deprecated`.
 
+### Unions
+
+An interface marked `//goapi:oneOf` (exactly one variant matches) or
+`//goapi:anyOf` (one or more may) is a union. Its variants are the named
+types of the scanned packages that implement it, by value or by pointer:
+
+```go
+// Diet is what a pet eats.
+//
+//goapi:oneOf discriminator=type         ← the property that selects the variant
+type Diet interface{ diet() }
+
+type Herbivore struct {
+	Type   string   `json:"type"`
+	Plants []string `json:"plants,omitempty"`
+}
+
+func (Herbivore) diet() {}
+
+//goapi:discriminatorValue meat          ← instead of "Carnivore"
+type Carnivore struct {
+	Type string `json:"type"`
+	Prey string `json:"prey"`
+}
+
+func (*Carnivore) diet() {}
+```
+
+`Diet` becomes `oneOf` references to `Herbivore` and `Carnivore`. With a
+discriminator, the union requires the property, and its mapping gives each
+variant's value: the type name, unless `//goapi:discriminatorValue`
+gives another. Every variant must have the property, and no two variants
+may have the same value. Other interfaces are any value, with a warning
+unless they are empty (`any`).
+A generated model of the document holds the variants in a sum type and
+writes the discriminator value when encoding.
+
 ### Operations
 
 Any function or method can declare an operation; it does not have to be
