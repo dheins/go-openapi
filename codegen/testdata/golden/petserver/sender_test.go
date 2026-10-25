@@ -28,14 +28,23 @@ import (
 type receiver struct {
 	mu   sync.Mutex
 	seen []any
+	// callers are who hookAuth found sent each request, if anyone.
+	callers []any
 	// gone makes pet events answer 410, and fail an error.
 	gone, fail bool
 }
 
-func (r *receiver) record(req any) {
+func (r *receiver) record(ctx context.Context, req any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seen = append(r.seen, req)
+	r.callers = append(r.callers, ctx.Value(callerKey{}))
+}
+
+func (r *receiver) lastCaller() any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.callers[len(r.callers)-1]
 }
 
 func (r *receiver) last() any {
@@ -47,13 +56,13 @@ func (r *receiver) last() any {
 	return r.seen[len(r.seen)-1]
 }
 
-func (r *receiver) PetAdoptedWebhook(_ context.Context, req *api.PetAdoptedWebhookRequest) (api.PetAdoptedWebhookResponse, error) {
-	r.record(req)
+func (r *receiver) PetAdoptedWebhook(ctx context.Context, req *api.PetAdoptedWebhookRequest) (api.PetAdoptedWebhookResponse, error) {
+	r.record(ctx, req)
 	return api.PetAdoptedWebhook200JSONResponse{Body: model.PetAdoptedWebhook200ResponseBody{Ok: oapi.Some(req.Body.By != "nobody")}}, nil
 }
 
-func (r *receiver) SubscribePetEventCallback(_ context.Context, req *api.SubscribePetEventCallbackRequest) (api.SubscribePetEventCallbackResponse, error) {
-	r.record(req)
+func (r *receiver) SubscribePetEventCallback(ctx context.Context, req *api.SubscribePetEventCallbackRequest) (api.SubscribePetEventCallbackResponse, error) {
+	r.record(ctx, req)
 	switch {
 	case r.fail:
 		return nil, problem.New(http.StatusServiceUnavailable, "try later")
@@ -63,8 +72,8 @@ func (r *receiver) SubscribePetEventCallback(_ context.Context, req *api.Subscri
 	return api.SubscribePetEventCallback204Response{}, nil
 }
 
-func (r *receiver) SubscribePingCallback(_ context.Context, req *api.SubscribePingCallbackRequest) (api.SubscribePingCallbackResponse, error) {
-	r.record(req)
+func (r *receiver) SubscribePingCallback(ctx context.Context, req *api.SubscribePingCallbackRequest) (api.SubscribePingCallbackResponse, error) {
+	r.record(ctx, req)
 	return api.SubscribePingCallback200TextResponse{Body: "pong " + strconv.FormatInt(req.N.Value, 10)}, nil
 }
 
@@ -76,7 +85,11 @@ type hookAuth struct{}
 type callerKey struct{}
 
 func (hookAuth) HookKey(ctx context.Context, key string, _ []string) (context.Context, error) {
-	if key != "consumer-key" {
+	switch key {
+	case "revoked":
+		return nil, problem.New(http.StatusForbidden, "the key was revoked")
+	case "consumer-key":
+	default:
 		return nil, errors.New("unknown key")
 	}
 	return context.WithValue(ctx, callerKey{}, "key"), nil
@@ -265,5 +278,66 @@ func TestSenderCredentials(t *testing.T) {
 	token := SenderCredentials{HookToken: func(context.Context, string) (string, error) { return "token", nil }}
 	if _, err := newSender(t, token).SubscribePingCallback(ctx, srv.URL+"/ping", ping); err != nil {
 		t.Errorf("ping with a token: %v", err)
+	}
+}
+
+func TestReceiverSecurity(t *testing.T) {
+	ctx := context.Background()
+	r := &receiver{}
+	srv := newReceiver(t, r)
+	adopted := &api.PetAdoptedWebhookRequest{Body: model.PetAdoptedWebhookRequestBody{Pet: model.Pet{Name: "Rex"}, By: "Ann"}}
+	key := func(k string) *Sender {
+		return newSender(t, SenderCredentials{HookKey: func(context.Context, string) (string, error) { return k, nil }})
+	}
+
+	// The context the security handler returns is the method's.
+	if _, err := key("consumer-key").PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); err != nil || r.lastCaller() != "key" {
+		t.Errorf("accepted key: %v, caller %v", err, r.lastCaller())
+	}
+	calls := len(r.seen)
+
+	// Credentials that are not accepted are 401, without the reason; a
+	// problem the handler returns is sent as it is.
+	var unexpected *client.UnexpectedResponse
+	if _, err := key("wrong").PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); !errors.As(err, &unexpected) ||
+		unexpected.StatusCode != 401 || unexpected.Problem.Detail != "the credentials are not valid" {
+		t.Errorf("wrong key: %v", err)
+	}
+	if _, err := key("revoked").PetAdoptedWebhook(ctx, srv.URL+"/hooks/adopted", adopted); !errors.As(err, &unexpected) ||
+		unexpected.StatusCode != 403 || unexpected.Problem.Detail != "the key was revoked" {
+		t.Errorf("revoked key: %v", err)
+	}
+	// Without credentials, the challenge names the alternative that has one.
+	resp, err := http.Post(srv.URL+"/hooks/adopted", "application/json", strings.NewReader(`{"pet":{"name":"Rex"},"by":"Ann"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), "Basic") {
+		t.Errorf("no credentials: %d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	}
+	if len(r.seen) != calls {
+		t.Errorf("the receiver was called %d times for rejected requests", len(r.seen)-calls)
+	}
+
+	// The ping takes a token or none, but a token it does not accept is
+	// rejected rather than taken as no credentials.
+	ping := &api.SubscribePingCallbackRequest{N: oapi.Some(int64(1))}
+	token := func(tok string) *Sender {
+		return newSender(t, SenderCredentials{HookToken: func(context.Context, string) (string, error) { return tok, nil }})
+	}
+	if _, err := token("token").SubscribePingCallback(ctx, srv.URL+"/ping", ping); err != nil || r.lastCaller() != "token" {
+		t.Errorf("token: %v, caller %v", err, r.lastCaller())
+	}
+	if _, err := newSender(t, SenderCredentials{}).SubscribePingCallback(ctx, srv.URL+"/ping", ping); err != nil || r.lastCaller() != nil {
+		t.Errorf("anonymous: %v, caller %v", err, r.lastCaller())
+	}
+	if _, err := token("bad").SubscribePingCallback(ctx, srv.URL+"/ping", ping); !errors.As(err, &unexpected) || unexpected.StatusCode != 401 {
+		t.Errorf("bad token: %v", err)
+	}
+	// The pet event callback declares no security.
+	event := &api.SubscribePetEventCallbackRequest{XEvent: model.SubscribePetEventCallbackXEventCreated, Body: model.Pet{Name: "Rex"}}
+	if _, err := newSender(t, SenderCredentials{}).SubscribePetEventCallback(ctx, srv.URL+"/hooks/pets/POST", event); err != nil {
+		t.Errorf("unsecured callback: %v", err)
 	}
 }
