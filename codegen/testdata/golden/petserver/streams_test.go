@@ -7,12 +7,14 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -227,5 +229,81 @@ func TestClientFullDuplex(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{"Ann", "Bo"}) {
 		t.Errorf("echoed %q", got)
+	}
+}
+
+func TestClientTypedEvents(t *testing.T) {
+	ctx := context.Background()
+	_, c := newTestClient(t, petclient.Credentials{})
+
+	// Each event comes back as the kind its name says, with its data.
+	resp := as[api.Feed200EventsResponse](t)(c.Feed(ctx, nil))
+	var got []string
+	for ev, err := range resp.Events {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch d := ev.Data.Value().(type) {
+		case model.Pet:
+			got = append(got, ev.Event+" "+d.Name)
+		case model.Feed200EventRemovedData:
+			got = append(got, fmt.Sprintf("%s %d %s", ev.Event, d.ID, ev.ID))
+		case model.Feed200EventDataString:
+			got = append(got, ev.Event+" "+string(d))
+		}
+	}
+	if want := []string{"added Rex", "added Tom", "removed 2 r2", "ping hi"}; !slices.Equal(got, want) {
+		t.Errorf("feed %q, want %q", got, want)
+	}
+
+	// An event that does not decode ends the loop; constraints are checked
+	// with response validation.
+	feed := func(body string, opts ...client.Option) error {
+		t.Helper()
+		_, fake := newTestClient(t, petclient.Credentials{}, append(opts, respond(200, http.Header{"Content-Type": {"text/event-stream"}}, body))...)
+		resp := as[api.Feed200EventsResponse](t)(fake.Feed(ctx, nil))
+		for _, err := range resp.Events {
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var invalid *client.InvalidResponse
+	for _, body := range []string{"event: other\ndata: 1\n\n", "event: added\ndata: not json\n\n"} {
+		if err := feed(body); !errors.As(err, &invalid) {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+	zero := "event: removed\ndata: {\"id\":0}\n\n"
+	if err := feed(zero); err != nil {
+		t.Errorf("unvalidated: %v", err)
+	}
+	if err := feed(zero, client.WithResponseValidation()); !errors.As(err, &invalid) || !strings.Contains(err.Error(), "/data/id") {
+		t.Errorf("validated: %v", err)
+	}
+
+	// Typed request events are checked before they are sent, and by the
+	// server without that.
+	pets := func(names ...string) iter.Seq2[server.TypedEvent[model.Pet], error] {
+		return func(yield func(server.TypedEvent[model.Pet], error) bool) {
+			for i, name := range names {
+				if !yield(server.TypedEvent[model.Pet]{ID: strconv.Itoa(i), Data: model.Pet{Name: name}}, nil) {
+					return
+				}
+			}
+		}
+	}
+	if r := as[api.PostTypedEvents200JSONResponse](t)(c.PostTypedEvents(ctx, &api.PostTypedEventsRequest{Body: pets("Ann", "Bo")})); !slices.Equal(r.Body, []string{"Ann", "Bo"}) {
+		t.Errorf("typed events: %+v", r)
+	}
+	var invalidReq *client.InvalidRequest
+	if _, err := c.PostTypedEvents(ctx, &api.PostTypedEventsRequest{Body: pets("Cy", "")}); !errors.As(err, &invalidReq) || invalidReq.Problem.Errors[0].Pointer != "/1/data/name" {
+		t.Errorf("invalid event: %v", err)
+	}
+	_, lax := newTestClient(t, petclient.Credentials{}, client.WithoutRequestValidation())
+	_, err := lax.PostTypedEvents(ctx, &api.PostTypedEventsRequest{Body: pets("Di", "")})
+	if u := unexpected(t, err, 400); u.Problem == nil || u.Problem.Errors[0].Pointer != "/1/data/name" {
+		t.Errorf("server-side invalid event: %+v", u.Problem)
 	}
 }
