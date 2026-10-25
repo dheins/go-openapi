@@ -43,4 +43,23 @@ type CallbackHandler interface {
 {{- end}}
 }
 {{- end}}
+{{- if .Schemes}}
+
+// ReceiverSecurityHandler checks the credentials the API sends with its
+// webhooks and callbacks, with one method per security scheme they use.
+// The handler of a webhook or callback that declares security takes one.
+// A method returns the context the receiver's method runs with, or an
+// error: a *problem.Problem (such as 403 for missing scopes) is sent as it
+// is, any other error as 401 without details.
+//
+// A method is only called when the request carries credentials for its
+// scheme; requests without any are answered with 401 unless the webhook
+// or callback allows anonymous requests.
+type ReceiverSecurityHandler interface {
+{{- range .Schemes}}
+{{securityDoc .}}
+	{{.Method}}(ctx {{imp "context" "context"}}.Context, {{securityParams .}}, scopes []string) (context.Context, error)
+{{- end}}
+}
+{{- end}}
 {{- end}}

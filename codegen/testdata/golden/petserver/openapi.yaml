@@ -725,6 +725,7 @@ paths:
         ping:
           "{$request.header.X-Callback}":
             get:
+              security: [{hookToken: []}, {}]
               parameters:
                 - name: n
                   in: query
@@ -741,6 +742,7 @@ paths:
 webhooks:
   petAdopted:
     post:
+      security: [{hookKey: []}, {basicAuth: []}]
       requestBody:
         required: true
         content:
@@ -944,3 +946,11 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+    hookKey:
+      type: apiKey
+      in: header
+      name: X-Hook-Key
+      description: The key a consumer issued for its webhooks.
+    hookToken:
+      type: http
+      scheme: bearer

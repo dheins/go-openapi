@@ -4,6 +4,20 @@ a method per webhook and callback) goes to the server package.
 */ -}}
 
 {{define "sender"}}
+{{- if .Schemes}}
+// SenderCredentials are the credentials the sender sends, one per security
+// scheme of the webhooks and callbacks. Each is given the target URL, so
+// that it can return the credentials of the consumer there. A request uses
+// the first of its security requirements whose credentials are all set; a
+// field left nil is not set.
+type SenderCredentials struct {
+{{- range .Schemes}}
+{{credentialDoc .}}
+	{{.Method}} {{senderCredentialType .}}
+{{- end}}
+}
+
+{{end -}}
 // Sender sends the document's webhooks and callbacks, with a method per
 // webhook and callback, to the URL given with each: one a consumer
 // registered for a webhook, or the URL of a callback (the callback's URL
@@ -14,17 +28,24 @@ a method per webhook and callback) goes to the server package.
 // middleware (client.WithMiddleware).
 type Sender struct {
 	cfg *client.Config
+{{- if .Schemes}}
+	creds SenderCredentials
+{{- end}}
 }
 
-// NewSender returns a sender configured by opts.
-func NewSender(opts ...client.Option) (*Sender, error) {
+// NewSender returns a sender{{if .Schemes}} sending creds,{{end}} configured by opts.
+func NewSender({{if .Schemes}}creds SenderCredentials, {{end}}opts ...client.Option) (*Sender, error) {
 	cfg, err := client.NewSenderConfig(opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &Sender{cfg: cfg}, nil
+	return &Sender{cfg: cfg{{if .Schemes}}, creds: creds{{end}}}, nil
 }
-{{- range .}}
+{{- range .Schemes}}
+
+{{senderScheme .}}
+{{- end}}
+{{- range .Ops}}
 
 {{senderMethod .}}
 {{- end}}

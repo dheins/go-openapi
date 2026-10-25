@@ -40,3 +40,23 @@ type CallbackHandler interface {
 	// {$request.header.X-Callback}).
 	SubscribePingCallback(ctx context.Context, req *SubscribePingCallbackRequest) (SubscribePingCallbackResponse, error)
 }
+
+// ReceiverSecurityHandler checks the credentials the API sends with its
+// webhooks and callbacks, with one method per security scheme they use.
+// The handler of a webhook or callback that declares security takes one.
+// A method returns the context the receiver's method runs with, or an
+// error: a *problem.Problem (such as 403 for missing scopes) is sent as it
+// is, any other error as 401 without details.
+//
+// A method is only called when the request carries credentials for its
+// scheme; requests without any are answered with 401 unless the webhook
+// or callback allows anonymous requests.
+type ReceiverSecurityHandler interface {
+	// HookToken checks a bearer token (security scheme "hookToken").
+	HookToken(ctx context.Context, token string, scopes []string) (context.Context, error)
+	// HookKey checks the API key sent in the header "X-Hook-Key" (security scheme "hookKey").
+	// The key a consumer issued for its webhooks.
+	HookKey(ctx context.Context, key string, scopes []string) (context.Context, error)
+	// BasicAuth checks HTTP basic credentials (security scheme "basicAuth").
+	BasicAuth(ctx context.Context, username, password string, scopes []string) (context.Context, error)
+}

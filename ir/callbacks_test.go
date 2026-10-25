@@ -49,7 +49,7 @@ paths:
 webhooks:
   newPet:
     post:
-      security: [{key: []}]
+      security: [{hook: []}, {}]
       requestBody:
         content: {application/json: {schema: {$ref: "#/components/schemas/Pet"}}}
       responses: {"200": {description: ok}}
@@ -62,17 +62,31 @@ components:
     Pet: {type: object, properties: {name: {type: string}}}
   securitySchemes:
     key: {type: apiKey, in: header, name: X-Key}
+    hook: {type: http, scheme: bearer}
 `, Options{Operations: true})
 
 	var hooks []string
 	for _, o := range m.Webhooks {
-		hooks = append(hooks, fmt.Sprintf("%s %s %s %s %v", o.Webhook, o.Method, o.Name, o.RequestType, o.Security))
+		var reqs []string
+		for _, req := range o.Security {
+			var names []string
+			for _, u := range req {
+				names = append(names, u.Scheme.Name)
+			}
+			reqs = append(reqs, "{"+strings.Join(names, " ")+"}")
+		}
+		hooks = append(hooks, fmt.Sprintf("%s %s %s %s %v", o.Webhook, o.Method, o.Name, o.RequestType, reqs))
 	}
 	// The second subscribe is taken by the operation, but the suffix sets
-	// it apart; webhooks are not secured by the document's requirements.
-	want := []string{"newPet POST NewPetWebhook NewPetWebhookRequest []", "petGone POST SubscribeWebhook SubscribeWebhookRequest []"}
+	// it apart; webhooks have their own requirements, not the document's.
+	want := []string{"newPet POST NewPetWebhook NewPetWebhookRequest [{hook} {}]", "petGone POST SubscribeWebhook SubscribeWebhookRequest []"}
 	if !slices.Equal(hooks, want) {
 		t.Errorf("webhooks:\n%q\nwant\n%q", hooks, want)
+	}
+	// The API sends credentials of the webhooks' schemes, and checks those
+	// of the operations'.
+	if len(m.SenderSchemes) != 1 || m.SenderSchemes[0].Method != "Hook" || len(m.SecuritySchemes) != 1 || m.SecuritySchemes[0].Name != "key" {
+		t.Errorf("sender schemes %+v, schemes %+v", m.SenderSchemes, m.SecuritySchemes)
 	}
 	if b := m.Webhooks[0].Body; b == nil || b.Value.Type == nil || b.Value.Type.Name != "Pet" {
 		t.Errorf("webhook body = %+v", b)
@@ -113,7 +127,6 @@ components:
 		warnings = append(warnings, w.Location.Pointer+": "+w.Message)
 	}
 	for _, w := range []string{
-		"/webhooks/newPet/post/security: security requirements of webhooks and callbacks are not applied; add credentials or signatures with client middleware",
 		`/paths/~1subscriptions~1{tenant}/post/callbacks/audit/https:~1~1{$request.path.tenant}.example.com~1{$request.header.x-hook}?s={$response.body#~1id}/post: the URL "https://{$request.path.tenant}.example.com/{$request.header.x-hook}?s={$response.body#/id}" of callback "audit": $response.body#/id is not part of the request type; it is not computed, so the sender passes it`,
 	} {
 		if !slices.Contains(warnings, w) {

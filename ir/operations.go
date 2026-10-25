@@ -391,8 +391,9 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 		b.security(o, op)
 		b.callbacks(o, op, methods)
 	case len(op.Security) > 0:
-		// The document's security is for the operations the API serves.
-		b.warnAt(op, []string{"security"}, "security requirements of webhooks and callbacks are not applied; add credentials or signatures with client middleware")
+		// Only their own: the document's security is for the operations the
+		// API serves.
+		b.requirements(o, op, op.Security, op, &b.model.SenderSchemes)
 	}
 	if site.kind != PathOperation && op.Callbacks.Len() > 0 {
 		b.warnAt(op, []string{"callbacks"}, "callbacks of webhooks and callbacks are not generated")
@@ -1326,21 +1327,26 @@ func effectiveSecurity(doc *oas.Document, op *oas.Operation) []oas.SecurityRequi
 
 // security maps the security requirements of op.
 func (b *builder) security(o *Operation, op *oas.Operation) {
-	reqs := effectiveSecurity(b.spec.Document, op)
-	if len(reqs) == 0 {
-		return
-	}
 	// Scheme names written as relative URI references are resolved
 	// against the file of the requirement's owner.
 	var owner any = b.spec.Document
 	if op.Security != nil {
 		owner = op
 	}
+	b.requirements(o, op, effectiveSecurity(b.spec.Document, op), owner, &b.model.SecuritySchemes)
+}
+
+// requirements sets the security requirements of o to reqs, those of op
+// or of owner, adding the schemes they use to schemes.
+func (b *builder) requirements(o *Operation, op *oas.Operation, reqs []oas.SecurityRequirement, owner any, schemes *[]*SecurityScheme) {
+	if len(reqs) == 0 {
+		return
+	}
 	o.Security = [][]*SecurityUse{}
 	for _, req := range reqs {
 		uses := []*SecurityUse{}
 		for name, scopes := range req.All() {
-			scheme, why := b.securityScheme(owner, name)
+			scheme, why := b.securityScheme(owner, name, schemes)
 			if why != "" {
 				b.unsupported(o, op, why)
 				return
@@ -1352,15 +1358,18 @@ func (b *builder) security(o *Operation, op *oas.Operation) {
 }
 
 // securityScheme returns the scheme a requirement of owner names, by
-// component name or URI reference, mapping it on first use. Names that
-// lead to the same scheme share one SecurityHandler method.
-func (b *builder) securityScheme(owner any, name string) (*SecurityScheme, string) {
+// component name or URI reference, mapping it on first use and adding it
+// to schemes. Names that lead to the same scheme share one method.
+func (b *builder) securityScheme(owner any, name string, schemes *[]*SecurityScheme) (*SecurityScheme, string) {
 	def := b.spec.SecurityScheme(owner, name)
 	if def == nil {
 		return nil, fmt.Sprintf("security scheme %q is not defined", name)
 	}
-	for _, s := range b.model.SecuritySchemes {
+	for _, s := range slices.Concat(b.model.SecuritySchemes, b.model.SenderSchemes) {
 		if s.def == def {
+			if !slices.Contains(*schemes, s) {
+				*schemes = append(*schemes, s)
+			}
 			return s, ""
 		}
 	}
@@ -1380,7 +1389,7 @@ func (b *builder) securityScheme(owner any, name string) (*SecurityScheme, strin
 		method = method[i+1:]
 	}
 	s.Method = b.securityMethods.claim(GoName(method))
-	b.model.SecuritySchemes = append(b.model.SecuritySchemes, s)
+	*schemes = append(*schemes, s)
 	return s, ""
 }
 

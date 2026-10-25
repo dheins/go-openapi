@@ -42,6 +42,10 @@ type Model struct {
 	// SecuritySchemes are the schemes the generated operations use, in
 	// document order.
 	SecuritySchemes []*SecurityScheme
+	// SenderSchemes are the schemes the webhooks and callbacks use, which
+	// the API sends credentials for, in document order. A scheme both
+	// use is in both.
+	SenderSchemes []*SecurityScheme
 	// Warnings report schema features that are not represented in the
 	// generated types.
 	Warnings []Warning

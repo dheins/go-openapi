@@ -150,7 +150,7 @@ var {{.Name}}Operation = {{opInfo .Operation}}
 //
 // It {{if .Security}}checks the credentials with sec, {{end}}decodes and validates the
 // request, calls h.{{.Name}} and sends the response it returns.
-func Handle{{.Name}}(c *server.Config, h {{.Interface}}{{if .Secured}}, sec SecurityHandler{{end}}) http.Handler {
+func Handle{{.Name}}(c *server.Config, h {{.Interface}}{{with .SecurityType}}, sec {{.}}{{end}}) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.Log(r.Context(), {{imp "log/slog" "slog"}}.LevelDebug, "handling request")
 {{- if .Security}}

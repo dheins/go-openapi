@@ -93,7 +93,11 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		if err := og.operationFiles(o); err != nil {
 			return nil, err
 		}
-		if err := og.handlerFile(handlerData{o, len(m.SecuritySchemes) > 0, "Handler"}); err != nil {
+		sec := ""
+		if len(m.SecuritySchemes) > 0 {
+			sec = "SecurityHandler"
+		}
+		if err := og.handlerFile(handlerData{o, sec, "Handler"}); err != nil {
 			return nil, err
 		}
 	}
@@ -103,10 +107,10 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 				return nil, err
 			}
 		}
-		if err := og.receiverFile(sent); err != nil {
+		if err := og.receiverFile(sent, m.SenderSchemes); err != nil {
 			return nil, err
 		}
-		content, err := g.render("sender", sent, func(f *fileGen) {
+		content, err := g.render("sender", senderData{Ops: sent, Schemes: m.SenderSchemes}, func(f *fileGen) {
 			f.imp(clientImport, "client")
 		})
 		if err != nil {
@@ -117,12 +121,20 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 	return packageFiles(gens, order), nil
 }
 
-// handlerData is what the handler template needs: the operation, whether
-// the handler takes a SecurityHandler, and the interface it calls.
+// senderData is what the sender template needs: the webhooks and
+// callbacks, and the schemes they send credentials of.
+type senderData struct {
+	Ops     []*ir.Operation
+	Schemes []*ir.SecurityScheme
+}
+
+// handlerData is what the handler template needs: the operation, the
+// type of the handler's security handler ("" for none), and the
+// interface it calls.
 type handlerData struct {
 	*ir.Operation
-	Secured   bool
-	Interface string
+	SecurityType string
+	Interface    string
 }
 
 // handlerFile adds the file of the HTTP handler of d.Operation.
