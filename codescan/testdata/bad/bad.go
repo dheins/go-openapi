@@ -25,3 +25,47 @@ type Uses struct {
 
 //goapi:schema "unterminated
 type Quote struct{}
+
+// Shape has variants without the discriminator, and two with one value.
+//
+//goapi:oneOf discriminator=kind
+type Shape interface{ area() float64 }
+
+type Square struct {
+	Side float64 `json:"side"`
+}
+
+func (Square) area() float64 { return 0 }
+
+type Circle struct {
+	Kind string `json:"kind"`
+}
+
+func (Circle) area() float64 { return 0 }
+
+//goapi:discriminatorValue Circle
+type Oval struct {
+	Kind string `json:"kind"`
+}
+
+func (Oval) area() float64 { return 0 }
+
+//goapi:oneOf
+type NotAnInterface struct{}
+
+//goapi:discriminatorValue x
+type Lonely struct{}
+
+// Nobody has no variants.
+//
+//goapi:anyOf
+type Nobody interface{ nobody() }
+
+//goapi:oneOf color=red
+type Odd interface{ odd() }
+
+//goapi:schema
+type Unions struct {
+	S Shape  `json:"s"`
+	N Nobody `json:"n"`
+}

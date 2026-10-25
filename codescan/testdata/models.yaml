@@ -127,6 +127,7 @@ components:
       type: object
       required:
         - email
+      description: Owner is an owner, from another package.
     Level:
       type: integer
       enum:
@@ -183,3 +184,80 @@ components:
       required:
         - items
       description: Page is a page of items.
+    Feeding:
+      properties:
+        diet:
+          $ref: '#/components/schemas/Diet'
+        contact:
+          $ref: '#/components/schemas/Contact'
+        backup:
+          anyOf:
+            - $ref: '#/components/schemas/Diet'
+            - type: "null"
+      type: object
+      required:
+        - diet
+        - backup
+      description: Feeding uses the unions.
+    Diet:
+      oneOf:
+        - $ref: '#/components/schemas/Omnivore'
+        - $ref: '#/components/schemas/Herbivore'
+        - $ref: '#/components/schemas/Carnivore'
+      required:
+        - kind
+      description: Diet is what a pet eats.
+      discriminator:
+        propertyName: kind
+        mapping:
+          Omnivore: '#/components/schemas/Omnivore'
+          Herbivore: '#/components/schemas/Herbivore'
+          meat: '#/components/schemas/Carnivore'
+    Omnivore:
+      properties:
+        kind:
+          type: string
+      type: object
+      required:
+        - kind
+      description: Omnivore eats anything; a variant of models.Diet from another package.
+    Herbivore:
+      properties:
+        kind:
+          type: string
+        plants:
+          items:
+            type: string
+          type: array
+      type: object
+      required:
+        - kind
+        - plants
+      description: Herbivore eats plants.
+    Carnivore:
+      properties:
+        kind:
+          type: string
+        prey:
+          type: string
+      type: object
+      required:
+        - kind
+        - prey
+      description: Carnivore eats meat; a Diet through its pointer.
+    Contact:
+      anyOf:
+        - $ref: '#/components/schemas/Email'
+        - $ref: '#/components/schemas/Phone'
+      description: 'Contact is how to reach an owner: any of its variants may match.'
+    Email:
+      type: string
+      description: Email is an email address.
+    Phone:
+      properties:
+        number:
+          type: string
+      type: object
+      required:
+        - number
+      description: Phone is a phone number.

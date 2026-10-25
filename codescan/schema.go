@@ -127,6 +127,9 @@ func (s *scanner) named(t *types.Named) *oas.Schema {
 	case oapiPath + ".File":
 		return &oas.Schema{Type: oas.Types{"string"}, Format: "binary"}
 	}
+	if td := s.decls[obj]; td != nil && td.union != "" {
+		return s.component(t, td, func() *oas.Schema { return s.unionSchema(td) })
+	}
 	_, isStruct := t.Underlying().(*types.Struct)
 	switch {
 	case hasMethod(t, "MarshalJSON") && !isStruct:
@@ -137,23 +140,33 @@ func (s *scanner) named(t *types.Named) *oas.Schema {
 		return &oas.Schema{Type: oas.Types{"string"}}
 	}
 
+	td := s.decls[obj]
+	return s.component(t, td, func() *oas.Schema {
+		schema := s.schemaOf(t.Underlying())
+		if td != nil && td.enum {
+			schema.Enum = s.enumValues(t, td)
+		}
+		return schema
+	})
+}
+
+// component returns a reference to the component of the named type t,
+// adding it the first time with the schema build returns and the type's
+// documentation.
+func (s *scanner) component(t *types.Named, td *typeDecl, build func() *oas.Schema) *oas.Schema {
 	key := types.TypeString(t, nil)
 	if name, ok := s.names[key]; ok {
 		return &oas.Schema{Ref: refPrefix + name}
 	}
-	td := s.decls[obj]
 	name := s.componentName(t, td)
 	s.names[key] = name
 	// Reserve the place first, so a recursive type refers to itself.
 	s.schemas.Set(name, &oas.Schema{})
-	defer s.at(obj.Pos())()
-	schema := s.schemaOf(t.Underlying())
+	defer s.at(t.Obj().Pos())()
+	schema := build()
 	if td != nil {
 		desc, deprecated := docText(td.doc)
 		schema.Description, schema.Deprecated = desc, deprecated
-		if td.enum {
-			schema.Enum = s.enumValues(t, td)
-		}
 	}
 	s.schemas.Set(name, schema)
 	return &oas.Schema{Ref: refPrefix + name}
