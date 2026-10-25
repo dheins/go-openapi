@@ -49,6 +49,8 @@
 # testdata/badops/badops.go:142:1: error: goapi:link: no operation has the operationId "nosuchop"
 # testdata/badops/badops.go:144:1: error: goapi:link: response 200 already has a link "next"
 # testdata/badops/badops.go:145:1: error: goapi:link takes a status and a name, then operationId= and the parameters
+# testdata/badops/badops.go:150:2: error: field A: explode is true or false, not "maybe"
+# testdata/badops/badops.go:151:2: error: field B: contentType needs a value
 openapi: 3.1.0
 info:
   title: Bad
@@ -135,6 +137,21 @@ paths:
               operationId: nosuchop
             next:
               operationId: examples
+  /parts:
+    post:
+      operationId: parts
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Parts'
+            encoding:
+              a: {}
+              b: {}
+        required: true
+      responses:
+        "204":
+          description: No Content.
 webhooks:
   hook:
     post:
@@ -148,3 +165,16 @@ webhooks:
       responses:
         "204":
           description: No Content.
+components:
+  schemas:
+    Parts:
+      properties:
+        a:
+          type: string
+        b:
+          type: string
+      type: object
+      required:
+        - a
+        - b
+      description: Parts has encodings codescan rejects.

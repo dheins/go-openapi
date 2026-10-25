@@ -164,3 +164,22 @@ func (s *Server) NotifyPet(ctx context.Context, req *PetEvent) error { return ni
 //goapi:callback subscribe petEvent GET {$request.body#/url}/pets id=pingSubscriber
 //goapi:response 200
 func (s *Server) PingSubscriber(ctx context.Context) error { return nil }
+
+// Upload is a pet's photo, with a caption and labels.
+type Upload struct {
+	Photo   oapi.File `json:"photo" goapi:"contentType=image/png|image/jpeg;headers=X-Checksum|X-Seq"`
+	Caption string    `json:"caption,omitempty" goapi:"maxLength=40"`
+	Labels  []string  `json:"labels,omitempty" goapi:"style=form;explode=false"`
+}
+
+// UploadRequest holds an upload.
+type UploadRequest struct {
+	ID     int64  `goapi:"in=path;name=id"`
+	Upload Upload `goapi:"in=body;mediaType=multipart/form-data"`
+}
+
+// UploadPhoto stores a photo with its caption.
+//
+//goapi:operation POST /pets/{id}/uploads
+//goapi:response 204
+func (s *Server) UploadPhoto(ctx context.Context, req *UploadRequest) error { return nil }

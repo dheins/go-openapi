@@ -245,6 +245,41 @@ paths:
               security:
                 - apiKey: []
                 - {}
+  /pets/{id}/uploads:
+    post:
+      description: UploadPhoto stores a photo with its caption.
+      operationId: uploadPhoto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Upload'
+            encoding:
+              photo:
+                contentType: image/png, image/jpeg
+                headers:
+                  X-Checksum:
+                    required: true
+                    schema:
+                      type: string
+                  X-Seq:
+                    required: true
+                    schema:
+                      type: string
+              labels:
+                style: form
+                explode: false
+        required: true
+      responses:
+        "204":
+          description: No Content.
 webhooks:
   petAdopted:
     post:
@@ -421,6 +456,22 @@ components:
         - pet
         - by
       description: AdoptedEvent is sent when a pet is adopted.
+    Upload:
+      properties:
+        photo:
+          type: string
+          format: binary
+        caption:
+          type: string
+          maxLength: 40
+        labels:
+          items:
+            type: string
+          type: array
+      type: object
+      required:
+        - photo
+      description: Upload is a pet's photo, with a caption and labels.
   securitySchemes:
     apiKey:
       type: apiKey

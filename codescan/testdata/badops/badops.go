@@ -144,3 +144,18 @@ func examples(req BodyReq) {}
 //goapi:link 200 next operationId=examples
 //goapi:link 200
 func links() {}
+
+// Parts has encodings codescan rejects.
+type Parts struct {
+	A string `json:"a" goapi:"explode=maybe"`
+	B string `json:"b" goapi:"contentType"`
+}
+
+// PartsReq sends Parts as a form.
+type PartsReq struct {
+	Body Parts `goapi:"in=body;mediaType=application/x-www-form-urlencoded"`
+}
+
+//goapi:operation POST /parts
+//goapi:response 204
+func parts(req PartsReq) {}

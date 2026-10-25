@@ -911,9 +911,112 @@ func (s *scanner) requestBody(op *oas.Operation, f *types.Var, tag reflect.Struc
 		if err := s.applyEntries(schema, schemaEntries); err != nil {
 			s.report(f.Pos(), Error, "field %s: %v", f.Name(), err)
 		}
-		rb.Content.Set(mt, &oas.MediaType{Schema: schema})
+		media := &oas.MediaType{Schema: schema}
+		if isFormOrMultipart(mt) {
+			media.Encoding = s.encodings(f.Type())
+		}
+		rb.Content.Set(mt, media)
 	}
 	op.RequestBody = rb
+}
+
+func isFormOrMultipart(mediaType string) bool {
+	mt, _, _ := strings.Cut(mediaType, ";")
+	mt = strings.TrimSpace(strings.ToLower(mt))
+	return mt == "application/x-www-form-urlencoded" || mt == "multipart/form-data"
+}
+
+// encodings returns the encoding of the properties of a form or multipart
+// body of type t, from the contentType, headers, style and explode keys
+// of its fields' goapi tags, or nil if they have none.
+func (s *scanner) encodings(t types.Type) *oas.OrderedMap[*oas.Encoding] {
+	t = deref(t)
+	if isOptional(t) {
+		t = types.Unalias(t).(*types.Named).TypeArgs().At(0)
+	}
+	st, ok := deref(t).Underlying().(*types.Struct)
+	if !ok {
+		return nil
+	}
+	encodings := &oas.OrderedMap[*oas.Encoding]{}
+	s.fieldEncodings(st, encodings, map[string]bool{})
+	if encodings.Len() == 0 {
+		return nil
+	}
+	return encodings
+}
+
+// fieldEncodings adds the encodings of the fields of st, named as fieldsOf
+// names their properties, to encodings.
+func (s *scanner) fieldEncodings(st *types.Struct, encodings *oas.OrderedMap[*oas.Encoding], seen map[string]bool) {
+	for i := range st.NumFields() {
+		f := st.Field(i)
+		tag := reflect.StructTag(st.Tag(i))
+		jsonTag, hasJSON := tag.Lookup("json")
+		if jsonTag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(jsonTag, ",")
+		if f.Embedded() && name == "" {
+			if inner, ok := deref(f.Type()).Underlying().(*types.Struct); ok {
+				s.fieldEncodings(inner, encodings, seen)
+				continue
+			}
+		}
+		if !f.Exported() {
+			continue
+		}
+		if name == "" || !hasJSON {
+			name = f.Name()
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		text, ok := tag.Lookup("goapi")
+		if !ok {
+			continue
+		}
+		entries, err := parseTag(text)
+		if err != nil {
+			// fieldsOf reports it.
+			continue
+		}
+		var enc *oas.Encoding
+		for _, e := range entries {
+			if !slices.Contains([]string{"contentType", "headers", "style", "explode"}, e.key) {
+				continue
+			}
+			if enc == nil {
+				enc = &oas.Encoding{}
+			}
+			if e.flag || e.value == "" {
+				s.report(f.Pos(), Error, "field %s: %s needs a value", f.Name(), e.key)
+				continue
+			}
+			switch e.key {
+			case "contentType":
+				enc.ContentType = strings.ReplaceAll(e.value, "|", ", ")
+			case "headers":
+				enc.Headers = &oas.OrderedMap[*oas.Header]{}
+				for _, h := range strings.Split(e.value, "|") {
+					enc.Headers.Set(h, &oas.Header{Required: true, Schema: &oas.Schema{Type: oas.Types{"string"}}})
+				}
+			case "style":
+				enc.Style = e.value
+			case "explode":
+				if e.value != "true" && e.value != "false" {
+					s.report(f.Pos(), Error, "field %s: explode is true or false, not %q", f.Name(), e.value)
+					continue
+				}
+				b := e.value == "true"
+				enc.Explode = &b
+			}
+		}
+		if enc != nil {
+			encodings.Set(name, enc)
+		}
+	}
 }
 
 // bodySchema returns the schema of a body of type t sent as mediaType:
