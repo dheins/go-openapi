@@ -8,8 +8,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -524,6 +526,33 @@ func TestMultipart(t *testing.T) {
 	}
 	if _, err := DecodeMultipart[upload](body.Bytes(), "multipart/form-data", props); err == nil {
 		t.Error("missing boundary accepted")
+	}
+
+	// As browsers' FormData sends them: every Blob part has a file name,
+	// JSON values too; a part of an undeclared property is still left out.
+	body.Reset()
+	mw = multipart.NewWriter(&body)
+	for _, part := range []struct{ name, data string }{{"owner", `{"name":"Ann"}`}, {"tags", "a"}, {"tags", "b"}, {"extra", "x"}} {
+		h := textproto.MIMEHeader{}
+		h.Set("Content-Disposition", `form-data; name="`+part.name+`"; filename="blob"`)
+		h.Set("Content-Type", "application/json")
+		pw, _ := mw.CreatePart(h)
+		pw.Write([]byte(part.data))
+	}
+	mw.Close()
+	type owned struct {
+		Owner struct {
+			Name string `json:"name"`
+		} `json:"owner"`
+		Tags []string `json:"tags"`
+	}
+	oprops := Property{Type: "object", Properties: map[string]Property{
+		"owner": {Type: "object", Properties: map[string]Property{"name": {Type: "string"}}},
+		"tags":  {Type: "string", Array: true},
+	}}
+	o, err := DecodeMultipart[owned](body.Bytes(), mw.FormDataContentType(), oprops)
+	if err != nil || o.Owner.Name != "Ann" || !slices.Equal(o.Tags, []string{"a", "b"}) {
+		t.Errorf("blob parts: %+v, %v", o, err)
 	}
 }
 

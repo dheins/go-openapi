@@ -37,6 +37,7 @@ func FormFields(body []byte) (map[string][]string, error) {
 // declares a content type, and carry its Headers.
 func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, error) {
 	var v T
+	obj = obj.shape()
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil || params["boundary"] == "" {
 		return v, &oapi.ValidationError{Message: "multipart body without a boundary"}
@@ -66,12 +67,16 @@ func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, e
 			errs.Add(oapi.Field("", name), msg)
 			continue
 		}
+		_, declared := obj.Properties[name]
 		switch {
 		case prop.Type == "file":
 			files[name] = append(files[name], oapi.File{Name: part.FileName(), ContentType: part.Header.Get("Content-Type"), Header: part.Header, Data: data})
 			// A placeholder, so that decoding sees the property as present.
 			fields[name] = append(fields[name], "")
-		case part.FileName() == "":
+		case part.FileName() == "" || declared:
+			// A part of a declared value is read as one even with a file
+			// name: browsers' FormData names every Blob part a file, as
+			// JavaScript clients send JSON values.
 			fields[name] = append(fields[name], string(data))
 		}
 	}
