@@ -86,9 +86,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   field per variant or the union types goapi generates, and variants
   outside the scanned packages. Only interfaces marked `//goapi:oneOf` or `anyOf`
   are unions. — later
-- Webhooks, callbacks, links, examples of operations and media types, and
-  per-property encodings of form and multipart bodies in directives.
-  — later
+- Examples of parameters and headers, and examples checked against their
+  schemas (by `goapi validate` too). — later
 - Generic types are only mapped as instances (`Page[Pet]` becomes
   `PagePet`); a generic `$defs`-style schema is not. — later
 - `encoding/json`'s rules for fields of the same name at one depth of
@@ -108,6 +107,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Codescan: webhooks, callbacks, links, examples and encodings of form
+  and multipart bodies in directives. (a118adc, 15b8c81, 84a62f8,
+  c32cfc6)
 - [x] Typed server-sent events: data from the 3.2 `itemSchema`, one kind or
   named kinds, in servers and Go and TypeScript clients. (8ae2e3c,
   3833106, d98139d)

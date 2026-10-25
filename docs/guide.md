@@ -1174,6 +1174,10 @@ type PetRequest struct {
 | `//goapi:request T` | the request type; without it, the function's first struct parameter (other than `*http.Request`) |
 | `//goapi:response STATUS [TYPE [MEDIA TYPE]] [description=…]` | a response: a status, a range such as `4XX`, or `default`; `TYPE` is a Go type such as `Pet`, `[]Pet` or `models.Pet`, and the media type is JSON by default |
 | `//goapi:security a b:read,write` | an alternative requirement needing all the schemes it names, with their scopes; `-` allows anonymous requests |
+| `//goapi:webhook NAME METHOD [id=…] [tags=a,b] [summary=…]` | a webhook, in place of `//goapi:operation` (see below) |
+| `//goapi:callback OPERATIONID NAME METHOD URL-EXPRESSION [id=…] [summary=…]` | a callback of the operation with that operationId, in place of `//goapi:operation` |
+| `//goapi:link STATUS NAME operationId=ID [PARAM=EXPRESSION …] [requestBody=…] [description=…]` | a link of a response; `operationRef=` instead of `operationId=` |
+| `//goapi:example request\|STATUS [MEDIA TYPE] [name=…] [summary=…] [description=…] JSON` | an example of the request or response body; the JSON is the rest of the line |
 
 The fields of a request type say where they are with
 `in=path|query|header|cookie|body`. The parameter name defaults to the
@@ -1185,6 +1189,70 @@ the path template. Other parameters are optional unless marked
 `mediaType=` (separate several with `|`). A response type whose fields
 are `in=header` and `in=body` gives the headers and the body; any other
 type is the body.
+
+### Webhooks and callbacks
+
+A function declares a webhook or a callback, which the API sends, as it
+declares an operation, with the same request, response and security
+directives:
+
+```go
+// PetAdopted tells a consumer that a pet was adopted.
+//
+//goapi:webhook petAdopted POST
+//goapi:response 204
+//goapi:security apiKey
+func (s *Store) PetAdopted(ctx context.Context, req *AdoptedRequest) error
+
+// NotifyPet sends a subscriber a pet event, at the URL it subscribed with.
+//
+//goapi:callback subscribe petEvent POST {$request.body#/url}/pets
+//goapi:response 204
+func (s *Store) NotifyPet(ctx context.Context, req *PetEventRequest) error
+```
+
+A webhook goes to `webhooks.<name>`, and a callback to
+`callbacks.<name>.<url-expression>` of the operation with the given
+operationId, where several methods can share a URL. They have no path
+parameters, operationIds are unique across operations, webhooks and
+callbacks, and `goapi generate server` gives the scanned service a
+`Sender` for them.
+
+### Links and examples
+
+```go
+//goapi:operation POST /pets
+//goapi:response 201 Pet
+//goapi:link 201 GetPet operationId=getPet id=$response.body#/id
+//goapi:example request {"name": "Rex", "kind": "dog"}
+//goapi:example 201 name=rex summary="A dog" {"id": 1, "name": "Rex", "kind": "dog"}
+func (s *Store) CreatePet(ctx context.Context, req *CreatePetRequest) (*Pet, error)
+```
+
+A link belongs to a response the function declares. Its other keys are
+its parameters, whose values are JSON as they are or, like runtime
+expressions, strings, and its operationId must be a scanned operation's.
+An example's JSON is the rest of the line, written as it is. Without a
+name it is the media type's `example`, with one it is one of its
+`examples`. The media type may be left out when the body has only one.
+
+### Encodings
+
+The fields of a form or multipart body type can say how their parts are
+sent, with keys of the `goapi` tag that schemas leave out:
+
+```go
+type Upload struct {
+	Photo   oapi.File `json:"photo" goapi:"contentType=image/png|image/jpeg;headers=X-Checksum"`
+	Labels  []string  `json:"labels,omitempty" goapi:"style=form;explode=false"`
+}
+```
+
+They become the `encoding` of each property: `contentType` the media
+types a part may have, `headers` part headers that must be present, and
+`style` and `explode` how a form field is written. They are applied to
+the form and multipart media types the body is sent as, and ignored in
+other bodies.
 
 Package comments describe the document:
 
