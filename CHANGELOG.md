@@ -199,6 +199,13 @@
 
 ### Fixed
 
+- Multipart parts of declared properties that are not files were left out
+  when they had a file name, which browsers' `FormData` gives every `Blob`
+  part; they are read as the property's value.
+- Converted Swagger 2.0 documents were invalid when a definition or
+  security definition had a name 3.x does not allow (only letters, digits,
+  `.`, `_` and `-`); such components are renamed, with a warning, and their
+  references and security requirements follow.
 - A generated server did not compile when an operation's only security
   requirement was the anonymous one (`security: [{}]`): its handler
   imported `context` without using it.

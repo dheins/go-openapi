@@ -2,6 +2,8 @@ package loader
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -38,6 +40,9 @@ type converter struct {
 	// parameters, which become request bodies (or are inlined for other
 	// media types).
 	forms, bodies map[string]*yaml.Node
+	// renamed are the new references of renamed components, by their
+	// unescaped old ones.
+	renamed map[string]string
 }
 
 func newConverter(lookup func(base, ref string) *yaml.Node) *converter {
@@ -216,7 +221,69 @@ func (c *converter) document(n *yaml.Node, uri string) {
 		}
 		n.Content = slices.Insert(n.Content, place, str("components", components), components)
 	}
+	c.renameComponents(n, components)
 	c.refs(n, false)
+}
+
+var (
+	componentName    = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	notComponentName = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+)
+
+// renameComponents gives the components whose names 3.x does not allow
+// (2.0 names have no pattern) names it does, recording their references
+// for refs and renaming security schemes in the requirements of doc.
+func (c *converter) renameComponents(doc, components *yaml.Node) {
+	schemes := map[string]string{}
+	for i := 0; i+1 < len(components.Content); i += 2 {
+		kind, m := components.Content[i].Value, resolveAlias(components.Content[i+1])
+		taken := map[string]bool{}
+		for j := 0; j < len(m.Content); j += 2 {
+			taken[m.Content[j].Value] = true
+		}
+		for j := 0; j < len(m.Content); j += 2 {
+			key := m.Content[j]
+			if componentName.MatchString(key.Value) {
+				continue
+			}
+			base := notComponentName.ReplaceAllString(key.Value, "_")
+			name := base
+			for k := 2; taken[name]; k++ {
+				name = fmt.Sprintf("%s_%d", base, k)
+			}
+			taken[name] = true
+			c.warn(key, "%s %q is renamed %q: 3.x names have only letters, digits, '.', '_' and '-'", kind, key.Value, name)
+			if c.renamed == nil {
+				c.renamed = map[string]string{}
+			}
+			c.renamed[oas.JoinPointer("#/components", kind, key.Value)] = oas.JoinPointer("#/components", kind, name)
+			if kind == "securitySchemes" {
+				schemes[key.Value] = name
+			}
+			m.Content[j] = str(name, key)
+		}
+	}
+	if len(schemes) == 0 {
+		return
+	}
+	requirements := []*yaml.Node{mappingValue(doc, "security")}
+	eachValue(mappingValue(doc, "paths"), func(item *yaml.Node) {
+		for _, m := range operationMethods {
+			requirements = append(requirements, mappingValue(mappingValue(item, m), "security"))
+		}
+	})
+	for _, list := range requirements {
+		eachItem(list, func(req *yaml.Node) {
+			if req.Kind != yaml.MappingNode {
+				return
+			}
+			for i := 0; i+1 < len(req.Content); i += 2 {
+				if name, ok := schemes[req.Content[i].Value]; ok {
+					req.Content[i] = str(name, req.Content[i])
+				}
+			}
+		})
+	}
 }
 
 // servers replaces host, basePath and schemes by a servers list: a URL
@@ -850,6 +917,10 @@ func (c *converter) refs(n *yaml.Node, names bool) {
 					if rest, ok := strings.CutPrefix(v.Value, from); ok {
 						v.Value = to + rest
 					}
+				}
+				// Unescaped, as a reference may percent-encode the name.
+				if old, err := url.PathUnescape(v.Value); err == nil && c.renamed[old] != "" {
+					v.Value = c.renamed[old]
 				}
 			default:
 				c.refs(v, slices.Contains(namedMaps, key))

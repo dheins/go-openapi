@@ -166,6 +166,52 @@ securityDefinitions:
 	}
 }
 
+func TestConvert20ComponentNames(t *testing.T) {
+	// 2.0 names may have characters 3.x names cannot; a renamed name that
+	// is taken gets a suffix.
+	src, err := ParseBytes([]byte(`swagger: "2.0"
+info: {title: t, version: v}
+paths:
+  /a:
+    get:
+      security: [{"pass word": []}]
+      responses:
+        "200":
+          description: ok
+          schema: {$ref: "#/definitions/Pet%20Food"}
+definitions:
+  Pet Food: {type: string}
+  Pet_Food: {type: integer}
+securityDefinitions:
+  pass word: {type: basic}
+security: [{"pass word": []}]
+`), "mem.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, w := range convertRoot(src) {
+		got = append(got, fmt.Sprintf("%d:%d: %s", w.Position.Line, w.Position.Column, w.Message))
+	}
+	want := `12:3: schemas "Pet Food" is renamed "Pet_Food_2": 3.x names have only letters, digits, '.', '_' and '-'
+15:3: securitySchemes "pass word" is renamed "pass_word": 3.x names have only letters, digits, '.', '_' and '-'`
+	if strings.Join(got, "\n") != want {
+		t.Errorf("notices:\n%s\nwant\n%s", strings.Join(got, "\n"), want)
+	}
+	data, err := src.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{`"Pet_Food_2":{"type":"string"}`, `{"$ref":"#/components/schemas/Pet_Food_2"}`, `"pass_word":{"type":"http"`, `"security":[{"pass_word":[]}]`} {
+		if strings.Count(string(data), s) == 0 {
+			t.Errorf("no %s in %s", s, data)
+		}
+	}
+	if strings.Count(string(data), `"security":[{"pass_word":[]}]`) != 2 {
+		t.Errorf("security requirements not renamed: %s", data)
+	}
+}
+
 func TestConvert20Idempotent(t *testing.T) {
 	// A node reached twice (here through an alias) is converted once.
 	src, err := ParseBytes([]byte(`swagger: "2.0"
