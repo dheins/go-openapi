@@ -20,6 +20,7 @@ type Pet struct {
 	Kind Kind                     `json:"kind"`
 	Tag  oapi.Optional[string]    `json:"tag,omitzero"`
 	Born oapi.Optional[oapi.Date] `json:"born,omitzero"`
+	Diet oapi.Optional[Diet]      `json:"diet,omitzero"`
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -49,8 +50,8 @@ func (m *Pet) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 func (m *Pet) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	obj := oapi.BeginObject(dec)
 	var v Pet
-	var seen [5]bool
-	var problems [5]error
+	var seen [6]bool
+	var problems [6]error
 	for obj.Next() {
 		switch obj.Name() {
 		case "id":
@@ -72,6 +73,9 @@ func (m *Pet) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 		case "born":
 			seen[4] = true
 			problems[4] = obj.Decode(&v.Born, false, dir)
+		case "diet":
+			seen[5] = true
+			problems[5] = obj.Decode(&v.Diet, false, dir)
 		default:
 			obj.Skip()
 		}
@@ -100,6 +104,9 @@ func (m *Pet) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	}
 	if seen[4] {
 		errs.Nested("/born", problems[4])
+	}
+	if seen[5] {
+		errs.Nested("/diet", problems[5])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -147,6 +154,13 @@ func (m Pet) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 		}
 		dst = append(dst, ',')
 	}
+	if m.Diet.Set {
+		dst = append(dst, "\"diet\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Diet.Value, dir); err != nil {
+			return nil, fmt.Errorf("diet: %w", err)
+		}
+		dst = append(dst, ',')
+	}
 	return oapi.EndObject(dst, start), nil
 }
 
@@ -160,5 +174,8 @@ func (m Pet) Validate() error {
 		errs.Add("/name", "length must be at most 40")
 	}
 	errs.Nested("/kind", m.Kind.Validate())
+	if m.Diet.Set {
+		errs.Nested("/diet", m.Diet.Value.Validate())
+	}
 	return errs.Err()
 }

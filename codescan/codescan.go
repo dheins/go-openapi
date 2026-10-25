@@ -111,6 +111,7 @@ func Scan(opts Options) (*Result, error) {
 		return nil, err
 	}
 	s.index()
+	s.findVariants()
 	title := "API"
 	if len(s.pkgs) > 0 {
 		title = s.pkgs[len(s.pkgs)-1].path
@@ -123,6 +124,9 @@ func Scan(opts Options) (*Result, error) {
 	}
 	for _, td := range s.roots {
 		s.schemaOf(td.obj.Type())
+	}
+	for _, check := range s.checks {
+		check()
 	}
 	if s.schemas.Len() > 0 {
 		if doc.Components == nil {
@@ -142,6 +146,8 @@ type scanner struct {
 	dir   string
 	pkgs  []*pkg
 	decls map[*types.TypeName]*typeDecl
+	// order is the declarations, in package and source order.
+	order []*typeDecl
 	// fields are the struct fields of the scanned source, by the
 	// position of their name, for their comments.
 	fields map[token.Pos]*ast.Field
@@ -156,7 +162,9 @@ type scanner struct {
 	schemes    map[string]bool
 	schemeUses []schemeUse
 	// uses32 says that the document uses what only 3.2 has.
-	uses32  bool
+	uses32 bool
+	// checks run once every schema is built.
+	checks  []func()
 	schemas *oas.OrderedMap[*oas.Schema]
 	// names are the component names of the named types mapped so far, by
 	// type, and taken the names in use.
@@ -184,6 +192,14 @@ type typeDecl struct {
 	// type's constants are its values.
 	name string
 	enum bool
+	// union is oneOf or anyOf for a union interface, with the property
+	// that discriminates its variants, which findVariants finds.
+	union, discriminator string
+	variants             []*typeDecl
+	// discValue is the discriminator value //goapi:discriminatorValue
+	// gives the type, as a variant, at discValuePos.
+	discValue    string
+	discValuePos token.Pos
 }
 
 func (s *scanner) report(pos token.Pos, sev Severity, format string, args ...any) {
@@ -248,6 +264,7 @@ func (s *scanner) index() {
 						td.doc = gen.Doc
 					}
 					s.decls[obj] = td
+					s.order = append(s.order, td)
 					s.typeDirectives(td)
 				}
 			}
@@ -279,6 +296,29 @@ func (s *scanner) typeDirectives(td *typeDecl) {
 				continue
 			}
 			td.enum = true
+		case "oneOf", "anyOf":
+			if !types.IsInterface(td.obj.Type()) {
+				s.report(d.pos, Error, "goapi:%s is for interface types; %s is not one", d.name, td.obj.Name())
+				continue
+			}
+			if len(d.args) > 0 {
+				s.report(d.pos, Error, "goapi:%s takes only discriminator=", d.name)
+				continue
+			}
+			td.union = d.name
+			for _, e := range d.kv {
+				if e.key != "discriminator" || e.value == "" {
+					s.report(d.pos, Error, "goapi:%s: unknown key %q", d.name, e.key)
+					continue
+				}
+				td.discriminator = e.value
+			}
+		case "discriminatorValue":
+			if len(d.args) != 1 || len(d.kv) > 0 {
+				s.report(d.pos, Error, "goapi:discriminatorValue takes a value")
+				continue
+			}
+			td.discValue, td.discValuePos = d.args[0], d.pos
 		default:
 			s.report(d.pos, Error, "unknown directive goapi:%s on a type", d.name)
 		}

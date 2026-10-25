@@ -4,6 +4,12 @@
 
 ### Added
 
+- Unions in `codescan`: `//goapi:oneOf` or `//goapi:anyOf` on an interface
+  makes it a union of the scanned packages' named types that implement it,
+  by value or pointer. `discriminator=<property>` adds a discriminator
+  (which the union requires) mapping each variant's type name, or the
+  value `//goapi:discriminatorValue` gives it. Variants without the
+  property, duplicate values, and unions without variants are reported.
 - `codegen.TypeScript`: the TypeScript of a model, a start on generated
   TypeScript clients. `models.ts` has a type per schema (interfaces,
   literal unions with `as const` objects for enums, unions) and a schema

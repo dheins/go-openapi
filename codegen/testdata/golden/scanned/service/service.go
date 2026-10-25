@@ -22,7 +22,31 @@ type Pet struct {
 	Kind Kind                  `json:"kind"`
 	Tag  oapi.Optional[string] `json:"tag,omitzero"`
 	Born oapi.Date             `json:"born,omitzero"`
+	Diet Diet                  `json:"diet,omitempty"`
 }
+
+// Diet is what a pet eats.
+//
+//goapi:oneOf discriminator=type
+type Diet interface{ diet() }
+
+// Herbivore eats plants.
+type Herbivore struct {
+	Type   string   `json:"type"`
+	Plants []string `json:"plants,omitempty"`
+}
+
+func (Herbivore) diet() {}
+
+// Carnivore eats meat.
+//
+//goapi:discriminatorValue meat
+type Carnivore struct {
+	Type string `json:"type"`
+	Prey string `json:"prey" goapi:"minLength=1"`
+}
+
+func (*Carnivore) diet() {}
 
 // Kind is the kind of a pet.
 //

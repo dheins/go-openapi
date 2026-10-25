@@ -77,8 +77,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 ## Codescan
 
-- Unions: `oneOf` from interfaces or sum-type patterns, and
-  discriminators. — later
+- Unions from other sum-type patterns, such as a struct with a pointer
+  field per variant or the union types goapi generates, and variants
+  outside the scanned packages. Only interfaces marked `//goapi:oneOf` or `anyOf`
+  are unions. — later
 - Webhooks, callbacks, links, examples of operations and media types, and
   per-property encodings of form and multipart bodies in directives.
   — later
@@ -101,6 +103,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Unions in codescan: `//goapi:oneOf` and `anyOf` on interfaces, with
+  their implementations as variants and an optional discriminator.
+  (3cda02f, 5408396)
 - [x] TypeScript clients: `goapi generate ts-client`, using only `fetch`,
   with types, validation and the selection flags. (5e4f942, b54ff74,
   87cdbe6)

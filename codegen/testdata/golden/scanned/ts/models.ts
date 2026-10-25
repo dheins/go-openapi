@@ -10,10 +10,11 @@ export interface Pet {
   kind: Kind;
   tag?: string;
   born?: string;
+  diet?: Diet;
 }
 
 /** The schema of Pet, for validation and encoding. */
-export const PetSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "integer" }, required: true, readOnly: true }, name: { schema: { kind: "string", minLength: 1, maxLength: 40 }, required: true }, kind: { schema: $ref(() => KindSchema), required: true }, tag: { schema: { kind: "string" } }, born: { schema: { kind: "string", format: "date" } } } };
+export const PetSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "integer" }, required: true, readOnly: true }, name: { schema: { kind: "string", minLength: 1, maxLength: 40 }, required: true }, kind: { schema: $ref(() => KindSchema), required: true }, tag: { schema: { kind: "string" } }, born: { schema: { kind: "string", format: "date" } }, diet: { schema: $ref(() => DietSchema) } } };
 
 /** Kind is the kind of a pet. */
 export type Kind = "dog" | "cat";
@@ -26,6 +27,30 @@ export const Kind = {
 
 /** The schema of Kind, for validation and encoding. */
 export const KindSchema: $Schema = { kind: "string", enum: ["dog", "cat"] };
+
+/** Diet is what a pet eats. */
+export type Diet = Herbivore | Carnivore;
+
+/** The schema of Diet, for validation and encoding. */
+export const DietSchema: $Schema = { kind: "union", oneOf: true, variants: [$ref(() => HerbivoreSchema), $ref(() => CarnivoreSchema)], discriminator: "type", mapping: { Herbivore: $ref(() => HerbivoreSchema), meat: $ref(() => CarnivoreSchema), Carnivore: $ref(() => CarnivoreSchema) } };
+
+/** Herbivore eats plants. */
+export interface Herbivore {
+  type: string;
+  plants?: string[];
+}
+
+/** The schema of Herbivore, for validation and encoding. */
+export const HerbivoreSchema: $Schema = { kind: "object", properties: { type: { schema: { kind: "string" }, required: true }, plants: { schema: { kind: "array", items: { kind: "string" } } } } };
+
+/** Carnivore eats meat. */
+export interface Carnivore {
+  type: string;
+  prey: string;
+}
+
+/** The schema of Carnivore, for validation and encoding. */
+export const CarnivoreSchema: $Schema = { kind: "object", properties: { type: { schema: { kind: "string" }, required: true }, prey: { schema: { kind: "string", minLength: 1 }, required: true } } };
 
 /** Problem is an error. */
 export interface Problem {

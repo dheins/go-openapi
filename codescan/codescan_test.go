@@ -24,7 +24,12 @@ var update = flag.Bool("update", false, "rewrite the expected documents in testd
 func TestGolden(t *testing.T) {
 	for _, name := range []string{"models", "bad", "service", "badops"} {
 		t.Run(name, func(t *testing.T) {
-			res, err := Scan(Options{Patterns: []string{"./testdata/" + name}})
+			pattern := "./testdata/" + name
+			if name == "models" {
+				// With shared, whose types are variants of models' unions.
+				pattern += "/..."
+			}
+			res, err := Scan(Options{Patterns: []string{pattern}})
 			if err != nil {
 				t.Fatal(err)
 			}

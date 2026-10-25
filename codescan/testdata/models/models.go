@@ -109,3 +109,54 @@ type Upload struct {
 	Done  chan bool   `json:"done,omitempty"`
 	Pages Page[Owner] `json:"pages,omitzero"`
 }
+
+// Diet is what a pet eats.
+//
+//goapi:oneOf discriminator=kind
+type Diet interface{ Eats() string }
+
+// Herbivore eats plants.
+type Herbivore struct {
+	Kind   string   `json:"kind"`
+	Plants []string `json:"plants"`
+}
+
+// Eats makes Herbivore a Diet.
+func (Herbivore) Eats() string { return "plants" }
+
+// Carnivore eats meat; a Diet through its pointer.
+//
+//goapi:discriminatorValue meat
+type Carnivore struct {
+	Kind string `json:"kind"`
+	Prey string `json:"prey"`
+}
+
+// Eats makes *Carnivore a Diet.
+func (*Carnivore) Eats() string { return "meat" }
+
+// Contact is how to reach an owner: any of its variants may match.
+//
+//goapi:anyOf
+type Contact interface{ contact() }
+
+// Email is an email address.
+type Email string
+
+func (Email) contact() {}
+
+// Phone is a phone number.
+type Phone struct {
+	Number string `json:"number"`
+}
+
+func (Phone) contact() {}
+
+// Feeding uses the unions.
+//
+//goapi:schema
+type Feeding struct {
+	Diet    Diet    `json:"diet"`
+	Contact Contact `json:"contact,omitempty"`
+	Backup  *Diet   `json:"backup"`
+}

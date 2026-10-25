@@ -111,6 +111,22 @@ func TestScannedRoundTrip(t *testing.T) {
 		t.Errorf("invalid pet: %v", err)
 	}
 
+	// The variants of an interface: the discriminator value is the one
+	// //goapi:discriminatorValue gives, set when encoding.
+	fang := model.Pet{Name: "Fang", Kind: model.KindDog, Diet: oapi.Some(model.NewDiet(model.Carnivore{Prey: "rabbits"}))}
+	resp, err = c.CreatePet(ctx, &api.CreatePetRequest{Body: fang})
+	created, ok = resp.(api.CreatePet201JSONResponse)
+	if diet, meat := created.Body.Diet.Value.Value().(model.Carnivore); err != nil || !ok || !meat || diet.Prey != "rabbits" || diet.Type != "meat" {
+		t.Fatalf("carnivore: %+v %v", resp, err)
+	}
+	if diet, meat := s.pets[2].Diet.Value.Value().(model.Carnivore); !meat || diet.Type != "meat" {
+		t.Errorf("stored diet = %+v", s.pets[2].Diet)
+	}
+	if _, err := c.CreatePet(ctx, &api.CreatePetRequest{Body: model.Pet{Name: "Bambi", Kind: model.KindDog, Diet: oapi.Some(model.NewDiet(model.Carnivore{}))}}); !errors.As(err, &invalid) ||
+		invalid.Problem.Errors[0].Pointer != "/diet/prey" {
+		t.Errorf("invalid diet: %v", err)
+	}
+
 	list, err := c.ListPets(ctx, &api.ListPetsRequest{Limit: 5, Kind: oapi.Some([]model.Kind{model.KindCat})})
 	if page, ok := list.(api.ListPets200JSONResponse); err != nil || !ok || len(page.Body) != 1 || page.Body[0].Name != "Tom" || page.XTotal != 1 {
 		t.Errorf("list: %+v %v", list, err)

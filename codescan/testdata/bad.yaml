@@ -8,6 +8,13 @@
 # testdata/bad/bad.go:18:1: error: unknown directive goapi:frobnicate on a type
 # testdata/bad/bad.go:19:6: warning: goapi:enum: Empty has no constants
 # testdata/bad/bad.go:26:1: error: unterminated quote in "schema \"unterminated"
+# testdata/bad/bad.go:34:6: error: Square, a variant of Shape, has no property "kind", its discriminator
+# testdata/bad/bad.go:47:6: error: Circle and Oval of Shape have the discriminator value "Circle"
+# testdata/bad/bad.go:53:1: error: goapi:oneOf is for interface types; NotAnInterface is not one
+# testdata/bad/bad.go:56:1: error: goapi:discriminatorValue: Lonely is not a variant of a union with a discriminator
+# testdata/bad/bad.go:62:6: warning: goapi:anyOf: no type of the scanned packages implements Nobody; it is left untyped
+# testdata/bad/bad.go:64:1: error: goapi:oneOf: unknown key "color"
+# testdata/bad/bad.go:65:6: warning: goapi:oneOf: no type of the scanned packages implements Odd; it is left untyped
 openapi: 3.1.0
 info:
   title: github.com/dheins/go-openapi/codescan/testdata/bad
@@ -47,3 +54,49 @@ components:
         - e
     Empty:
       type: string
+    Unions:
+      properties:
+        s:
+          $ref: '#/components/schemas/Shape'
+        n:
+          $ref: '#/components/schemas/Nobody'
+      type: object
+      required:
+        - s
+        - n
+    Shape:
+      oneOf:
+        - $ref: '#/components/schemas/Square'
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Oval'
+      required:
+        - kind
+      description: Shape has variants without the discriminator, and two with one value.
+      discriminator:
+        propertyName: kind
+        mapping:
+          Square: '#/components/schemas/Square'
+          Circle: '#/components/schemas/Circle'
+    Square:
+      properties:
+        side:
+          type: number
+      type: object
+      required:
+        - side
+    Circle:
+      properties:
+        kind:
+          type: string
+      type: object
+      required:
+        - kind
+    Oval:
+      properties:
+        kind:
+          type: string
+      type: object
+      required:
+        - kind
+    Nobody:
+      description: Nobody has no variants.

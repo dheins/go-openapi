@@ -278,6 +278,29 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   so object parts are sent as JSON strings.
 - *Not done*: see [features.md](../features.md).
 
+### M12 – Unions in codescan ✅
+- [x] `//goapi:oneOf` and `//goapi:anyOf` on interfaces: the scanned
+  packages' named types implementing them, by value or pointer, are the
+  variants
+- [x] `discriminator=` with a mapping of type names, or the values of
+  `//goapi:discriminatorValue`, checked against the variants' properties
+- [x] The scanned golden service has a union, sent by the Go and the
+  TypeScript clients to the generated server
+
+**How it went**
+- *Opt-in*: an interface is a union only when marked, so interfaces that
+  are not data (`io.Reader`, handlers) never become schemas by accident;
+  the variants are inferred, so adding an implementation needs no other
+  change.
+- *Checks after building*: a variant may refer to its own union, so
+  whether it has the discriminator property is checked once every schema
+  is built.
+- *Validation* of the scanner's output warned that the discriminator was
+  not required; the union requires it.
+- *Found on the way*: `FuzzConvert20` found that 2.0 names which 3.x does
+  not allow were converted as they were; they are renamed.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
