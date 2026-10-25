@@ -83,8 +83,9 @@ Invalid requests are answered with RFC 9457 problem details listing every
 problem; a handler can also return a `*problem.Problem` as its error.
 
 The server supports every OpenAPI parameter style, JSON, form, multipart,
-text and binary bodies, streaming responses (JSON Lines, server-sent
-events), `oneOf`/`anyOf` with discriminators, and the 3.2 `QUERY` method.
+text and binary bodies, streamed requests and responses (JSON Lines,
+server-sent events), `oneOf`/`anyOf` with discriminators, and the 3.2
+`QUERY` method.
 When the document declares security, `NewServer` also takes a generated
 `SecurityHandler` with one method per scheme:
 

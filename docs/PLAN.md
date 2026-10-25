@@ -301,6 +301,28 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   not allow were converted as they were; they are renamed.
 - *Not done*: see [features.md](../features.md).
 
+### M13 – Streamed request bodies ✅
+- [x] JSON Lines and server-sent event request bodies as `iter.Seq2`
+  fields, decoded and validated item by item as handlers range over them
+- [x] Media types matched without reading the body, which is read only
+  for the operation's other media types; full duplex for operations
+  streaming both ways
+- [x] Go clients writing the iterator as the transport reads it, and
+  TypeScript clients sending an `Iterable` at once or an `AsyncIterable`
+  as a stream
+- [x] `FuzzStreamBodies`
+
+**How it went**
+- *Limits*: `MaxBodyBytes` limits lines, not streams, which may last as
+  long as the server's timeouts allow.
+- *Shared runtime*: the server and the Go client share the `api` package,
+  so both sides came in one step; the event format moved to `server` so
+  both directions read and write it alike.
+- *The format*: the fuzz target's round trip led to reading every line
+  end the format allows (CR too), digits-only `retry`, and writing IDs
+  and names that cannot start other fields.
+- *Not done*: see [features.md](../features.md) and [bugs.md](../bugs.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

@@ -33,8 +33,11 @@ shipped in.
 
 ## Server
 
-- Request bodies streamed as JSON Lines or server-sent events (responses
-  can stream already). — later
+- Typed server-sent events: the `data` of events as the `itemSchema`
+  describes it, for requests and responses (they are `server.Event`s with
+  string data today). — later
+- Streamed request bodies that can be sent again, for retry middleware
+  (a stream is sent once today). — later
 - Typed positional parts (`prefixItems` with `prefixEncoding`; such
   bodies are raw parts today), `multipart/byteranges` for range requests,
   and multipart bodies streamed with `itemSchema`. — later
@@ -70,6 +73,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   request. File parts carry theirs in `oapi.File.Header`. — later
 - Retries, pagination and caching helpers: left to `Doer` middleware
   (`client.WithMiddleware`). — not planned
+- TypeScript clients: full duplex, reading a streamed response while the
+  request still streams (`duplex: "half"` sends the request first). — later
 - TypeScript clients: XML and positional multipart bodies and responses,
   headers of multipart parts (`FormData` cannot set them), and `int64`
   values beyond 2^53 (they are `number`s). Cookie parameters cannot be
@@ -103,6 +108,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Streamed request bodies: JSON Lines and server-sent events read item
+  by item by handlers, and sent as they are produced by Go and TypeScript
+  clients. (5bbb007, e8f127f, 9fc7627)
 - [x] Unions in codescan: `//goapi:oneOf` and `anyOf` on interfaces, with
   their implementations as variants and an optional discriminator.
   (3cda02f, 5408396)
