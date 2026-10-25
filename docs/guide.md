@@ -499,6 +499,56 @@ func (s *store) ImportLines(ctx context.Context, req *api.ImportLinesRequest) (a
   still reading, even over HTTP/1.1.
 - The items can be ranged over once; nil means no body was sent.
 
+### Typed server-sent events
+
+Events are `server.Event`s, with their data as text, unless the
+`itemSchema` (3.2) of the `text/event-stream` media type types their
+data. Two shapes do:
+
+```yaml
+# One kind: every event's data is a Pet, as JSON.
+itemSchema:
+  type: object
+  properties:
+    data: {type: string, contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
+
+# Named kinds: the event's name says what its data is.
+itemSchema:
+  oneOf:
+    - properties:
+        event: {const: added}
+        data: {type: string, contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
+    - properties:
+        event: {const: removed}
+        data: {type: string, contentMediaType: application/json, contentSchema: {type: object, properties: {id: {type: integer}}}}
+    - properties:
+        event: {const: ping}
+        data: {type: string}          # no contentSchema: the text itself
+```
+
+The events are then `server.TypedEvent[T]`s, with `ID`, `Event`, `Retry`
+and `Data T`. For named kinds, `T` is a union of the kinds' data
+(`Feed200EventData`, its inline members named after their kind, such as
+`Feed200EventRemovedData`), and the event's name selects the variant:
+
+```go
+return api.Feed200EventsResponse{Events: func(yield func(server.TypedEvent[model.Feed200EventData], error) bool) {
+	yield(server.TypedEvent[model.Feed200EventData]{Data: model.NewFeed200EventData(pet)}, nil) // sent as "added"
+}}, nil
+```
+
+- **Writing:** an event is named after its data's variant, and its data
+  written as JSON (or as text, for a kind without a `contentSchema`).
+  Setting `Event` to another kind's name is an error that ends the stream.
+- **Reading:** data is decoded and validated as each event is read. In a
+  request, a problem ends the loop with a 400 `*server.BindError` that
+  points into the event from its index (`body /2/data/name`), and an
+  unknown event name with one at `/2/event`. Generated clients end the
+  loop with a `*client.InvalidResponse` (constraints are checked with
+  response validation), and check request events before sending them.
+- An `itemSchema` with a kind that has no `const` event name, or two kinds
+  of one name, gets a warning, and its events stay `server.Event`s.
+
 ### XML
 
 An XML body with a schema decodes into the schema's type, like JSON, and
@@ -565,6 +615,9 @@ return api.Watch200EventsResponse{Events: func(yield func(server.Event, error) b
 	yield(ev, err)
 }}, nil
 ```
+
+Events whose data the `itemSchema` types are `server.TypedEvent`s; see
+[Typed server-sent events](#typed-server-sent-events).
 
 When a response offers several media types, pick one with
 `server.Negotiate(r, "application/jsonl", "text/csv")`, which follows the
@@ -811,6 +864,7 @@ if (resp.status === 200) {
   - JSON Lines and server-sent event bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
 - **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines are `items` and server-sent events `events`, both `AsyncIterable`s that stop the stream when you `break`.
+- **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
 - **Options:** `baseUrl` (the document's server by default), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal` and `headers`. A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
 
