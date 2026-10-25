@@ -37,7 +37,10 @@ func TestTypeScriptClient(t *testing.T) {
 		t.Fatalf("node --test: %v\n%s", err, out)
 	}
 
-	// What the TypeScript client sent, as the server read it.
+	// What the TypeScript client sent, as the server read it. Handlers of
+	// streams the client stopped sending may still be running.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	filter := model.Filter{Role: "admin", Age: oapi.Some(int64(3)), Tags: oapi.Some([]string{"x", "y"}),
 		Owner: oapi.Some(model.FilterOwner{Name: oapi.Some("Ann")}), Labels: oapi.Some(map[string]int64{"a": 1})}
 	wantReports := &api.GetReportsRequest{

@@ -20,6 +20,7 @@ import (
 	"net/textproto"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -29,6 +30,9 @@ import (
 
 // store implements Handler with an in-memory list of pets.
 type store struct {
+	// mu is held by the handlers of streamed bodies: when a client stops
+	// sending one, it returns before the handler does.
+	mu     sync.Mutex
 	pets   []model.Pet
 	nextID int64
 	// seen records the last request each method received.
@@ -263,6 +267,8 @@ func (s *store) Watch(context.Context, *api.WatchRequest) (api.WatchResponse, er
 }
 
 func (s *store) ImportLines(_ context.Context, req *api.ImportLinesRequest) (api.ImportLinesResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.seen["ImportLines"] = req
 	var n int64
 	add := func(p model.Pet) {
@@ -287,6 +293,8 @@ func (s *store) ImportLines(_ context.Context, req *api.ImportLinesRequest) (api
 }
 
 func (s *store) PostEvents(_ context.Context, req *api.PostEventsRequest) (api.PostEventsResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var events []server.Event
 	for ev, err := range req.Body {
 		if err != nil {

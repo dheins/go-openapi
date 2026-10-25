@@ -158,9 +158,11 @@ func TestClientStreams(t *testing.T) {
 	events := func(yield func(server.Event, error) bool) {
 		_ = yield(server.Event{Event: "a", Data: "1\n2"}, nil) && yield(server.Event{ID: "7", Data: "x"}, nil)
 	}
-	if r := as[api.PostEvents200JSONResponse](t)(c.PostEvents(ctx, &api.PostEventsRequest{Body: events})); r.Body != 2 ||
-		!slices.Equal(s.seen["PostEvents"].([]server.Event), []server.Event{{Event: "a", Data: "1\n2"}, {ID: "7", Data: "x"}}) {
-		t.Errorf("events: %+v %+v", r, s.seen["PostEvents"])
+	r := as[api.PostEvents200JSONResponse](t)(c.PostEvents(ctx, &api.PostEventsRequest{Body: events}))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if got := s.seen["PostEvents"].([]server.Event); r.Body != 2 || !slices.Equal(got, []server.Event{{Event: "a", Data: "1\n2"}, {ID: "7", Data: "x"}}) {
+		t.Errorf("events: %+v %+v", r, got)
 	}
 }
 
