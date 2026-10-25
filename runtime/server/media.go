@@ -276,19 +276,7 @@ func WriteEvents(c *Config, w http.ResponseWriter, r *http.Request, status int, 
 			c.Log(r.Context(), slog.LevelError, "event stream failed", "path", r.URL.Path, "error", err)
 			break
 		}
-		if ev.ID != "" {
-			fmt.Fprintf(bw, "id: %s\n", ev.ID)
-		}
-		if ev.Event != "" {
-			fmt.Fprintf(bw, "event: %s\n", ev.Event)
-		}
-		if ev.Retry > 0 {
-			fmt.Fprintf(bw, "retry: %d\n", ev.Retry)
-		}
-		for line := range strings.SplitSeq(ev.Data, "\n") {
-			fmt.Fprintf(bw, "data: %s\n", line)
-		}
-		bw.WriteByte('\n')
+		bw.Write(AppendEvent(nil, ev))
 		if bw.Flush() != nil {
 			return nil
 		}

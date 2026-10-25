@@ -250,6 +250,8 @@ func present(expr string, r *ir.Ref) (string, string) {
 		return expr + ".Set", expr + ".Value"
 	case ir.Pointer:
 		return expr + " != nil", "*" + expr
+	case ir.Stream:
+		return expr + " != nil", expr
 	}
 	return "", expr
 }
@@ -513,6 +515,10 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("r.TextBody(%s, string(%s))", ct, value)
 		case "binary":
 			stmt = fmt.Sprintf("r.BytesBody(%s, %s)", ct, value)
+		case "jsonl":
+			stmt = fmt.Sprintf("client.JSONLinesBody(c, r, %s, %s, %s)", ct, value, f.itemValidation(m.Field.Value.Elem))
+		case "sse":
+			stmt = fmt.Sprintf("r.EventsBody(%s)", value)
 		}
 		guarded(w, depth, cond, stmt)
 	}

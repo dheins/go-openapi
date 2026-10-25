@@ -339,6 +339,38 @@ const watchSpec: OperationSpec = {
   responses: [{ status: "200", mediaType: "text/event-stream", kind: "sse" }],
 };
 
+/** The inputs of importLines. */
+export interface ImportLinesRequest {
+  jsonBody: $m.Pet[];
+}
+
+/** The responses of importLines. */
+export type ImportLinesResponse =
+  | { status: 200; body: number };
+
+const importLinesSpec: OperationSpec = {
+  method: "POST",
+  path: "/pets/lines",
+  params: [],
+  body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "jsonBody", schema: { kind: "array", items: $ref(() => $m.PetSchema) } }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "integer" } }],
+};
+
+/** The inputs of echo. */
+export interface EchoRequest {
+}
+
+/** The responses of echo. */
+export type EchoResponse =
+  | { status: 200; items: AsyncIterable<$m.Pet> };
+
+const echoSpec: OperationSpec = {
+  method: "POST",
+  path: "/echo",
+  params: [],
+  responses: [{ status: "200", mediaType: "application/jsonl", kind: "jsonl", item: $ref(() => $m.PetSchema) }],
+};
+
 /** The inputs of upload. */
 export interface UploadRequest {
   body?: { [key: string]: unknown };
@@ -602,6 +634,24 @@ export class Client {
   /** GET /events. */
   watch(req: WatchRequest = {}, call?: CallOptions): Promise<WatchResponse> {
     return send(this.#cfg, watchSpec, req, call) as Promise<WatchResponse>;
+  }
+
+  /**
+   * POST /pets/lines.
+   *
+   * Pets added one by one as they arrive, or all at once.
+   */
+  importLines(req: ImportLinesRequest, call?: CallOptions): Promise<ImportLinesResponse> {
+    return send(this.#cfg, importLinesSpec, req, call) as Promise<ImportLinesResponse>;
+  }
+
+  /**
+   * POST /echo.
+   *
+   * Each pet sent back as it arrives.
+   */
+  echo(req: EchoRequest = {}, call?: CallOptions): Promise<EchoResponse> {
+    return send(this.#cfg, echoSpec, req, call) as Promise<EchoResponse>;
   }
 
   /** POST /upload. */

@@ -416,6 +416,61 @@ func (c *Client) Watch(ctx context.Context, req *api.WatchRequest) (api.WatchRes
 	return api.ReadWatchResponse(c.cfg, resp)
 }
 
+// PostEvents calls POST /events. A nil req sends no parameters or body.
+//
+// Events read as they arrive.
+func (c *Client) PostEvents(ctx context.Context, req *api.PostEventsRequest) (api.PostEventsResponse, error) {
+	if req == nil {
+		req = &api.PostEventsRequest{}
+	}
+	hreq, err := api.NewPostEventsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPostEventsResponse(c.cfg, resp)
+}
+
+// ImportLines calls POST /pets/lines. A nil req sends no parameters or
+// body.
+//
+// Pets added one by one as they arrive, or all at once.
+func (c *Client) ImportLines(ctx context.Context, req *api.ImportLinesRequest) (api.ImportLinesResponse, error) {
+	if req == nil {
+		req = &api.ImportLinesRequest{}
+	}
+	hreq, err := api.NewImportLinesRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadImportLinesResponse(c.cfg, resp)
+}
+
+// Echo calls POST /echo. A nil req sends no parameters or body.
+//
+// Each pet sent back as it arrives.
+func (c *Client) Echo(ctx context.Context, req *api.EchoRequest) (api.EchoResponse, error) {
+	if req == nil {
+		req = &api.EchoRequest{}
+	}
+	hreq, err := api.NewEchoRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadEchoResponse(c.cfg, resp)
+}
+
 // Upload calls POST /upload. A nil req sends no parameters or body.
 func (c *Client) Upload(ctx context.Context, req *api.UploadRequest) (api.UploadResponse, error) {
 	if req == nil {

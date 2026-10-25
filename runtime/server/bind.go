@@ -4,8 +4,6 @@ import (
 	"encoding"
 	"errors"
 	"fmt"
-	"io"
-	"mime"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -203,40 +201,15 @@ func parseInto(s string, dst any) error {
 // unsupported content type (415) or a body over the size limit (413). An
 // optional body that is absent returns false without a problem.
 func (c *Config) ReadBody(w http.ResponseWriter, r *http.Request, b *Binder, mediaTypes []string, required bool) ([]byte, string, bool) {
-	var body []byte
-	if r.Body != nil {
-		var err error
-		body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, c.MaxBodyBytes))
-		var tooLarge *http.MaxBytesError
-		switch {
-		case errors.As(err, &tooLarge):
-			b.fatal = problem.Newf(http.StatusRequestEntityTooLarge, "the request body is larger than %d bytes", tooLarge.Limit)
-			return nil, "", false
-		case err != nil:
-			b.fatal = problem.New(http.StatusBadRequest, "the request body could not be read")
-			return nil, "", false
-		}
-	}
-	if len(body) == 0 {
-		if required {
-			b.errs = append(b.errs, problem.Error{In: "body", Detail: "request body is required"})
-		}
+	body, ok := c.ReadAll(w, r, b, required)
+	if !ok {
 		return nil, "", false
 	}
-	ct := r.Header.Get("Content-Type")
-	if ct == "" {
-		return body, mediaTypes[0], true
+	mediaType, ok := matchBody(r, b, mediaTypes)
+	if !ok {
+		return nil, "", false
 	}
-	mt, _, err := mime.ParseMediaType(ct)
-	if err == nil {
-		for _, pattern := range mediaTypes {
-			if matchMediaType(mt, []string{pattern}) {
-				return body, pattern, true
-			}
-		}
-	}
-	b.fatal = problem.Newf(http.StatusUnsupportedMediaType, "content type %q is not supported; use %s", ct, strings.Join(mediaTypes, " or "))
-	return nil, "", false
+	return body, mediaType, true
 }
 
 // matchMediaType reports whether mt matches one of the patterns, which

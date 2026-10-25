@@ -577,6 +577,9 @@ func (v *validator) line(depth int, format string, args ...any) {
 // nested loops distinct.
 func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 	switch r.Kind {
+	case ir.Stream:
+		// Its items are checked as they are read or written.
+		return
 	case ir.Optional:
 		v.guarded(expr+".Set", expr+".Value", path, r.Elem, hint, depth)
 		return

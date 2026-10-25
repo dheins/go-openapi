@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"iter"
 	"mime/multipart"
 	"net/textproto"
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/server"
@@ -68,6 +72,94 @@ func (r *Request) XMLBody(contentType string, v any, root *server.XMLNode) {
 		return
 	}
 	r.body, r.contentType = data, contentType
+}
+
+// JSONLinesBody sets the body to items as JSON Lines, each encoded
+// (leaving out read-only properties) and, if c validates requests,
+// checked with validate as it is sent. An invalid item, or an error items
+// yields, ends the request with that error: a *InvalidRequest, with
+// pointers into the item from its index ("/2/name"), for an invalid one.
+// A stream cannot be sent again, so middleware cannot retry it.
+func JSONLinesBody[T any](c *Config, r *Request, contentType string, items iter.Seq2[T, error], validate func(T) error) {
+	if !c.ValidateRequests {
+		validate = nil
+	}
+	r.contentType = contentType
+	r.stream = func(w io.Writer) error {
+		i := 0
+		for item, err := range items {
+			if err != nil {
+				return err
+			}
+			if validate != nil {
+				if err := validate(item); err != nil {
+					var errs oapi.ValidationErrors
+					errs.Nested("/"+strconv.Itoa(i), err)
+					var b server.Binder
+					b.Body(errs.Err())
+					return &InvalidRequest{Problem: b.Problem()}
+				}
+			}
+			data, err := oapi.EncodeRequest(item)
+			if err != nil {
+				return fmt.Errorf("body: item %d: %w", i, err)
+			}
+			if _, err := w.Write(append(data, '\n')); err != nil {
+				return err
+			}
+			i++
+		}
+		return nil
+	}
+}
+
+// EventsBody sets the body to events as server-sent events, written as
+// they are sent. An error events yields ends the request with it.
+func (r *Request) EventsBody(events iter.Seq2[server.Event, error]) {
+	r.contentType = "text/event-stream"
+	r.stream = func(w io.Writer) error {
+		for ev, err := range events {
+			if err != nil {
+				return err
+			}
+			if _, err := w.Write(server.AppendEvent(nil, ev)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// streamBody is a request body written as the transport reads it. The
+// writer starts on the first read, so a request that is never sent
+// leaves nothing running, and Close stops it.
+type streamBody struct {
+	write  func(io.Writer) error
+	once   sync.Once
+	reader *io.PipeReader
+}
+
+func (s *streamBody) Read(p []byte) (int, error) {
+	s.once.Do(s.start)
+	if s.reader == nil {
+		return 0, io.ErrClosedPipe
+	}
+	return s.reader.Read(p)
+}
+
+func (s *streamBody) Close() error {
+	// Closed before it is read, it never starts.
+	s.once.Do(func() {})
+	if s.reader == nil {
+		return nil
+	}
+	return s.reader.Close()
+}
+
+func (s *streamBody) start() {
+	pr, pw := io.Pipe()
+	s.reader = pr
+	go func() { pw.CloseWithError(s.write(pw)) }()
 }
 
 // PartsBody sets the body to items as a multipart body of positional

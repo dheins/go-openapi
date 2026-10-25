@@ -68,6 +68,18 @@ type Handler interface {
 	ExportPets(ctx context.Context, req *ExportPetsRequest) (ExportPetsResponse, error)
 	// Watch handles GET /events.
 	Watch(ctx context.Context, req *WatchRequest) (WatchResponse, error)
+	// PostEvents handles POST /events.
+	//
+	// Events read as they arrive.
+	PostEvents(ctx context.Context, req *PostEventsRequest) (PostEventsResponse, error)
+	// ImportLines handles POST /pets/lines.
+	//
+	// Pets added one by one as they arrive, or all at once.
+	ImportLines(ctx context.Context, req *ImportLinesRequest) (ImportLinesResponse, error)
+	// Echo handles POST /echo.
+	//
+	// Each pet sent back as it arrives.
+	Echo(ctx context.Context, req *EchoRequest) (EchoResponse, error)
 	// Upload handles POST /upload.
 	Upload(ctx context.Context, req *UploadRequest) (UploadResponse, error)
 	// Admin handles GET /admin.

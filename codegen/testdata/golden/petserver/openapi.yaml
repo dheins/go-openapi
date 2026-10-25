@@ -506,6 +506,58 @@ paths:
           description: Pet events.
           content:
             text/event-stream: {}
+    post:
+      operationId: postEvents
+      description: Events read as they arrive.
+      requestBody:
+        required: true
+        content:
+          text/event-stream: {}
+      responses:
+        "200":
+          description: How many events arrived.
+          content:
+            application/json:
+              schema:
+                type: integer
+  /pets/lines:
+    post:
+      operationId: importLines
+      description: Pets added one by one as they arrive, or all at once.
+      requestBody:
+        required: true
+        content:
+          application/jsonl:
+            itemSchema:
+              $ref: "#/components/schemas/Pet"
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Pet"
+      responses:
+        "200":
+          description: How many pets were added.
+          content:
+            application/json:
+              schema:
+                type: integer
+  /echo:
+    post:
+      operationId: echo
+      description: Each pet sent back as it arrives.
+      requestBody:
+        content:
+          application/x-ndjson:
+            itemSchema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "200":
+          description: The pets.
+          content:
+            application/jsonl:
+              itemSchema:
+                $ref: "#/components/schemas/Pet"
   /upload:
     post:
       operationId: upload

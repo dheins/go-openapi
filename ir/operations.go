@@ -174,7 +174,9 @@ type BodyField struct {
 // BodyMedia is one media type a request body accepts.
 type BodyMedia struct {
 	MediaType string
-	// Kind is json, xml, form, multipart, text or binary.
+	// Kind is json, xml, form, multipart, parts, text, binary, jsonl
+	// (JSON Lines, read as a stream of items) or sse (a stream of
+	// server-sent events).
 	Kind string
 	// Properties are the object properties, for form and multipart, and
 	// Additional the type of any others; Shape names the object's shape
@@ -762,10 +764,9 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 	for mt, m := range rb.Content.All() {
 		schema := m.Deref().Schema
 		kind := bodyKind(mt, schema)
-		if kind == "" || kind == "jsonl" || kind == "sse" {
-			b.warnAt(m, nil, fmt.Sprintf("request bodies of type %s are not supported yet and are answered with 415", mt))
-			rejected = append(rejected, mt)
-			continue
+		if kind == "jsonl" {
+			// The schema of the items, which the field is a stream of.
+			schema = streamItem(m.Deref())
 		}
 		if m.Deref().Encoding.Len() > 0 && kind != "multipart" {
 			b.warnAt(m, []string{"encoding"}, "the encoding object is not applied yet")
@@ -775,7 +776,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			g = "structured"
 		}
 		i := slices.IndexFunc(groups, func(gr *group) bool {
-			return gr.kind == g && (g != "structured" && g != "parts" || sameSchema(gr.schema, deref(schema)))
+			return gr.kind == g && (g != "structured" && g != "parts" && g != "jsonl" || sameSchema(gr.schema, deref(schema)))
 		})
 		var field *BodyField
 		switch {
@@ -846,6 +847,15 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 	return body
 }
 
+// streamItem returns the schema of the items of a JSON Lines body: its
+// itemSchema (3.2), or the items of an array schema.
+func streamItem(media *oas.MediaType) *oas.Schema {
+	if media.ItemSchema == nil && media.Schema != nil {
+		return deref(media.Schema).Items
+	}
+	return media.ItemSchema
+}
+
 // opaque reports whether a binary body's schema leaves its bytes
 // undescribed: no schema, or a string.
 func opaque(s *oas.Schema) bool {
@@ -869,7 +879,7 @@ func sameSchema(a, b *oas.Schema) bool {
 // cannot be decoded into Body: after its kind, or after the media type if
 // another field has that name. The caller claims it once the field is used.
 func bodyFieldName(fields namespace, kind, mediaType string) string {
-	name := map[string]string{"json": "JSON", "xml": "XML", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary"}[kind] + "Body"
+	name := map[string]string{"json": "JSON", "xml": "XML", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary", "jsonl": "JSONLines", "sse": "Events"}[kind] + "Body"
 	if kind == "parts" {
 		// MixedBody, RelatedBody, ...
 		mt, _, _ := strings.Cut(mediaType, ";")
@@ -1074,6 +1084,10 @@ func isFilePart(s *oas.Schema) bool {
 // type for structured bodies, a string for text and bytes for binary.
 func (b *builder) bodyValue(kind string, schema *oas.Schema, hint string) *Ref {
 	switch kind {
+	case "jsonl":
+		return &Ref{Kind: Stream, Elem: b.use(schema, strings.TrimSuffix(hint, "Body")+"Item", nil)}
+	case "sse":
+		return &Ref{Kind: Stream, Elem: &Ref{Kind: Builtin, Name: "server.Event", Import: serverImport}}
 	case "text":
 		if s := deref(schema); s != nil && slices.Equal([]string(s.Type), []string{"string"}) {
 			return b.stringRef(s)
@@ -1152,11 +1166,7 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 				suffix = GoName(strings.TrimSuffix(mt, "/*"))
 			}
 		case "jsonl":
-			item := media.ItemSchema
-			if item == nil && media.Schema != nil {
-				item = deref(media.Schema).Items
-			}
-			v.Item = b.use(item, o.Name+statusName+"Item", nil)
+			v.Item = b.use(streamItem(media), o.Name+statusName+"Item", nil)
 			suffix = "JSONLines"
 		case "sse":
 			suffix = "Events"
