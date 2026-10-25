@@ -1,11 +1,14 @@
 package petserver
 
-// Tests of streamed request bodies over HTTP. They are not generated;
-// codegen's TestGeneratedCode runs them.
+// Tests of streamed request bodies, over HTTP and through the generated
+// client. They are not generated; codegen's TestGeneratedCode runs them.
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"io"
+	"iter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
+	petclient "github.com/dheins/go-openapi/codegen/testdata/golden/petserver/client"
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
+	"github.com/dheins/go-openapi/oapi"
+	"github.com/dheins/go-openapi/runtime/client"
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
@@ -98,5 +106,92 @@ func TestStreamedFullDuplex(t *testing.T) {
 	pw.Close()
 	if lines.Scan() {
 		t.Errorf("extra line %q", lines.Text())
+	}
+}
+
+// pets yields a pet per name, then err if not nil.
+func pets(err error, names ...string) iter.Seq2[model.Pet, error] {
+	return func(yield func(model.Pet, error) bool) {
+		for _, name := range names {
+			if !yield(model.Pet{Name: name}, nil) {
+				return
+			}
+		}
+		if err != nil {
+			yield(model.Pet{}, err)
+		}
+	}
+}
+
+func TestClientStreams(t *testing.T) {
+	ctx := context.Background()
+	s, c := newTestClient(t, petclient.Credentials{})
+	lines := as[api.ImportLines200JSONResponse](t)
+	if r := lines(c.ImportLines(ctx, &api.ImportLinesRequest{Body: pets(nil, "Ann", "Bo", "Cy")})); r.Body != 3 || s.pets[4].Name != "Cy" {
+		t.Errorf("import: %+v %+v", r, s.pets)
+	}
+	if r := lines(c.ImportLines(ctx, &api.ImportLinesRequest{JSONBody: oapi.Some([]model.Pet{{Name: "Di"}})})); r.Body != 1 {
+		t.Errorf("import as JSON: %+v", r)
+	}
+	if got := s.seen["ImportLines"].(*api.ImportLinesRequest); got.ContentType != "application/json" || got.Body != nil {
+		t.Errorf("JSON import = %+v", got)
+	}
+
+	// An invalid item ends the request before it is sent.
+	var invalid *client.InvalidRequest
+	if _, err := c.ImportLines(ctx, &api.ImportLinesRequest{Body: pets(nil, "Ed", "")}); !errors.As(err, &invalid) ||
+		len(invalid.Problem.Errors) != 1 || invalid.Problem.Errors[0].Pointer != "/1/name" {
+		t.Errorf("invalid item: %v", err)
+	}
+	// So does an error of the iterator.
+	stop := errors.New("stop")
+	if _, err := c.ImportLines(ctx, &api.ImportLinesRequest{Body: pets(stop, "Fi")}); !errors.Is(err, stop) {
+		t.Errorf("iterator error: %v", err)
+	}
+	// Without validation, the server finds the invalid item.
+	_, lax := newTestClient(t, petclient.Credentials{}, client.WithoutRequestValidation())
+	_, err := lax.ImportLines(ctx, &api.ImportLinesRequest{Body: pets(nil, "Gus", "")})
+	if u := unexpected(t, err, 400); u.Problem == nil || len(u.Problem.Errors) != 1 || u.Problem.Errors[0].Pointer != "/1/name" {
+		t.Errorf("server-side invalid item: %+v", u.Problem)
+	}
+
+	events := func(yield func(server.Event, error) bool) {
+		_ = yield(server.Event{Event: "a", Data: "1\n2"}, nil) && yield(server.Event{ID: "7", Data: "x"}, nil)
+	}
+	if r := as[api.PostEvents200JSONResponse](t)(c.PostEvents(ctx, &api.PostEventsRequest{Body: events})); r.Body != 2 ||
+		!slices.Equal(s.seen["PostEvents"].([]server.Event), []server.Event{{Event: "a", Data: "1\n2"}, {ID: "7", Data: "x"}}) {
+		t.Errorf("events: %+v %+v", r, s.seen["PostEvents"])
+	}
+}
+
+func TestClientFullDuplex(t *testing.T) {
+	_, c := newTestClient(t, petclient.Credentials{})
+	// Each pet is sent once the one before it has come back, so the
+	// request and the response stream at the same time.
+	echoed := make(chan string)
+	items := func(yield func(model.Pet, error) bool) {
+		for _, name := range []string{"Ann", "Bo"} {
+			if !yield(model.Pet{Name: name}, nil) {
+				return
+			}
+			select {
+			case <-echoed:
+			case <-time.After(10 * time.Second):
+				yield(model.Pet{}, errors.New("no echo"))
+				return
+			}
+		}
+	}
+	r := as[api.Echo200JSONLinesResponse](t)(c.Echo(context.Background(), &api.EchoRequest{Body: items}))
+	var got []string
+	for p, err := range r.Items {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, p.Name)
+		echoed <- p.Name
+	}
+	if !slices.Equal(got, []string{"Ann", "Bo"}) {
+		t.Errorf("echoed %q", got)
 	}
 }
