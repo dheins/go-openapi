@@ -366,6 +366,26 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   format now.
 - *Not done*: see [features.md](../features.md).
 
+### M16 – Webhooks, callbacks, links, examples and encodings in codescan ✅
+- [x] `//goapi:webhook` and `//goapi:callback`, declared like operations
+- [x] `//goapi:link` and `//goapi:example`, with JSON unquoted to the end
+  of the line
+- [x] Encodings of form and multipart bodies from `goapi` tag keys
+- [x] The scanned golden service runs a webhook, a callback and a
+  multipart body end to end
+
+**How it went**
+- *One parser*: operations, webhooks and callbacks share the parsing of
+  their declaration, so they take the same request, response and security
+  directives; callbacks are placed once every operation is known.
+- *Raw examples*: `//goapi:example` lines are not split into words, so
+  JSON needs no quoting; `FuzzDirectives` checks that what parses is JSON.
+- *Found on the way*: the sender's scheme helpers were named with a
+  lower-case first letter (`aPIKeyScheme`); they are `schemeAPIKey`. The
+  validator does not check examples against schemas, so neither does
+  `goapi scan`.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

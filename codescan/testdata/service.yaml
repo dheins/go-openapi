@@ -81,6 +81,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/Pet'
+            examples:
+              rex:
+                summary: A dog, with "tags"
+                value:
+                  name: Rex
+              tom:
+                value:
+                  name: Tom
           application/xml:
             schema:
               $ref: '#/components/schemas/Pet'
@@ -92,12 +100,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+          links:
+            GetPet:
+              operationId: getPet
+              parameters:
+                id: $response.body#/id
+              description: The new pet.
         4XX:
           description: Client error.
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+              example:
+                title: Conflict
       deprecated: true
     additionalOperations:
       PURGE:
@@ -130,6 +146,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+              example:
+                id: 1
+                name: Rex
+                tags:
+                  - good dog
         "404":
           description: Not Found.
       security:
@@ -181,6 +202,110 @@ paths:
       responses:
         "204":
           description: No Content.
+  /subscriptions:
+    post:
+      description: Subscribe registers a URL for pet events.
+      operationId: subscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                url:
+                  type: string
+                  format: uri
+              type: object
+              required:
+                - url
+        required: true
+      responses:
+        "201":
+          description: Created.
+      callbacks:
+        petEvent:
+          '{$request.body#/url}/pets':
+            get:
+              description: PingSubscriber checks that a subscriber is there.
+              operationId: pingSubscriber
+              responses:
+                "200":
+                  description: OK.
+            post:
+              description: NotifyPet sends a subscriber a pet event, at the URL it gave.
+              operationId: notifyPet
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/Pet'
+                required: true
+              responses:
+                "204":
+                  description: No Content.
+              security:
+                - apiKey: []
+                - {}
+  /pets/{id}/uploads:
+    post:
+      description: UploadPhoto stores a photo with its caption.
+      operationId: uploadPhoto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Upload'
+            encoding:
+              photo:
+                contentType: image/png, image/jpeg
+                headers:
+                  X-Checksum:
+                    required: true
+                    schema:
+                      type: string
+                  X-Seq:
+                    required: true
+                    schema:
+                      type: string
+              labels:
+                style: form
+                explode: false
+        required: true
+      responses:
+        "204":
+          description: No Content.
+webhooks:
+  petAdopted:
+    post:
+      tags:
+        - pets
+      description: PetAdopted tells a consumer that a pet was adopted.
+      operationId: petAdopted
+      parameters:
+        - name: X-Attempt
+          in: header
+          schema:
+            type: integer
+            format: int32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdoptedEvent'
+        required: true
+      responses:
+        "204":
+          description: No Content.
+        "410":
+          description: The consumer is gone.
+      security:
+        - bearer: []
 components:
   schemas:
     Pet:
@@ -319,6 +444,34 @@ components:
         - title
         - status
       description: Problem is an error.
+    AdoptedEvent:
+      properties:
+        pet:
+          $ref: '#/components/schemas/Pet'
+        by:
+          type: string
+          minLength: 1
+      type: object
+      required:
+        - pet
+        - by
+      description: AdoptedEvent is sent when a pet is adopted.
+    Upload:
+      properties:
+        photo:
+          type: string
+          format: binary
+        caption:
+          type: string
+          maxLength: 40
+        labels:
+          items:
+            type: string
+          type: array
+      type: object
+      required:
+        - photo
+      description: Upload is a pet's photo, with a caption and labels.
   securitySchemes:
     apiKey:
       type: apiKey

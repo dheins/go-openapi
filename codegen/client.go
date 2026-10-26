@@ -229,8 +229,8 @@ func (f *fileGen) senderMethod(o *ir.Operation) string {
 }
 
 // senderSchemeFunc names the method of Sender returning the client.Scheme
-// of s for a target.
-func senderSchemeFunc(s *ir.SecurityScheme) string { return lowerFirst(s.Method) + "Scheme" }
+// of s for a target; prefixed, so that initialisms (APIKey) stay whole.
+func senderSchemeFunc(s *ir.SecurityScheme) string { return "scheme" + s.Method }
 
 // senderScheme returns the method of Sender that gives the scheme s with
 // the credentials of a target.

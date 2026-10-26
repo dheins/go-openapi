@@ -41,6 +41,10 @@ func (s *scanner) applyKeyword(schema *oas.Schema, e tagEntry, required *int) er
 		return e.value, nil
 	}
 	switch e.key {
+	case "contentType", "headers", "style", "explode":
+		// How a property of a form or multipart body is encoded, which the
+		// body applies (see encodings); not a schema keyword.
+		return nil
 	case "readOnly":
 		return flag(func() { schema.ReadOnly = true })
 	case "writeOnly":

@@ -49,9 +49,9 @@ func NewSender(creds SenderCredentials, opts ...client.Option) (*Sender, error) 
 	return &Sender{cfg: cfg, creds: creds}, nil
 }
 
-// hookTokenScheme returns the scheme "hookToken" with the credentials for
+// schemeHookToken returns the scheme "hookToken" with the credentials for
 // target.
-func (s *Sender) hookTokenScheme(target string) client.Scheme {
+func (s *Sender) schemeHookToken(target string) client.Scheme {
 	var cred func(ctx context.Context) (string, error)
 	if f := s.creds.HookToken; f != nil {
 		cred = func(ctx context.Context) (string, error) { return f(ctx, target) }
@@ -59,9 +59,9 @@ func (s *Sender) hookTokenScheme(target string) client.Scheme {
 	return client.Bearer(cred)
 }
 
-// hookKeyScheme returns the scheme "hookKey" with the credentials for
+// schemeHookKey returns the scheme "hookKey" with the credentials for
 // target.
-func (s *Sender) hookKeyScheme(target string) client.Scheme {
+func (s *Sender) schemeHookKey(target string) client.Scheme {
 	var cred func(ctx context.Context) (string, error)
 	if f := s.creds.HookKey; f != nil {
 		cred = func(ctx context.Context) (string, error) { return f(ctx, target) }
@@ -69,9 +69,9 @@ func (s *Sender) hookKeyScheme(target string) client.Scheme {
 	return client.APIKey("header", "X-Hook-Key", cred)
 }
 
-// basicAuthScheme returns the scheme "basicAuth" with the credentials for
+// schemeBasicAuth returns the scheme "basicAuth" with the credentials for
 // target.
-func (s *Sender) basicAuthScheme(target string) client.Scheme {
+func (s *Sender) schemeBasicAuth(target string) client.Scheme {
 	var cred func(ctx context.Context) (username, password string, err error)
 	if f := s.creds.BasicAuth; f != nil {
 		cred = func(ctx context.Context) (username, password string, err error) { return f(ctx, target) }
@@ -89,7 +89,7 @@ func (s *Sender) PetAdoptedWebhook(ctx context.Context, target string, req *api.
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Authorize(ctx, hreq, []client.Requirement{{s.hookKeyScheme(target)}, {s.basicAuthScheme(target)}}); err != nil {
+	if err := client.Authorize(ctx, hreq, []client.Requirement{{s.schemeHookKey(target)}, {s.schemeBasicAuth(target)}}); err != nil {
 		return nil, err
 	}
 	resp, err := s.cfg.Do(hreq)
@@ -128,7 +128,7 @@ func (s *Sender) SubscribePingCallback(ctx context.Context, target string, req *
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Authorize(ctx, hreq, []client.Requirement{{s.hookTokenScheme(target)}, {}}); err != nil {
+	if err := client.Authorize(ctx, hreq, []client.Requirement{{s.schemeHookToken(target)}, {}}); err != nil {
 		return nil, err
 	}
 	resp, err := s.cfg.Do(hreq)

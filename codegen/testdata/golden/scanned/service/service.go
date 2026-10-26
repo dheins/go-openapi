@@ -99,7 +99,9 @@ type CreatePetRequest struct {
 //
 //goapi:operation POST /pets tags=pets
 //goapi:response 201 Pet
+//goapi:link 201 GetPet operationId=getPet id=$response.body#/id
 //goapi:response 409 Problem application/problem+json
+//goapi:example request {"name": "Rex", "kind": "dog"}
 func (Store) CreatePet(ctx context.Context, req *CreatePetRequest) (*Pet, error) {
 	return nil, nil
 }
@@ -113,6 +115,7 @@ type PetRequest struct {
 //
 //goapi:operation GET /pets/{id} tags=pets
 //goapi:response 200 Pet
+//goapi:example 200 name=rex summary="A dog" {"id": 1, "name": "Rex", "kind": "dog"}
 //goapi:response 404
 func (Store) GetPet(ctx context.Context, req *PetRequest) (*Pet, error) {
 	return nil, nil
@@ -138,5 +141,79 @@ type PhotoRequest struct {
 //goapi:operation PUT /pets/{id}/photo tags=pets
 //goapi:response 204
 func (Store) PutPhoto(ctx context.Context, req *PhotoRequest) error {
+	return nil
+}
+
+// Upload is a pet's photo with a caption.
+type Upload struct {
+	Photo   oapi.File `json:"photo" goapi:"contentType=image/png|image/jpeg;headers=X-Checksum"`
+	Caption string    `json:"caption,omitempty" goapi:"maxLength=40"`
+}
+
+// UploadRequest holds a pet's upload.
+type UploadRequest struct {
+	ID     int64  `goapi:"in=path;name=id"`
+	Upload Upload `goapi:"in=body;mediaType=multipart/form-data"`
+}
+
+// UploadPhoto stores a pet's photo, with its caption.
+//
+//goapi:operation POST /pets/{id}/uploads tags=pets
+//goapi:response 204
+func (Store) UploadPhoto(ctx context.Context, req *UploadRequest) error {
+	return nil
+}
+
+// Adoption is sent when a pet is adopted.
+type Adoption struct {
+	Pet Pet    `json:"pet"`
+	By  string `json:"by" goapi:"minLength=1"`
+}
+
+// AdoptedRequest is the request of the petAdopted webhook.
+type AdoptedRequest struct {
+	Adoption Adoption `goapi:"in=body"`
+}
+
+// PetAdopted tells a consumer that a pet was adopted, with the key the
+// consumer issued.
+//
+//goapi:webhook petAdopted POST tags=pets
+//goapi:response 204
+//goapi:security apiKey
+func (Store) PetAdopted(ctx context.Context, req *AdoptedRequest) error {
+	return nil
+}
+
+// SubscribeRequest asks for pet events at a URL.
+type SubscribeRequest struct {
+	Body Subscription `goapi:"in=body"`
+}
+
+// Subscription is where to send pet events.
+type Subscription struct {
+	URL string `json:"url" goapi:"format=uri"`
+}
+
+// Subscribe registers a URL for pet events.
+//
+//goapi:operation POST /subscriptions tags=pets
+//goapi:response 201
+func (Store) Subscribe(ctx context.Context, req *SubscribeRequest) error {
+	return nil
+}
+
+// PetEventRequest is a pet event.
+type PetEventRequest struct {
+	Pet Pet `goapi:"in=body"`
+}
+
+// NotifyPet sends a subscriber a pet event, with a key or none.
+//
+//goapi:callback subscribe petEvent POST {$request.body#/url}/pets
+//goapi:response 204
+//goapi:security apiKey
+//goapi:security -
+func (Store) NotifyPet(ctx context.Context, req *PetEventRequest) error {
 	return nil
 }

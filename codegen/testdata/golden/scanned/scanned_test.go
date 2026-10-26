@@ -70,6 +70,16 @@ func (s *store) PutPhoto(_ context.Context, req *api.PutPhotoRequest) (api.PutPh
 	return api.PutPhoto204Response{}, nil
 }
 
+func (s *store) UploadPhoto(_ context.Context, req *api.UploadPhotoRequest) (api.UploadPhotoResponse, error) {
+	s.seen["UploadPhoto"] = req
+	return api.UploadPhoto204Response{}, nil
+}
+
+func (s *store) Subscribe(_ context.Context, req *api.SubscribeRequest) (api.SubscribeResponse, error) {
+	s.seen["Subscribe"] = req
+	return api.Subscribe201Response{}, nil
+}
+
 type auth struct{}
 
 func (auth) APIKey(ctx context.Context, key string, _ []string) (context.Context, error) {

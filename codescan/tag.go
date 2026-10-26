@@ -71,7 +71,10 @@ type directive struct {
 	name string
 	args []string
 	kv   []tagEntry
-	pos  token.Pos
+	// raw is the text after the name of a directive whose arguments are
+	// not split, //goapi:example, whose value is JSON.
+	raw string
+	pos token.Pos
 }
 
 // value returns the value of the argument key, if given.
@@ -97,6 +100,10 @@ func directives(doc *ast.CommentGroup) ([]directive, error) {
 	for _, c := range doc.List {
 		rest, ok := strings.CutPrefix(c.Text, directivePrefix)
 		if !ok {
+			continue
+		}
+		if name, raw, _ := strings.Cut(rest, " "); name == "example" {
+			ds = append(ds, directive{name: name, raw: strings.TrimSpace(raw), pos: c.Slash})
 			continue
 		}
 		words, err := splitWords(rest)

@@ -60,3 +60,29 @@ export interface Problem {
 
 /** The schema of Problem, for validation and encoding. */
 export const ProblemSchema: $Schema = { kind: "object", properties: { title: { schema: { kind: "string" }, required: true }, detail: { schema: { kind: "string" } } } };
+
+/** Upload is a pet's photo with a caption. */
+export interface Upload {
+  photo: Blob;
+  caption?: string;
+}
+
+/** The schema of Upload, for validation and encoding. */
+export const UploadSchema: $Schema = { kind: "object", properties: { photo: { schema: { kind: "file" }, required: true }, caption: { schema: { kind: "string", maxLength: 40 } } } };
+
+/** Adoption is sent when a pet is adopted. */
+export interface Adoption {
+  pet: Pet;
+  by: string;
+}
+
+/** The schema of Adoption, for validation and encoding. */
+export const AdoptionSchema: $Schema = { kind: "object", properties: { pet: { schema: $ref(() => PetSchema), required: true }, by: { schema: { kind: "string", minLength: 1 }, required: true } } };
+
+/** Subscription is where to send pet events. */
+export interface Subscription {
+  url: string;
+}
+
+/** The schema of Subscription, for validation and encoding. */
+export const SubscriptionSchema: $Schema = { kind: "object", properties: { url: { schema: { kind: "string", format: "uri" }, required: true } } };

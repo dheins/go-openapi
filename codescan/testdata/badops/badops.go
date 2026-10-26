@@ -65,3 +65,97 @@ func second() {}
 //goapi:operation GET /dup
 //goapi:response 200
 func third() {}
+
+// HookReq has a path field, which webhooks and callbacks do not have.
+type HookReq struct {
+	ID int64 `goapi:"in=path;name=id"`
+}
+
+//goapi:webhook hook POST
+//goapi:response 204
+func hookWithPath(req HookReq) {}
+
+//goapi:webhook hook
+//goapi:response 204
+func hookWithoutMethod() {}
+
+//goapi:webhook again POST
+//goapi:response 204
+func hookOnce() {}
+
+//goapi:webhook again POST
+//goapi:response 204
+func hookTwice() {}
+
+//goapi:webhook quiet POST
+func hookWithoutResponse() {}
+
+//goapi:operation GET /both
+//goapi:webhook both GET
+//goapi:response 200
+func both() {}
+
+//goapi:callback nosuchop event POST {$request.body#/url}
+//goapi:response 204
+func orphanCallback() {}
+
+//goapi:callback same event POST {$request.body#/url}
+//goapi:response 204
+func callbackOnce() {}
+
+//goapi:callback same event POST {$request.body#/url} id=callbackAgain
+//goapi:response 204
+func callbackTwice() {}
+
+//goapi:callback same event POST
+//goapi:response 204
+func callbackWithoutURL() {}
+
+// BodyReq has a body.
+type BodyReq struct {
+	Body string `goapi:"in=body;mediaType=application/json|text/plain"`
+}
+
+//goapi:operation POST /examples
+//goapi:response 200 string
+//goapi:response 204
+//goapi:example 200 {"unterminated":
+//goapi:example 300 1
+//goapi:example 201 1
+//goapi:example 204 1
+//goapi:example request 1
+//goapi:example request text/csv 1
+//goapi:example request application/json color=red 1
+//goapi:example request application/json summary=lonely 1
+//goapi:example 200
+//goapi:example 200 2
+//goapi:example 200 3
+//goapi:example 200 name=a 4
+//goapi:example 200 name=a 5
+func examples(req BodyReq) {}
+
+//goapi:operation GET /links
+//goapi:response 200
+//goapi:link 201 next operationId=examples
+//goapi:link 200 nowhere
+//goapi:link 200 both operationId=examples operationRef=#/paths/~1links/get
+//goapi:link 200 missing operationId=nosuchop
+//goapi:link 200 next operationId=examples
+//goapi:link 200 next operationId=examples
+//goapi:link 200
+func links() {}
+
+// Parts has encodings codescan rejects.
+type Parts struct {
+	A string `json:"a" goapi:"explode=maybe"`
+	B string `json:"b" goapi:"contentType"`
+}
+
+// PartsReq sends Parts as a form.
+type PartsReq struct {
+	Body Parts `goapi:"in=body;mediaType=application/x-www-form-urlencoded"`
+}
+
+//goapi:operation POST /parts
+//goapi:response 204
+func parts(req PartsReq) {}

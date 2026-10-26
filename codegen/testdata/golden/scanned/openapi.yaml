@@ -60,6 +60,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/Pet'
+            example:
+              name: Rex
+              kind: dog
         required: true
       responses:
         "201":
@@ -68,6 +71,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+          links:
+            GetPet:
+              operationId: getPet
+              parameters:
+                id: $response.body#/id
         "409":
           description: Conflict.
           content:
@@ -95,6 +103,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+              examples:
+                rex:
+                  summary: A dog
+                  value:
+                    id: 1
+                    name: Rex
+                    kind: dog
         "404":
           description: Not Found.
     delete:
@@ -138,6 +153,89 @@ paths:
       responses:
         "204":
           description: No Content.
+  /pets/{id}/uploads:
+    post:
+      tags:
+        - pets
+      description: UploadPhoto stores a pet's photo, with its caption.
+      operationId: uploadPhoto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Upload'
+            encoding:
+              photo:
+                contentType: image/png, image/jpeg
+                headers:
+                  X-Checksum:
+                    required: true
+                    schema:
+                      type: string
+        required: true
+      responses:
+        "204":
+          description: No Content.
+  /subscriptions:
+    post:
+      tags:
+        - pets
+      description: Subscribe registers a URL for pet events.
+      operationId: subscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Subscription'
+        required: true
+      responses:
+        "201":
+          description: Created.
+      callbacks:
+        petEvent:
+          '{$request.body#/url}/pets':
+            post:
+              description: NotifyPet sends a subscriber a pet event, with a key or none.
+              operationId: notifyPet
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/Pet'
+                required: true
+              responses:
+                "204":
+                  description: No Content.
+              security:
+                - apiKey: []
+                - {}
+webhooks:
+  petAdopted:
+    post:
+      tags:
+        - pets
+      description: |-
+        PetAdopted tells a consumer that a pet was adopted, with the key the
+        consumer issued.
+      operationId: petAdopted
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Adoption'
+        required: true
+      responses:
+        "204":
+          description: No Content.
+      security:
+        - apiKey: []
 components:
   schemas:
     Pet:
@@ -217,6 +315,39 @@ components:
       required:
         - title
       description: Problem is an error.
+    Upload:
+      properties:
+        photo:
+          type: string
+          format: binary
+        caption:
+          type: string
+          maxLength: 40
+      type: object
+      required:
+        - photo
+      description: Upload is a pet's photo with a caption.
+    Adoption:
+      properties:
+        pet:
+          $ref: '#/components/schemas/Pet'
+        by:
+          type: string
+          minLength: 1
+      type: object
+      required:
+        - pet
+        - by
+      description: Adoption is sent when a pet is adopted.
+    Subscription:
+      properties:
+        url:
+          type: string
+          format: uri
+      type: object
+      required:
+        - url
+      description: Subscription is where to send pet events.
   securitySchemes:
     apiKey:
       type: apiKey

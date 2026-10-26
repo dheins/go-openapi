@@ -1,6 +1,7 @@
 package codescan
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -250,35 +251,290 @@ type schemeUse struct {
 // doc, in package and source order.
 func (s *scanner) operations(doc *oas.Document) {
 	ids := map[string]token.Pos{}
+	parents := map[string]*oas.Operation{}
+	var callbacks []*declared
 	for _, fd := range s.funcs {
-		op, method, path, ok := s.operation(fd)
+		d, ok := s.operation(fd)
 		if !ok {
 			continue
 		}
-		if prev, dup := ids[op.OperationID]; dup {
-			s.report(fd.ds[0].pos, Error, "operationId %q is already used at %s", op.OperationID, s.where(prev))
+		if prev, dup := ids[d.op.OperationID]; dup {
+			s.report(d.pos, Error, "operationId %q is already used at %s", d.op.OperationID, s.where(prev))
 			continue
 		}
-		ids[op.OperationID] = fd.ds[0].pos
-		if doc.Paths == nil {
-			doc.Paths = &oas.Paths{}
+		ids[d.op.OperationID] = d.pos
+		var item *oas.PathItem
+		switch d.kind {
+		case "operation":
+			parents[d.op.OperationID] = d.op
+			if doc.Paths == nil {
+				doc.Paths = &oas.Paths{}
+			}
+			item = pathItem(&doc.Paths.Items, d.path)
+		case "webhook":
+			if doc.Webhooks == nil {
+				doc.Webhooks = &oas.OrderedMap[*oas.PathItem]{}
+			}
+			item = pathItem(doc.Webhooks, d.name)
+		case "callback":
+			// Once every operation is known.
+			callbacks = append(callbacks, d)
+			continue
 		}
-		item, ok := doc.Paths.Items.Get(path)
+		s.place(item, d)
+	}
+	for _, d := range callbacks {
+		parent := parents[d.parent]
+		if parent == nil {
+			s.report(d.pos, Error, "goapi:callback: no goapi:operation has the operationId %q", d.parent)
+			continue
+		}
+		if parent.Callbacks == nil {
+			parent.Callbacks = &oas.OrderedMap[*oas.Callback]{}
+		}
+		cb, ok := parent.Callbacks.Get(d.name)
 		if !ok {
-			item = &oas.PathItem{}
-			doc.Paths.Items.Set(path, item)
+			cb = &oas.Callback{}
+			parent.Callbacks.Set(d.name, cb)
 		}
-		if !setOperation(item, method, op) {
-			s.report(fd.ds[0].pos, Error, "%s %s is declared twice", method, path)
-		}
-		if !slices.Contains(methods, method) || method == "QUERY" {
-			s.uses32 = true
-		}
+		s.place(pathItem(&cb.Items, d.path), d)
 	}
 	for _, u := range s.schemeUses {
 		if !s.schemes[u.name] {
 			s.report(u.pos, Error, "goapi:security: no goapi:securityScheme declares %q", u.name)
 		}
+	}
+	for _, l := range s.linkTargets {
+		if _, ok := ids[l.name]; !ok {
+			s.report(l.pos, Error, "goapi:link: no operation has the operationId %q", l.name)
+		}
+	}
+}
+
+// link adds the link a //goapi:link directive declares to a response of
+// op: link STATUS NAME operationId=ID|operationRef=REF [requestBody=EXPR]
+// [description=…], and a parameter per other key.
+func (s *scanner) link(d directive, op *oas.Operation) {
+	if len(d.args) != 2 {
+		s.report(d.pos, Error, "goapi:link takes a status and a name, then operationId= and the parameters")
+		return
+	}
+	resp, ok := op.Responses.Items.Get(d.args[0])
+	if !ok {
+		s.report(d.pos, Error, "goapi:link: the function declares no goapi:response %s", d.args[0])
+		return
+	}
+	l := &oas.Link{}
+	for _, e := range d.kv {
+		switch e.key {
+		case "operationId":
+			l.OperationID = e.value
+		case "operationRef":
+			l.OperationRef = e.value
+		case "description":
+			l.Description = e.value
+		case "requestBody":
+			l.RequestBody = linkValue(e.value)
+		default:
+			if l.Parameters == nil {
+				l.Parameters = &oas.OrderedMap[json.RawMessage]{}
+			}
+			l.Parameters.Set(e.key, linkValue(e.value))
+		}
+	}
+	if (l.OperationID == "") == (l.OperationRef == "") {
+		s.report(d.pos, Error, "goapi:link: give one of operationId and operationRef")
+		return
+	}
+	if l.OperationID != "" {
+		s.linkTargets = append(s.linkTargets, schemeUse{name: l.OperationID, pos: d.pos})
+	}
+	if resp.Links == nil {
+		resp.Links = &oas.OrderedMap[*oas.Link]{}
+	}
+	if _, dup := resp.Links.Get(d.args[1]); dup {
+		s.report(d.pos, Error, "goapi:link: response %s already has a link %q", d.args[0], d.args[1])
+		return
+	}
+	resp.Links.Set(d.args[1], l)
+}
+
+// linkValue is the value of a link parameter or request body: JSON as it
+// is, anything else (a runtime expression) as a string.
+func linkValue(v string) json.RawMessage {
+	if json.Valid([]byte(v)) {
+		return json.RawMessage(v)
+	}
+	data, _ := json.Marshal(v)
+	return data
+}
+
+// example adds the example a //goapi:example directive gives:
+// example request|STATUS [MEDIA TYPE] [name=…] [summary=…]
+// [description=…] JSON, the JSON being the rest of the line. With a
+// name, it is one of the media type's examples; without, its example.
+func (s *scanner) example(d directive, op *oas.Operation) {
+	ex, err := parseExample(d.raw)
+	if err != nil {
+		s.report(d.pos, Error, "goapi:example: %v", err)
+		return
+	}
+	var content *oas.OrderedMap[*oas.MediaType]
+	switch ex.target {
+	case "request":
+		if op.RequestBody == nil {
+			s.report(d.pos, Error, "goapi:example: the request has no body")
+			return
+		}
+		content = op.RequestBody.Content
+	default:
+		resp, ok := op.Responses.Items.Get(ex.target)
+		if !ok {
+			s.report(d.pos, Error, "goapi:example: %q is neither request nor a status the function declares a goapi:response for", ex.target)
+			return
+		}
+		if resp.Content == nil {
+			s.report(d.pos, Error, "goapi:example: response %s has no body", ex.target)
+			return
+		}
+		content = resp.Content
+	}
+	if ex.mediaType == "" {
+		if content.Len() > 1 {
+			s.report(d.pos, Error, "goapi:example: %s has several media types; name one", ex.target)
+			return
+		}
+		for mt := range content.All() {
+			ex.mediaType = mt
+		}
+	}
+	media, ok := content.Get(ex.mediaType)
+	if !ok {
+		s.report(d.pos, Error, "goapi:example: %s has no media type %s", ex.target, ex.mediaType)
+		return
+	}
+	if ex.name == "" {
+		if ex.summary != "" || ex.description != "" {
+			s.report(d.pos, Error, "goapi:example: summary and description are for a named example")
+			return
+		}
+		if media.Example != nil {
+			s.report(d.pos, Error, "goapi:example: %s %s already has an example; name them", ex.target, ex.mediaType)
+			return
+		}
+		media.Example = ex.value
+		return
+	}
+	if media.Examples == nil {
+		media.Examples = &oas.OrderedMap[*oas.Example]{}
+	}
+	if _, dup := media.Examples.Get(ex.name); dup {
+		s.report(d.pos, Error, "goapi:example: %s %s already has an example %q", ex.target, ex.mediaType, ex.name)
+		return
+	}
+	media.Examples.Set(ex.name, &oas.Example{Summary: ex.summary, Description: ex.description, Value: ex.value})
+}
+
+// exampleDirective is a //goapi:example directive, parsed.
+type exampleDirective struct {
+	target, mediaType          string
+	name, summary, description string
+	value                      json.RawMessage
+}
+
+// parseExample parses the text of a //goapi:example directive: a target,
+// then optionally a media type and keys, then JSON to the end.
+func parseExample(raw string) (exampleDirective, error) {
+	var ex exampleDirective
+	rest := strings.TrimSpace(raw)
+	word := func() string {
+		i := strings.IndexAny(rest, " \t")
+		if i < 0 {
+			i = len(rest)
+		}
+		w := rest[:i]
+		rest = strings.TrimSpace(rest[i:])
+		return w
+	}
+	ex.target = word()
+	if ex.target != "request" && !validStatus(ex.target) {
+		return ex, fmt.Errorf("%q is neither request nor a status code, range (4XX) or default", ex.target)
+	}
+	for rest != "" && !json.Valid([]byte(rest)) {
+		if strings.ContainsAny(rest[:1], `{["-0123456789`) {
+			return ex, fmt.Errorf("the value is not JSON: %s", rest)
+		}
+		key, value, isKey := strings.Cut(word(), "=")
+		if !isKey {
+			if ex.mediaType != "" || ex.name != "" || !strings.Contains(key, "/") {
+				return ex, fmt.Errorf("%q is neither a media type, a key nor JSON", key)
+			}
+			ex.mediaType = key
+			continue
+		}
+		if strings.HasPrefix(value, `"`) {
+			// A quoted value may hold spaces: take it from the text.
+			quoted, err := strconv.QuotedPrefix(value + " " + rest)
+			if err != nil {
+				return ex, fmt.Errorf("%s: %v", key, err)
+			}
+			rest = strings.TrimSpace(strings.TrimPrefix(value+" "+rest, quoted))
+			value, _ = strconv.Unquote(quoted)
+		}
+		switch key {
+		case "name":
+			ex.name = value
+		case "summary":
+			ex.summary = value
+		case "description":
+			ex.description = value
+		default:
+			return ex, fmt.Errorf("unknown key %q", key)
+		}
+	}
+	if rest == "" {
+		return ex, fmt.Errorf("no JSON value after %s", ex.target)
+	}
+	ex.value = json.RawMessage(rest)
+	return ex, nil
+}
+
+// declared is what a function with goapi directives declares: an
+// operation at path, a webhook called name, or a callback called name of
+// the operation parent, at the URL expression path.
+type declared struct {
+	kind         string
+	op           *oas.Operation
+	method, path string
+	name, parent string
+	pos          token.Pos
+}
+
+// pathItem returns the path item of key in items, adding one if needed.
+func pathItem(items *oas.OrderedMap[*oas.PathItem], key string) *oas.PathItem {
+	item, ok := items.Get(key)
+	if !ok {
+		item = &oas.PathItem{}
+		items.Set(key, item)
+	}
+	return item
+}
+
+// place puts the operation d declares in item, as its method.
+func (s *scanner) place(item *oas.PathItem, d *declared) {
+	if !setOperation(item, d.method, d.op) {
+		switch d.kind {
+		case "webhook":
+			s.report(d.pos, Error, "the webhook %q has two %s operations", d.name, d.method)
+		case "callback":
+			s.report(d.pos, Error, "the callback %q of %s has two %s operations at %s", d.name, d.parent, d.method, d.path)
+		default:
+			s.report(d.pos, Error, "%s %s is declared twice", d.method, d.path)
+		}
+		return
+	}
+	if !slices.Contains(methods, d.method) || d.method == "QUERY" {
+		s.uses32 = true
 	}
 }
 
@@ -305,35 +561,59 @@ func setOperation(item *oas.PathItem, method string, op *oas.Operation) bool {
 	return true
 }
 
-// operation maps a function with goapi directives to the operation it
-// declares, its method and its path.
-func (s *scanner) operation(fd *funcDecl) (*oas.Operation, string, string, bool) {
+// declarations are the directives that say what a function declares,
+// with the arguments each takes.
+var declarations = map[string]string{
+	"operation": "a method and a path",
+	"webhook":   "a name and a method",
+	"callback":  "the operationId of its operation, a name, a method and a URL expression",
+}
+
+// operation maps a function with goapi directives to the operation,
+// webhook or callback it declares.
+func (s *scanner) operation(fd *funcDecl) (*declared, bool) {
 	var opDir *directive
 	for i, d := range fd.ds {
-		if d.name == "operation" {
-			if opDir != nil {
-				s.report(d.pos, Error, "goapi:operation is given twice")
-				return nil, "", "", false
-			}
-			opDir = &fd.ds[i]
+		if _, ok := declarations[d.name]; !ok {
+			continue
 		}
+		if opDir != nil {
+			if opDir.name == d.name {
+				s.report(d.pos, Error, "goapi:%s is given twice", d.name)
+			} else {
+				s.report(d.pos, Error, "goapi:%s and goapi:%s on one function", opDir.name, d.name)
+			}
+			return nil, false
+		}
+		opDir = &fd.ds[i]
 	}
 	if opDir == nil {
-		s.report(fd.ds[0].pos, Error, "goapi:%s without goapi:operation", fd.ds[0].name)
-		return nil, "", "", false
+		s.report(fd.ds[0].pos, Error, "goapi:%s without goapi:operation, goapi:webhook or goapi:callback", fd.ds[0].name)
+		return nil, false
 	}
-	if len(opDir.args) != 2 {
-		s.report(opDir.pos, Error, "goapi:operation takes a method and a path")
-		return nil, "", "", false
+	args := map[string]int{"operation": 2, "webhook": 2, "callback": 4}[opDir.name]
+	if len(opDir.args) != args {
+		s.report(opDir.pos, Error, "goapi:%s takes %s", opDir.name, declarations[opDir.name])
+		return nil, false
 	}
-	method, path := strings.ToUpper(opDir.args[0]), opDir.args[1]
-	if !validMethod(method) {
-		s.report(opDir.pos, Error, "goapi:operation: %q is not an HTTP method", opDir.args[0])
-		return nil, "", "", false
+	d := &declared{kind: opDir.name, pos: opDir.pos}
+	var methodArg string
+	switch d.kind {
+	case "operation":
+		methodArg, d.path = opDir.args[0], opDir.args[1]
+	case "webhook":
+		d.name, methodArg = opDir.args[0], opDir.args[1]
+	case "callback":
+		d.parent, d.name, methodArg, d.path = opDir.args[0], opDir.args[1], opDir.args[2], opDir.args[3]
 	}
-	if !strings.HasPrefix(path, "/") {
-		s.report(opDir.pos, Error, "goapi:operation: the path %q does not start with /", path)
-		return nil, "", "", false
+	d.method = strings.ToUpper(methodArg)
+	if !validMethod(d.method) {
+		s.report(opDir.pos, Error, "goapi:%s: %q is not an HTTP method", d.kind, methodArg)
+		return nil, false
+	}
+	if d.kind == "operation" && !strings.HasPrefix(d.path, "/") {
+		s.report(opDir.pos, Error, "goapi:operation: the path %q does not start with /", d.path)
+		return nil, false
 	}
 	name := fd.decl.Name.Name
 	op := &oas.Operation{OperationID: strings.ToLower(name[:1]) + name[1:], Responses: &oas.Responses{}}
@@ -347,15 +627,20 @@ func (s *scanner) operation(fd *funcDecl) (*oas.Operation, string, string, bool)
 		case "tags":
 			op.Tags = strings.Split(e.value, ",")
 		default:
-			s.report(opDir.pos, Error, "goapi:operation: unknown key %q", e.key)
+			s.report(opDir.pos, Error, "goapi:%s: unknown key %q", d.kind, e.key)
 		}
 	}
+	d.op = op
 	defer s.at(fd.decl.Pos())()
 
 	var reqType types.Type
+	var later []directive
 	for _, d := range fd.ds {
 		switch d.name {
-		case "operation":
+		case "link", "example":
+			// Once the responses and the request are known.
+			later = append(later, d)
+		case "operation", "webhook", "callback":
 		case "request":
 			if len(d.args) != 1 || len(d.kv) > 0 {
 				s.report(d.pos, Error, "goapi:request takes a type")
@@ -377,12 +662,29 @@ func (s *scanner) operation(fd *funcDecl) (*oas.Operation, string, string, bool)
 	if reqType == nil {
 		reqType = requestParam(fd)
 	}
-	s.request(op, reqType, path, opDir.pos)
-	if op.Responses.Items.Len() == 0 {
-		s.report(opDir.pos, Error, "goapi:operation %s %s declares no goapi:response", method, path)
-		return nil, "", "", false
+	path := d.path
+	if d.kind != "operation" {
+		// A webhook or callback has no path parameters.
+		path = ""
 	}
-	return op, method, path, true
+	s.request(op, reqType, path, d.kind, opDir.pos)
+	for _, ld := range later {
+		if ld.name == "link" {
+			s.link(ld, op)
+		} else {
+			s.example(ld, op)
+		}
+	}
+	if op.Responses.Items.Len() == 0 {
+		switch d.kind {
+		case "operation":
+			s.report(opDir.pos, Error, "goapi:operation %s %s declares no goapi:response", d.method, d.path)
+		default:
+			s.report(opDir.pos, Error, "goapi:%s %s declares no goapi:response", d.kind, d.name)
+		}
+		return nil, false
+	}
+	return d, true
 }
 
 func validMethod(m string) bool {
@@ -432,8 +734,9 @@ func requestParam(fd *funcDecl) types.Type {
 }
 
 // request adds the parameters and body of the request type t to op, and
-// checks them against the path's parameters.
-func (s *scanner) request(op *oas.Operation, t types.Type, path string, pos token.Pos) {
+// checks them against the path's parameters. kind is what op is, an
+// operation, a webhook or a callback, which have none.
+func (s *scanner) request(op *oas.Operation, t types.Type, path, kind string, pos token.Pos) {
 	declared := map[string]bool{}
 	for _, m := range pathParam.FindAllStringSubmatch(path, -1) {
 		declared[m[1]] = true
@@ -468,6 +771,10 @@ func (s *scanner) request(op *oas.Operation, t types.Type, path string, pos toke
 			case "path", "query", "header", "cookie":
 				if p := s.parameter(f, tag, entries, in); p != nil {
 					if in == "path" {
+						if kind != "operation" {
+							s.report(f.Pos(), Error, "field %s: a %s has no path parameters", f.Name(), kind)
+							continue
+						}
 						if !declared[p.Name] {
 							s.report(f.Pos(), Error, "path parameter %q is not in the path %s", p.Name, path)
 							continue
@@ -604,9 +911,112 @@ func (s *scanner) requestBody(op *oas.Operation, f *types.Var, tag reflect.Struc
 		if err := s.applyEntries(schema, schemaEntries); err != nil {
 			s.report(f.Pos(), Error, "field %s: %v", f.Name(), err)
 		}
-		rb.Content.Set(mt, &oas.MediaType{Schema: schema})
+		media := &oas.MediaType{Schema: schema}
+		if isFormOrMultipart(mt) {
+			media.Encoding = s.encodings(f.Type())
+		}
+		rb.Content.Set(mt, media)
 	}
 	op.RequestBody = rb
+}
+
+func isFormOrMultipart(mediaType string) bool {
+	mt, _, _ := strings.Cut(mediaType, ";")
+	mt = strings.TrimSpace(strings.ToLower(mt))
+	return mt == "application/x-www-form-urlencoded" || mt == "multipart/form-data"
+}
+
+// encodings returns the encoding of the properties of a form or multipart
+// body of type t, from the contentType, headers, style and explode keys
+// of its fields' goapi tags, or nil if they have none.
+func (s *scanner) encodings(t types.Type) *oas.OrderedMap[*oas.Encoding] {
+	t = deref(t)
+	if isOptional(t) {
+		t = types.Unalias(t).(*types.Named).TypeArgs().At(0)
+	}
+	st, ok := deref(t).Underlying().(*types.Struct)
+	if !ok {
+		return nil
+	}
+	encodings := &oas.OrderedMap[*oas.Encoding]{}
+	s.fieldEncodings(st, encodings, map[string]bool{})
+	if encodings.Len() == 0 {
+		return nil
+	}
+	return encodings
+}
+
+// fieldEncodings adds the encodings of the fields of st, named as fieldsOf
+// names their properties, to encodings.
+func (s *scanner) fieldEncodings(st *types.Struct, encodings *oas.OrderedMap[*oas.Encoding], seen map[string]bool) {
+	for i := range st.NumFields() {
+		f := st.Field(i)
+		tag := reflect.StructTag(st.Tag(i))
+		jsonTag, hasJSON := tag.Lookup("json")
+		if jsonTag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(jsonTag, ",")
+		if f.Embedded() && name == "" {
+			if inner, ok := deref(f.Type()).Underlying().(*types.Struct); ok {
+				s.fieldEncodings(inner, encodings, seen)
+				continue
+			}
+		}
+		if !f.Exported() {
+			continue
+		}
+		if name == "" || !hasJSON {
+			name = f.Name()
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		text, ok := tag.Lookup("goapi")
+		if !ok {
+			continue
+		}
+		entries, err := parseTag(text)
+		if err != nil {
+			// fieldsOf reports it.
+			continue
+		}
+		var enc *oas.Encoding
+		for _, e := range entries {
+			if !slices.Contains([]string{"contentType", "headers", "style", "explode"}, e.key) {
+				continue
+			}
+			if enc == nil {
+				enc = &oas.Encoding{}
+			}
+			if e.flag || e.value == "" {
+				s.report(f.Pos(), Error, "field %s: %s needs a value", f.Name(), e.key)
+				continue
+			}
+			switch e.key {
+			case "contentType":
+				enc.ContentType = strings.ReplaceAll(e.value, "|", ", ")
+			case "headers":
+				enc.Headers = &oas.OrderedMap[*oas.Header]{}
+				for _, h := range strings.Split(e.value, "|") {
+					enc.Headers.Set(h, &oas.Header{Required: true, Schema: &oas.Schema{Type: oas.Types{"string"}}})
+				}
+			case "style":
+				enc.Style = e.value
+			case "explode":
+				if e.value != "true" && e.value != "false" {
+					s.report(f.Pos(), Error, "field %s: explode is true or false, not %q", f.Name(), e.value)
+					continue
+				}
+				b := e.value == "true"
+				enc.Explode = &b
+			}
+		}
+		if enc != nil {
+			encodings.Set(name, enc)
+		}
+	}
 }
 
 // bodySchema returns the schema of a body of type t sent as mediaType:
