@@ -85,6 +85,8 @@ type PetPage struct {
 //
 //goapi:operation GET /pets tags=pets
 //goapi:response 200 PetPage
+//goapi:example query:limit 10
+//goapi:example 200 header:X-Total 2
 //goapi:response default Problem application/problem+json
 func (Store) ListPets(ctx context.Context, req *ListPetsRequest) (*PetPage, error) {
 	return nil, nil

@@ -4,6 +4,16 @@
 
 ### Added
 
+- `goapi validate` rule `example-schema` (a warning): examples that do not
+  match their schemas. It checks the `example` and `examples` (`value`, and
+  3.2's `dataValue`) of media types, parameters and headers, the items of a
+  JSON Lines example against its `itemSchema`, and the examples of
+  schemas, with schemas compiled where they are, so references resolve as
+  loaded, and formats asserted. Read-only properties need not be in
+  request examples, nor write-only ones in response examples. The examples
+  of XML and binary media types, which are usually the serialized
+  document, `serializedValue` and `externalValue` are not checked.
+  `loader.Spec.Sources` returns the loaded files.
 - Webhooks and callbacks in `codescan`: `//goapi:webhook <name> METHOD`
   and `//goapi:callback <operationId> <name> METHOD <url-expression>` on
   a function declare them as `//goapi:operation` declares an operation,
@@ -14,7 +24,10 @@
   operationId=<id> <param>=<expression>…` adds a link to a response,
   checked against the scanned operationIds, and `//goapi:example
   <request|status> [<media type>] [name=…] [summary=…] <JSON>` an example
-  of a body, with the JSON as the rest of the line, unquoted.
+  of a body, with the JSON as the rest of the line, unquoted; with the
+  target `query:limit`, `header:X-Trace`, `path:id` or `cookie:session`,
+  of a parameter, and with `<status> header:X-Total`, of a response
+  header.
 - Encodings of form and multipart bodies in `codescan`: the keys
   `contentType=image/png|image/jpeg`, `headers=X-Checksum|X-Seq` (required
   part headers), `style=` and `explode=` in the `goapi` tag of a body

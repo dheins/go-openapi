@@ -5,8 +5,10 @@ package loader
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/dheins/go-openapi/oas"
@@ -122,6 +124,19 @@ func (s *Spec) Position(loc Location) Position {
 // upgraded content.
 func (s *Spec) Root() *Source {
 	return s.root
+}
+
+// Sources returns the files the document was read from: the root, then
+// the others by URI. Their content is that of the model: upgraded or
+// converted, for documents that are not 3.1 or 3.2.
+func (s *Spec) Sources() []*Source {
+	out := []*Source{s.root}
+	for _, uri := range slices.Sorted(maps.Keys(s.sources)) {
+		if src := s.sources[uri]; src != s.root {
+			out = append(out, src)
+		}
+	}
+	return out
 }
 
 // Fragments returns the objects decoded from other files, in the order

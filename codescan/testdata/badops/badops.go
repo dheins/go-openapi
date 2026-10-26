@@ -159,3 +159,28 @@ type PartsReq struct {
 //goapi:operation POST /parts
 //goapi:response 204
 func parts(req PartsReq) {}
+
+// ParamReq has parameters.
+type ParamReq struct {
+	Limit int32  `goapi:"in=query;name=limit"`
+	Trace string `goapi:"in=header;name=X-Trace"`
+}
+
+// ParamResp has a header.
+type ParamResp struct {
+	Total int64 `goapi:"in=header;name=X-Total"`
+}
+
+//goapi:operation GET /params
+//goapi:response 200 ParamResp
+//goapi:example query:nosuch 1
+//goapi:example body:limit 1
+//goapi:example query: 1
+//goapi:example query:limit application/json 1
+//goapi:example request header:X-Total 1
+//goapi:example 200 header:X-Missing 1
+//goapi:example query:limit 1
+//goapi:example query:limit 2
+//goapi:example 200 header:X-Total 3
+//goapi:example 200 header:X-Total 4
+func params(req ParamReq) {}

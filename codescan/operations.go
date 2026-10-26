@@ -370,80 +370,119 @@ func linkValue(v string) json.RawMessage {
 }
 
 // example adds the example a //goapi:example directive gives:
-// example request|STATUS [MEDIA TYPE] [name=…] [summary=…]
-// [description=…] JSON, the JSON being the rest of the line. With a
-// name, it is one of the media type's examples; without, its example.
+// example TARGET [MEDIA TYPE] [name=…] [summary=…] [description=…] JSON,
+// the JSON being the rest of the line. The target is request, a status,
+// a parameter (query:limit, header:X-Trace, path:id, cookie:session) or
+// a response header (200 header:X-Total). With a name, the example is
+// one of its examples; without, its example.
 func (s *scanner) example(d directive, op *oas.Operation) {
 	ex, err := parseExample(d.raw)
 	if err != nil {
 		s.report(d.pos, Error, "goapi:example: %v", err)
 		return
 	}
-	var content *oas.OrderedMap[*oas.MediaType]
-	switch ex.target {
-	case "request":
-		if op.RequestBody == nil {
-			s.report(d.pos, Error, "goapi:example: the request has no body")
+	var example *json.RawMessage
+	var examples **oas.OrderedMap[*oas.Example]
+	var label string
+	switch {
+	case ex.paramIn != "":
+		i := slices.IndexFunc(op.Parameters, func(p *oas.Parameter) bool {
+			return p.In == ex.paramIn && (p.Name == ex.paramName || ex.paramIn == "header" && strings.EqualFold(p.Name, ex.paramName))
+		})
+		if i < 0 {
+			s.report(d.pos, Error, "goapi:example: the request has no %s parameter %q", ex.paramIn, ex.paramName)
 			return
 		}
-		content = op.RequestBody.Content
+		p := op.Parameters[i]
+		example, examples, label = &p.Example, &p.Examples, ex.paramIn+" parameter "+p.Name
 	default:
-		resp, ok := op.Responses.Items.Get(ex.target)
-		if !ok {
-			s.report(d.pos, Error, "goapi:example: %q is neither request nor a status the function declares a goapi:response for", ex.target)
-			return
+		var content *oas.OrderedMap[*oas.MediaType]
+		var headers *oas.OrderedMap[*oas.Header]
+		switch ex.target {
+		case "request":
+			if op.RequestBody == nil {
+				s.report(d.pos, Error, "goapi:example: the request has no body")
+				return
+			}
+			content = op.RequestBody.Content
+		default:
+			resp, ok := op.Responses.Items.Get(ex.target)
+			if !ok {
+				s.report(d.pos, Error, "goapi:example: %q is neither request nor a status the function declares a goapi:response for", ex.target)
+				return
+			}
+			content, headers = resp.Content, resp.Headers
 		}
-		if resp.Content == nil {
+		if ex.header != "" {
+			var h *oas.Header
+			for name, hd := range headers.All() {
+				if strings.EqualFold(name, ex.header) {
+					h = hd
+				}
+			}
+			if h == nil {
+				s.report(d.pos, Error, "goapi:example: response %s has no header %q", ex.target, ex.header)
+				return
+			}
+			example, examples, label = &h.Example, &h.Examples, "header "+ex.header+" of "+ex.target
+			break
+		}
+		if content == nil {
 			s.report(d.pos, Error, "goapi:example: response %s has no body", ex.target)
 			return
 		}
-		content = resp.Content
-	}
-	if ex.mediaType == "" {
-		if content.Len() > 1 {
-			s.report(d.pos, Error, "goapi:example: %s has several media types; name one", ex.target)
+		if ex.mediaType == "" {
+			if content.Len() > 1 {
+				s.report(d.pos, Error, "goapi:example: %s has several media types; name one", ex.target)
+				return
+			}
+			for mt := range content.All() {
+				ex.mediaType = mt
+			}
+		}
+		media, ok := content.Get(ex.mediaType)
+		if !ok {
+			s.report(d.pos, Error, "goapi:example: %s has no media type %s", ex.target, ex.mediaType)
 			return
 		}
-		for mt := range content.All() {
-			ex.mediaType = mt
-		}
-	}
-	media, ok := content.Get(ex.mediaType)
-	if !ok {
-		s.report(d.pos, Error, "goapi:example: %s has no media type %s", ex.target, ex.mediaType)
-		return
+		example, examples, label = &media.Example, &media.Examples, ex.target+" "+ex.mediaType
 	}
 	if ex.name == "" {
 		if ex.summary != "" || ex.description != "" {
 			s.report(d.pos, Error, "goapi:example: summary and description are for a named example")
 			return
 		}
-		if media.Example != nil {
-			s.report(d.pos, Error, "goapi:example: %s %s already has an example; name them", ex.target, ex.mediaType)
+		if *example != nil {
+			s.report(d.pos, Error, "goapi:example: %s already has an example; name them", label)
 			return
 		}
-		media.Example = ex.value
+		*example = ex.value
 		return
 	}
-	if media.Examples == nil {
-		media.Examples = &oas.OrderedMap[*oas.Example]{}
+	if *examples == nil {
+		*examples = &oas.OrderedMap[*oas.Example]{}
 	}
-	if _, dup := media.Examples.Get(ex.name); dup {
-		s.report(d.pos, Error, "goapi:example: %s %s already has an example %q", ex.target, ex.mediaType, ex.name)
+	if _, dup := (*examples).Get(ex.name); dup {
+		s.report(d.pos, Error, "goapi:example: %s already has an example %q", label, ex.name)
 		return
 	}
-	media.Examples.Set(ex.name, &oas.Example{Summary: ex.summary, Description: ex.description, Value: ex.value})
+	(*examples).Set(ex.name, &oas.Example{Summary: ex.summary, Description: ex.description, Value: ex.value})
 }
 
-// exampleDirective is a //goapi:example directive, parsed.
+// exampleDirective is a //goapi:example directive, parsed: its target is
+// a body (request or a status, with a media type), a parameter (paramIn,
+// paramName) or a header of a response (target, header).
 type exampleDirective struct {
 	target, mediaType          string
+	paramIn, paramName         string
+	header                     string
 	name, summary, description string
 	value                      json.RawMessage
 }
 
 // parseExample parses the text of a //goapi:example directive: a target,
-// then optionally a media type and keys, then JSON to the end.
+// then optionally a media type (or a response header) and keys, then
+// JSON to the end.
 func parseExample(raw string) (exampleDirective, error) {
 	var ex exampleDirective
 	rest := strings.TrimSpace(raw)
@@ -457,8 +496,13 @@ func parseExample(raw string) (exampleDirective, error) {
 		return w
 	}
 	ex.target = word()
-	if ex.target != "request" && !validStatus(ex.target) {
-		return ex, fmt.Errorf("%q is neither request nor a status code, range (4XX) or default", ex.target)
+	if in, name, ok := strings.Cut(ex.target, ":"); ok {
+		if !slices.Contains([]string{"query", "header", "path", "cookie"}, in) || name == "" {
+			return ex, fmt.Errorf("%q is not a parameter: write query:name, header:name, path:name or cookie:name", ex.target)
+		}
+		ex.paramIn, ex.paramName = in, name
+	} else if ex.target != "request" && !validStatus(ex.target) {
+		return ex, fmt.Errorf("%q is neither request, a status code, range (4XX) or default, nor a parameter", ex.target)
 	}
 	for rest != "" && !json.Valid([]byte(rest)) {
 		if strings.ContainsAny(rest[:1], `{["-0123456789`) {
@@ -466,11 +510,21 @@ func parseExample(raw string) (exampleDirective, error) {
 		}
 		key, value, isKey := strings.Cut(word(), "=")
 		if !isKey {
-			if ex.mediaType != "" || ex.name != "" || !strings.Contains(key, "/") {
-				return ex, fmt.Errorf("%q is neither a media type, a key nor JSON", key)
+			header, isHeader := strings.CutPrefix(key, "header:")
+			switch {
+			case ex.mediaType != "" || ex.header != "" || ex.name != "":
+			case isHeader && (ex.paramIn != "" || ex.target == "request"):
+				return ex, fmt.Errorf("%s: only responses have headers; the example of a request header is header:%s", key, header)
+			case isHeader && header != "":
+				ex.header = header
+				continue
+			case strings.Contains(key, "/") && ex.paramIn != "":
+				return ex, fmt.Errorf("the example of a parameter takes no media type")
+			case strings.Contains(key, "/"):
+				ex.mediaType = key
+				continue
 			}
-			ex.mediaType = key
-			continue
+			return ex, fmt.Errorf("%q is neither a media type, a response header, a key nor JSON", key)
 		}
 		if strings.HasPrefix(value, `"`) {
 			// A quoted value may hold spaces: take it from the text.

@@ -1,0 +1,68 @@
+openapi: 3.2.0
+info: {title: examples, version: "1"}
+paths:
+  /pets:
+    get:
+      parameters:
+        - name: q
+          in: query
+          schema: {type: string, maxLength: 3}
+          example: toolong
+        - name: limit
+          in: query
+          schema: {type: integer}
+          examples:
+            ok: {value: 10}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Seen:
+              schema: {type: string, format: date-time}
+              example: yesterday
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/Pet"}}
+              example: [{id: 1, name: Rex}, {name: Tom}]
+            application/xml:
+              schema: {$ref: "#/components/schemas/Pet"}
+              examples:
+                doc: {value: "<pet><name>Rex</name></pet>"}
+                data:
+                  dataValue: {id: 1}
+                remote:
+                  externalValue: https://example.com/pet.xml
+            application/jsonl:
+              itemSchema: {$ref: "#/components/schemas/Pet"}
+              example: [{id: 1, name: Rex}, {id: 2}]
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Pet"}
+            examples:
+              new: {value: {name: Rex, secret: s}}
+              shared: {$ref: "#/components/examples/Unnamed"}
+      responses:
+        "201":
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Pet"}
+              examples:
+                created: {value: {id: 1, name: Rex}}
+                shared: {$ref: "#/components/examples/Unnamed"}
+components:
+  examples:
+    Unnamed:
+      value: {id: 1}
+  schemas:
+    Pet:
+      type: object
+      required: [id, name, secret]
+      properties:
+        id: {type: integer, readOnly: true}
+        name: {type: string, minLength: 1}
+        secret: {type: string, writeOnly: true}
+      examples:
+        - {id: 1, name: ""}

@@ -67,6 +67,20 @@ Validation runs in three phases and stops at the first that finds errors:
    discriminator whose object members one value can satisfy together,
    which `oneOf` then rejects.
 
+   `example-schema` (a warning) reports an example that does not match its
+   schema: the `example` and `examples` (`value`, and 3.2's `dataValue`)
+   of media types, parameters and headers, each item of a JSON Lines
+   example against its `itemSchema`, and the examples of schemas. Formats
+   are checked too. A request example may leave out required read-only
+   properties, and a response example required write-only ones. The
+   examples of XML and binary media types are usually the serialized
+   document, so they are not checked, nor are `serializedValue` and
+   `externalValue`:
+
+   ```
+   openapi.yaml:26:24: warning: the example does not match its schema: /1: missing property 'id' [example-schema]
+   ```
+
 Each diagnostic has a file, line and column:
 
 ```
@@ -1177,7 +1191,7 @@ type PetRequest struct {
 | `//goapi:webhook NAME METHOD [id=…] [tags=a,b] [summary=…]` | a webhook, in place of `//goapi:operation` (see below) |
 | `//goapi:callback OPERATIONID NAME METHOD URL-EXPRESSION [id=…] [summary=…]` | a callback of the operation with that operationId, in place of `//goapi:operation` |
 | `//goapi:link STATUS NAME operationId=ID [PARAM=EXPRESSION …] [requestBody=…] [description=…]` | a link of a response; `operationRef=` instead of `operationId=` |
-| `//goapi:example request\|STATUS [MEDIA TYPE] [name=…] [summary=…] [description=…] JSON` | an example of the request or response body; the JSON is the rest of the line |
+| `//goapi:example TARGET [MEDIA TYPE] [name=…] [summary=…] [description=…] JSON` | an example of the request (`request`) or response (`STATUS`) body, a parameter (`query:limit`, `header:X-Trace`, `path:id`, `cookie:session`) or a response header (`200 header:X-Total`); the JSON is the rest of the line |
 
 The fields of a request type say where they are with
 `in=path|query|header|cookie|body`. The parameter name defaults to the
@@ -1233,8 +1247,19 @@ A link belongs to a response the function declares. Its other keys are
 its parameters, whose values are JSON as they are or, like runtime
 expressions, strings, and its operationId must be a scanned operation's.
 An example's JSON is the rest of the line, written as it is. Without a
-name it is the media type's `example`, with one it is one of its
+name it is the `example` of its target, with one it is one of its
 `examples`. The media type may be left out when the body has only one.
+Parameters and response headers have examples too:
+
+```go
+//goapi:example query:limit 20
+//goapi:example header:x-trace "123e4567-e89b-12d3-a456-426614174000"
+//goapi:example 200 header:X-Total 3
+```
+
+`goapi scan` validates what it writes, so an example that does not match
+its schema is reported as an `example-schema` warning; the document is
+still written.
 
 ### Encodings
 

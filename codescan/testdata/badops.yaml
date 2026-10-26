@@ -51,6 +51,14 @@
 # testdata/badops/badops.go:145:1: error: goapi:link takes a status and a name, then operationId= and the parameters
 # testdata/badops/badops.go:150:2: error: field A: explode is true or false, not "maybe"
 # testdata/badops/badops.go:151:2: error: field B: contentType needs a value
+# testdata/badops/badops.go:176:1: error: goapi:example: the request has no query parameter "nosuch"
+# testdata/badops/badops.go:177:1: error: goapi:example: "body:limit" is not a parameter: write query:name, header:name, path:name or cookie:name
+# testdata/badops/badops.go:178:1: error: goapi:example: "query:" is not a parameter: write query:name, header:name, path:name or cookie:name
+# testdata/badops/badops.go:179:1: error: goapi:example: the example of a parameter takes no media type
+# testdata/badops/badops.go:180:1: error: goapi:example: header:X-Total: only responses have headers; the example of a request header is header:X-Total
+# testdata/badops/badops.go:181:1: error: goapi:example: response 200 has no header "X-Missing"
+# testdata/badops/badops.go:183:1: error: goapi:example: query parameter limit already has an example; name them
+# testdata/badops/badops.go:185:1: error: goapi:example: header X-Total of 200 already has an example; name them
 openapi: 3.1.0
 info:
   title: Bad
@@ -152,6 +160,29 @@ paths:
       responses:
         "204":
           description: No Content.
+  /params:
+    get:
+      operationId: params
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            format: int32
+          example: 1
+        - name: X-Trace
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK.
+          headers:
+            X-Total:
+              schema:
+                type: integer
+                format: int64
+              example: 3
 webhooks:
   hook:
     post:

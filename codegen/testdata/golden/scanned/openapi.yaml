@@ -21,6 +21,7 @@ paths:
             minimum: 1
             format: int32
             default: 20
+          example: 10
         - name: kind
           in: query
           description: Kinds are the kinds to return.
@@ -38,6 +39,7 @@ paths:
               schema:
                 type: integer
                 format: int64
+              example: 2
           content:
             application/json:
               schema:

@@ -177,3 +177,28 @@ func TestScanErrors(t *testing.T) {
 		t.Error("a missing package was scanned")
 	}
 }
+
+// TestWrongExample checks that the scanned document of an example that
+// does not match its schema is valid, but warned about.
+func TestWrongExample(t *testing.T) {
+	res, err := Scan(Options{Patterns: []string{"./testdata/wrongexample"}})
+	if err != nil || res.HasErrors() {
+		t.Fatalf("scan: %v %v", err, res.Diagnostics)
+	}
+	data, err := json.Marshal(res.Document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := loader.ParseBytes(data, "file:///scan/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := validate.Source(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Diagnostics) != 1 || v.Diagnostics[0].Rule != validate.RuleExampleSchema || v.Diagnostics[0].Severity != validate.Warning ||
+		v.Diagnostics[0].Location.Pointer != "/paths/~1items/get/parameters/0/example" {
+		t.Errorf("diagnostics = %v", v.Diagnostics)
+	}
+}

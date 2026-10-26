@@ -43,6 +43,12 @@ type Problem struct {
 //
 //goapi:operation GET /pets tags=pets summary="List pets"
 //goapi:response 200 PetList
+//goapi:example 200 []
+//goapi:example 200 header:x-total 0
+//goapi:example query:limit 20
+//goapi:example query:tags name=two summary="Two tags" ["a", "b"]
+//goapi:example header:x-trace "123e4567-e89b-12d3-a456-426614174000"
+//goapi:example cookie:session "s1"
 //goapi:response default Problem application/problem+json description="An error."
 //goapi:security -
 func (s *Server) ListPets(ctx context.Context, req *ListPetsRequest) (*PetList, error) {
@@ -58,7 +64,6 @@ type GetPetRequest struct {
 //
 //goapi:operation GET /pets/{id} tags=pets
 //goapi:response 200 models.Pet
-//goapi:example 200 {"id": 1, "name": "Rex", "tags": ["good dog"]}
 //goapi:response 404
 //goapi:security bearer
 //goapi:security oauth:read
@@ -81,9 +86,7 @@ type CreatePetRequest struct {
 //goapi:response 201 models.Pet
 //goapi:link 201 GetPet operationId=getPet id=$response.body#/id description="The new pet."
 //goapi:response 4XX Problem application/problem+json
-//goapi:example request application/json name=rex summary="A dog, with \"tags\"" {"name": "Rex"}
-//goapi:example request application/json name=tom {"name": "Tom"}
-//goapi:example 4XX {"title": "Conflict"}
+//goapi:example 4XX {"title": "Conflict", "status": 409}
 func CreatePet(w http.ResponseWriter, r *http.Request) {}
 
 // PhotoRequest holds the inputs of photo operations.
@@ -144,6 +147,8 @@ type SubscribeRequest struct {
 //
 //goapi:operation POST /subscriptions
 //goapi:response 201
+//goapi:example request application/json name=hooks summary="A \"hook\" URL" {"url": "https://example.com/hooks"}
+//goapi:example request name=other {"url": "https://example.com/other"}
 func (s *Server) Subscribe(ctx context.Context, req *SubscribeRequest) error { return nil }
 
 // PetEvent is a pet event sent to a subscriber.

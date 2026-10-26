@@ -379,3 +379,24 @@ func isFalseOrAbsent(m map[string]any, key string) bool {
 	v, ok := m[key]
 	return !ok || v == false
 }
+
+func TestExampleSchemas(t *testing.T) {
+	res, err := File("testdata/examples.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Read-only properties need not be in requests, nor write-only ones in
+	// responses; an XML example (the document) and an external one are
+	// not checked; a shared example is checked where it is used.
+	assertDiagnostics(t, res.Diagnostics, []want{
+		{RuleExampleSchema, 10, "/: maxLength: got 7, want 3"},
+		{RuleExampleSchema, 22, "/: 'yesterday' is not valid date-time"},
+		{RuleExampleSchema, 26, "/1: missing property 'id'"},
+		{RuleExampleSchema, 32, "/: missing property 'name'"},
+		// An item of JSON Lines is reported where it is.
+		{RuleExampleSchema, 37, "/: missing property 'name'"},
+		{RuleExampleSchema, 58, "/: missing properties 'name', 'secret'"},
+		{RuleExampleSchema, 58, "/: missing property 'name'"},
+		{RuleExampleSchema, 68, "/name: minLength: got 0, want 1"},
+	})
+}

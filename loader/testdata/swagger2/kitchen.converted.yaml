@@ -93,8 +93,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/Pet"
               example:
-                - id: 1
-                  name: Rex
+                - {id: 1, kind: dog, name: Rex}
         default:
           $ref: "#/components/responses/Error"
     post:
