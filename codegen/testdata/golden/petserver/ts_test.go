@@ -54,7 +54,9 @@ func TestTypeScriptClient(t *testing.T) {
 	if got := s.seen["Lookup"].(*api.LookupRequest); !reflect.DeepEqual(got.Criteria.Value, filter) {
 		t.Errorf("lookup = %+v", got.Criteria.Value)
 	}
-	if got := s.seen["GetPet"].(*api.GetPetRequest); got.PetID != 9 {
+	// The last getPet is the link the TypeScript client followed, with
+	// the link's constant.
+	if got := s.seen["GetPet"].(*api.GetPetRequest); got.Session.Value != "s1" {
 		t.Errorf("last pet = %+v", got)
 	}
 	up := s.seen["UploadPhoto"].(*api.UploadPhotoRequest)
