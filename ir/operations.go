@@ -239,6 +239,9 @@ type Response struct {
 	// the handler sets the actual type in a ContentType field.
 	ContentTypeField bool
 	Headers          []*Header
+	// Links are the response's links, followed from each of its
+	// variants.
+	Links []*Link
 }
 
 // Header is a response header.
@@ -274,6 +277,7 @@ func (b *builder) buildOperations() {
 			}
 			for method, op := range pi.Operations() {
 				o := b.operation(path, strings.ToUpper(method), pi, op, methods, opSite{fallback: strings.ToLower(method) + " " + path})
+				b.oasOps[o] = op
 				b.register(mux, o)
 				b.model.Operations = append(b.model.Operations, o)
 			}
@@ -283,6 +287,7 @@ func (b *builder) buildOperations() {
 		}
 	}
 	b.buildWebhooks(methods)
+	b.resolveLinks()
 	b.model.BasePath, b.model.ServerURL = basePath(doc), serverURL(doc)
 }
 
@@ -404,7 +409,11 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 		b.warnOperation(o, "the operation declares no responses; its handler can only choose a status code")
 	}
 	for status, resp := range responses.All() {
-		o.Responses = append(o.Responses, b.response(o, status, resp)...)
+		variants := b.response(o, status, resp)
+		if r := resp.Deref(); r != nil && r.Links.Len() > 0 && len(variants) > 0 {
+			b.pending = append(b.pending, pendingLinks{answers: o, status: status, variants: variants, links: r.Links})
+		}
+		o.Responses = append(o.Responses, variants...)
 	}
 	if len(o.Responses) == 0 && o.Unsupported == "" {
 		o.Unsupported = "no response can be generated"

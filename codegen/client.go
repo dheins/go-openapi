@@ -310,7 +310,82 @@ func (f *fileGen) clientOps(o *ir.Operation) string {
 		b.WriteString("\n")
 	}
 	f.readResponseFunc(w, o)
+	for _, r := range o.Responses {
+		for _, l := range r.Links {
+			b.WriteString("\n")
+			f.linkMethod(w, o, r, l)
+		}
+	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// linkMethod writes the method of response variant r of o that builds the
+// request the link l leads to, from r and the request it answers.
+func (f *fileGen) linkMethod(w func(int, string, ...any), o *ir.Operation, r *ir.Response, l *ir.Link) {
+	target := l.Operation
+	doc := fmt.Sprintf("%s returns the request of %s that the link %q of this response leads to, built from the response and req, the request of %s it answers.", l.Method, target.Name, l.Name, o.Name)
+	w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
+	if l.Doc != "" {
+		w(0, "%s", comment("", []string{"", l.Doc}))
+	}
+	oapi := f.imp(oapiImport, "oapi")
+	w(0, "func (r %s) %s(req *%s) (*%s, error) {", r.TypeName, l.Method, o.RequestType, target.RequestType)
+	w(1, "var out %s", target.RequestType)
+	for _, v := range l.Values {
+		dst := "&out."
+		if v.Param != nil {
+			dst += v.Param.Field
+		} else {
+			dst += target.Body.Fields[0].Name
+		}
+		var cond, stmt string
+		switch {
+		case v.Const != nil:
+			stmt = fmt.Sprintf("client.LinkConst(%s, %s(%s))", dst, f.imp("encoding/json", "json")+".RawMessage", strconv.Quote(string(v.Const)))
+		case v.ResponseBody:
+			stmt = fmt.Sprintf("client.LinkValue(%s, r.Body, %s.Response, %q)", dst, oapi, v.Pointer)
+		case v.Header != "":
+			h := r.Header(v.Header)
+			var value string
+			cond, value = present("r."+h.Field, h.Type)
+			stmt = fmt.Sprintf("client.LinkValue(%s, %s, %s.Response, \"\")", dst, value, oapi)
+		case v.RequestBody:
+			field := o.Body.Fields[0]
+			var value string
+			cond, value = present("req."+field.Name, field.Type)
+			stmt = fmt.Sprintf("client.LinkValue(%s, %s, %s.Request, %q)", dst, value, oapi, v.Pointer)
+		default:
+			var value string
+			cond, value = present("req."+v.RequestParam.Field, v.RequestParam.Type)
+			stmt = fmt.Sprintf("client.LinkValue(%s, %s, %s.Request, \"\")", dst, value, oapi)
+		}
+		depth := 1
+		if cond != "" {
+			var dstType *ir.Ref
+			if v.Param != nil {
+				dstType = v.Param.Type
+			} else {
+				dstType = target.Body.Fields[0].Type
+			}
+			if dstType.Kind == ir.Optional || dstType.Kind == ir.Pointer {
+				// A value that is not set leaves an optional one unset.
+				w(1, "if %s {", cond)
+				depth = 2
+			} else {
+				w(1, "if !(%s) {", cond)
+				w(2, "return nil, client.LinkError(%q, %q, %s.New(\"it is not set\"))", l.Name, v.Expression, f.imp("errors", "errors"))
+				w(1, "}")
+			}
+		}
+		w(depth, "if err := %s; err != nil {", stmt)
+		w(depth+1, "return nil, client.LinkError(%q, %q, err)", l.Name, v.Expression)
+		w(depth, "}")
+		if depth == 2 {
+			w(1, "}")
+		}
+	}
+	w(1, "return &out, nil")
+	w(0, "}")
 }
 
 // present returns the condition under which expr, of type r, holds a

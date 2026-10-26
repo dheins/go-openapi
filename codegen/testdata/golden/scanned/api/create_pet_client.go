@@ -75,3 +75,14 @@ func ReadCreatePetResponse(c *client.Config, resp *http.Response) (CreatePetResp
 	}
 	return nil, c.Unexpected(resp)
 }
+
+// GetPetLink returns the request of GetPet that the link "GetPet" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) GetPetLink(req *CreatePetRequest) (*GetPetRequest, error) {
+	var out GetPetRequest
+	if err := client.LinkValue(&out.ID, r.Body, oapi.Response, "/id"); err != nil {
+		return nil, client.LinkError("GetPet", "$response.body#/id", err)
+	}
+	return &out, nil
+}

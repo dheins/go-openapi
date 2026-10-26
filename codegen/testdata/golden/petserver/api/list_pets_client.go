@@ -139,3 +139,19 @@ func ReadListPetsResponse(c *client.Config, resp *http.Response) (ListPetsRespon
 	}
 	return nil, c.Unexpected(resp)
 }
+
+// AllLink returns the request of ListPets that the link "All" of this
+// response leads to, built from the response and req, the request of
+// ListPets it answers.
+func (r ListPets200JSONResponse) AllLink(req *ListPetsRequest) (*ListPetsRequest, error) {
+	var out ListPetsRequest
+	if err := client.LinkValue(&out.Limit, r.XTotal, oapi.Response, ""); err != nil {
+		return nil, client.LinkError("All", "$response.header.X-Total", err)
+	}
+	if req.Tags.Set {
+		if err := client.LinkValue(&out.Tags, req.Tags.Value, oapi.Request, ""); err != nil {
+			return nil, client.LinkError("All", "$request.query.tags", err)
+		}
+	}
+	return &out, nil
+}

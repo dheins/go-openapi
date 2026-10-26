@@ -42,6 +42,10 @@ type builder struct {
 	// fileParts are the schemas of multipart properties that hold files
 	// without saying format: binary; see markFileParts.
 	fileParts map[*oas.Schema]bool
+	// pending are the links of responses, resolved once every operation
+	// is built, and oasOps the operations of the document's paths.
+	pending []pendingLinks
+	oasOps  map[*Operation]*oas.Operation
 }
 
 // Build maps the schemas of a loaded document to Go types: every
@@ -57,6 +61,7 @@ func Build(spec *loader.Spec, opts Options) *Model {
 		following: make(map[*oas.Schema]bool),
 
 		securityMethods: namespace{},
+		oasOps:          map[*Operation]*oas.Operation{},
 	}
 	if opts.Operations {
 		for _, n := range reservedServerNames {

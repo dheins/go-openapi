@@ -1,2 +1,2 @@
-315:21: the value of part header "X-Checksum" is not checked yet, only its presence
-407:21: the value of part header "X-Seq" is not checked yet, only its presence
+336:21: the value of part header "X-Checksum" is not checked yet, only its presence
+428:21: the value of part header "X-Seq" is not checked yet, only its presence

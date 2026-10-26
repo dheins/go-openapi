@@ -66,6 +66,12 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Pet"
+          links:
+            All:
+              operationId: listPets
+              parameters:
+                limit: $response.header.X-Total
+                tags: $request.query.tags
         default:
           $ref: "#/components/responses/Error"
     post:
@@ -86,6 +92,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Pet"
+          links:
+            GetPet:
+              operationId: getPet
+              description: The new pet.
+              parameters:
+                petId: $response.body#/id
+                session: s1
+            CopyPet:
+              operationId: copyPet
+              parameters:
+                path.petId: $response.body#/id
+                Destination: $request.body#/name
+            Again:
+              operationId: createPet
+              requestBody: $response.body
         4XX:
           $ref: "#/components/responses/Error"
   /pets/{petId}:
