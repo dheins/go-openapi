@@ -44,6 +44,11 @@ type Problem struct {
 //goapi:operation GET /pets tags=pets summary="List pets"
 //goapi:response 200 PetList
 //goapi:example 200 []
+//goapi:example 200 header:x-total 0
+//goapi:example query:limit 20
+//goapi:example query:tags name=two summary="Two tags" ["a", "b"]
+//goapi:example header:x-trace "123e4567-e89b-12d3-a456-426614174000"
+//goapi:example cookie:session "s1"
 //goapi:response default Problem application/problem+json description="An error."
 //goapi:security -
 func (s *Server) ListPets(ctx context.Context, req *ListPetsRequest) (*PetList, error) {

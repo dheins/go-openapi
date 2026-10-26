@@ -24,7 +24,10 @@
   operationId=<id> <param>=<expression>…` adds a link to a response,
   checked against the scanned operationIds, and `//goapi:example
   <request|status> [<media type>] [name=…] [summary=…] <JSON>` an example
-  of a body, with the JSON as the rest of the line, unquoted.
+  of a body, with the JSON as the rest of the line, unquoted; with the
+  target `query:limit`, `header:X-Trace`, `path:id` or `cookie:session`,
+  of a parameter, and with `<status> header:X-Total`, of a response
+  header.
 - Encodings of form and multipart bodies in `codescan`: the keys
   `contentType=image/png|image/jpeg`, `headers=X-Checksum|X-Seq` (required
   part headers), `style=` and `explode=` in the `goapi` tag of a body

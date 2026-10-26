@@ -29,6 +29,7 @@ paths:
             minimum: 1
             format: int32
             default: 20
+          example: 20
         - name: tags
           in: query
           description: Tags filters by tag.
@@ -37,18 +38,26 @@ paths:
             items:
               type: string
             type: array
+          examples:
+            two:
+              summary: Two tags
+              value:
+                - a
+                - b
         - name: X-Trace
           in: header
           description: Trace is a request id.
           schema:
             type: string
             format: uuid
+          example: 123e4567-e89b-12d3-a456-426614174000
         - name: session
           in: cookie
           description: Session is the session cookie.
           required: true
           schema:
             type: string
+          example: s1
       responses:
         "200":
           description: OK.
@@ -58,6 +67,7 @@ paths:
               schema:
                 type: integer
                 format: int64
+              example: 0
           content:
             application/json:
               schema:
