@@ -51,7 +51,11 @@ shipped in.
   (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects
   (indices are read and written). — later
 - Parameters and response headers with `content` other than JSON. — later
-- Links. — later
+- Links to operations of other documents (`operationRef` to another
+  file), links naming a `server`, and runtime expressions other than
+  `$response.body`, `$response.header` and `$request.*` in links
+  (`$url`, `$method`, `$statusCode`, and expressions embedded in
+  strings). — later
 - Signed webhooks (an HMAC of the body in a header): OpenAPI has no
   security scheme for them, so they are left to client and server
   middleware, as the guide shows. — not planned
@@ -108,6 +112,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Links: methods building the request a link leads to, and Go and
+  TypeScript client methods following it. (ba52f1c, 1d34beb, ef45b59)
 - [x] Examples checked against their schemas: `goapi validate` rule
   `example-schema`, and examples of parameters and response headers in
   codescan. (db59930, 88415af)

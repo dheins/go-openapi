@@ -404,6 +404,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   documents, the Swagger 2.0 kitchen sink and codescan's service fixture.
 - *Not done*: see [features.md](../features.md).
 
+### M18 – Links ✅
+- [x] Links resolved by `operationId` and `operationRef`, with values from
+  constants, the response's body and headers, and the request it answers
+- [x] `GetPetLink` methods on response variants and `Follow` methods on
+  Go clients
+- [x] `follow` methods on TypeScript clients
+
+**How it went**
+- *After the operations*: a link may lead to an operation declared after
+  it, so links are resolved once every operation is built, and selection
+  drops those to operations it leaves out.
+- *Through JSON*: a value is taken from its source as JSON and decoded
+  into the parameter, so types convert as they would on the wire, and a
+  value the parameter cannot hold is an error naming the link.
+- *Optional values*: an unset value leaves an optional parameter unset;
+  TypeScript leaves any missing value out for the request's validation.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
