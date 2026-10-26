@@ -479,6 +479,82 @@ export interface OperationSpec {
   readonly security?: readonly (readonly SchemeSpec[])[];
 }
 
+/** A link of a response, as client.ts describes it: the responses it is
+ * followed from, and where the values of the request it leads to come
+ * from. */
+export interface LinkSpec {
+  readonly name: string;
+  readonly responses: readonly { readonly status: string; readonly contentType?: string }[];
+  readonly values: readonly {
+    /** The property of the linked request. */
+    readonly key: string;
+    readonly expression: string;
+    readonly const?: unknown;
+    /** Where the value is, with source the key of the header or request
+     * property, and pointer a JSON pointer into a body; a constant
+     * without. */
+    readonly from?: "responseBody" | "responseHeader" | "requestBody" | "request";
+    readonly source?: string;
+    readonly pointer?: string;
+  }[];
+}
+
+/** Builds the request a link leads to from resp, a response, and req, the
+ * request it answers: what a generated follow method sends. A value
+ * that is not there is left out, for the request's validation to report
+ * if it is required. */
+export function link(spec: LinkSpec, resp: object, req: object): unknown {
+  const r = resp as Values;
+  const q = req as Values;
+  const status = r["status"] as number;
+  if (!spec.responses.some((v) => statusMatches(v.status, status) && (v.contentType === undefined || v.contentType === r["contentType"]))) {
+    throw new Error(`link ${spec.name}: a ${status} response has no such link`);
+  }
+  const out: Values = {};
+  for (const v of spec.values) {
+    let value: unknown;
+    switch (v.from) {
+      case undefined:
+        value = v.const;
+        break;
+      case "responseBody":
+        value = valueAt(r["body"], v.pointer ?? "");
+        break;
+      case "responseHeader":
+        value = (r["headers"] as Values | undefined)?.[v.source ?? ""];
+        break;
+      case "requestBody":
+        value = valueAt(q[v.source ?? ""], v.pointer ?? "");
+        break;
+      case "request":
+        value = q[v.source ?? ""];
+        break;
+    }
+    if (value !== undefined) {
+      out[v.key] = value;
+    }
+  }
+  return out;
+}
+
+// valueAt returns the value at pointer, a JSON pointer, in v, or undefined.
+function valueAt(v: unknown, pointer: string): unknown {
+  if (pointer === "") {
+    return v;
+  }
+  for (const raw of pointer.slice(1).split("/")) {
+    const tok = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (Array.isArray(v)) {
+      v = v[Number(tok)];
+    } else if (isObject(v)) {
+      v = v[tok];
+    } else {
+      return undefined;
+    }
+  }
+  return v;
+}
+
 /** The problem details of an RFC 9457 problem response. */
 export interface Problem {
   type?: string;

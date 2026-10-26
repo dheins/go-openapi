@@ -42,19 +42,24 @@ func (g *tsGen) client() string {
 		b.WriteString("}\n")
 	}
 
-	var methods strings.Builder
+	// The operations the client sends, first: a link to another is not
+	// followed.
+	specs := map[*ir.Operation]string{}
 	for _, o := range g.m.Operations {
 		if o.Unsupported != "" {
 			continue
 		}
-		spec, ok := g.operationSpec(o)
+		if spec, ok := g.operationSpec(o); ok {
+			specs[o] = spec
+		}
+	}
+	var methods strings.Builder
+	for _, o := range g.m.Operations {
+		spec, ok := specs[o]
 		if !ok {
 			continue
 		}
-		name := tsCamel(o.Name)
-		if name == "constructor" {
-			name += "_"
-		}
+		name := tsMethodName(o)
 		req, optional := g.requestType(o)
 		fmt.Fprintf(&b, "\n/** The inputs of %s. */\nexport interface %s %s\n", name, o.RequestType, req)
 		fmt.Fprintf(&b, "\n/** The responses of %s. */\nexport type %s =%s;\n", name, o.ResponseType, g.responseType(o))
@@ -68,6 +73,18 @@ func (g *tsGen) client() string {
 		}
 		fmt.Fprintf(&methods, "  %s(req: %s%s, call?: CallOptions): Promise<%s> {\n    return send(this.#cfg, %sSpec, req, call) as Promise<%s>;\n  }\n",
 			name, o.RequestType, def, o.ResponseType, name, o.ResponseType)
+		for _, l := range operationLinks(o) {
+			if _, ok := specs[l.Operation]; !ok {
+				continue
+			}
+			follow := tsCamel(l.Follow)
+			fmt.Fprintf(&b, "\nconst %sLink: LinkSpec = %s;\n", follow, g.linkSpec(o, l))
+			doc := fmt.Sprintf("Follows the link %q of a response of %s: sends the request of %s it builds from resp and req, the request resp answers.", l.Name, name, tsMethodName(l.Operation))
+			methods.WriteString("\n" + tsDoc("  ", strings.TrimSpace(doc+"\n\n"+l.Doc), false))
+			// Async, so that a response without the link rejects.
+			fmt.Fprintf(&methods, "  async %s(resp: %s, req: %s, call?: CallOptions): Promise<%s> {\n    return this.%s(link(%sLink, resp, req) as %s, call);\n  }\n",
+				follow, o.ResponseType, o.RequestType, l.Operation.ResponseType, tsMethodName(l.Operation), follow, l.Operation.RequestType)
+		}
 	}
 
 	creds, credsType := "", ""
@@ -89,6 +106,9 @@ export class Client {
 
 	body := b.String()
 	imports := []string{"config", "send", "type CallOptions", "type ClientOptions", "type Config", "type OperationSpec"}
+	if strings.Contains(body, ": LinkSpec = ") {
+		imports = append(imports, "link", "type LinkSpec")
+	}
 	for _, name := range []string{"BasicCredential", "Credential", "ServerEvent", "NamedEvent"} {
 		if strings.Contains(body, name) {
 			imports = append(imports, "type "+name)
@@ -468,6 +488,67 @@ func camelName(name string) string {
 		key = "_" + key
 	}
 	return key
+}
+
+// tsMethodName names the Client method of o.
+func tsMethodName(o *ir.Operation) string {
+	name := tsCamel(o.Name)
+	if name == "constructor" {
+		name += "_"
+	}
+	return name
+}
+
+// linkSpec renders the LinkSpec of link l of a response of o: the
+// responses it is followed from, and where each value of the request it
+// leads to comes from, by request and response keys.
+func (g *tsGen) linkSpec(o *ir.Operation, l *ir.Link) string {
+	var responses []string
+	perStatus := map[string]int{}
+	for _, r := range tsResponses(o) {
+		perStatus[r.Status]++
+	}
+	for _, r := range tsResponses(o) {
+		if !slices.Contains(r.Links, l) {
+			continue
+		}
+		s := "{ status: " + jsString(r.Status)
+		if perStatus[r.Status] > 1 {
+			s += ", contentType: " + jsString(r.MediaType)
+		}
+		responses = append(responses, s+" }")
+	}
+	targetKeys, ownKeys := paramKeys(l.Operation), paramKeys(o)
+	var values []string
+	for _, v := range l.Values {
+		key := "body"
+		if v.Param != nil {
+			key = targetKeys[v.Param]
+		} else {
+			key = tsCamel(l.Operation.Body.Fields[0].Name)
+		}
+		s := fmt.Sprintf("{ key: %s, expression: %s", jsString(key), jsString(v.Expression))
+		switch {
+		case v.Const != nil:
+			s += ", const: " + string(v.Const)
+		case v.ResponseBody:
+			s += fmt.Sprintf(", from: \"responseBody\", pointer: %s", jsString(v.Pointer))
+		case v.Header != "":
+			// The header's key is the same in every variant of the response.
+			for _, r := range o.Responses {
+				if h := r.Header(v.Header); h != nil && slices.Contains(r.Links, l) {
+					s += fmt.Sprintf(", from: \"responseHeader\", source: %s", jsString(headerKeys(r)[h]))
+					break
+				}
+			}
+		case v.RequestBody:
+			s += fmt.Sprintf(", from: \"requestBody\", source: %s, pointer: %s", jsString(tsCamel(o.Body.Fields[0].Name)), jsString(v.Pointer))
+		default:
+			s += fmt.Sprintf(", from: \"request\", source: %s", jsString(ownKeys[v.RequestParam]))
+		}
+		values = append(values, s+" }")
+	}
+	return fmt.Sprintf("{ name: %s, responses: [%s], values: [%s] }", jsString(l.Name), strings.Join(responses, ", "), strings.Join(values, ", "))
 }
 
 // tsCamel turns a Go name into a TypeScript property or method name:

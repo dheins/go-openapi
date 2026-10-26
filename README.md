@@ -114,6 +114,9 @@ if r, ok := resp.(api.GetPet200JSONResponse); ok {
 }
 ```
 
+Links are followed: `c.FollowCreatePetGetPet(ctx, resp, req)` sends the
+request a response's link leads to, in Go and TypeScript clients.
+
 Webhooks and callbacks are generated both ways. The server gets a `Sender`
 with a method per webhook and callback, and each callback gets a function
 computing its URL from the request that asked for it. Consumers get typed

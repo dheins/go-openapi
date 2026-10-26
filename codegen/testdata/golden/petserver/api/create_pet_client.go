@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -89,4 +90,45 @@ func ReadCreatePetResponse(c *client.Config, resp *http.Response) (CreatePetResp
 		return v, nil
 	}
 	return nil, c.Unexpected(resp)
+}
+
+// GetPetLink returns the request of GetPet that the link "GetPet" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+//
+// The new pet.
+func (r CreatePet201JSONResponse) GetPetLink(req *CreatePetRequest) (*GetPetRequest, error) {
+	var out GetPetRequest
+	if err := client.LinkValue(&out.PetID, r.Body, oapi.Response, "/id"); err != nil {
+		return nil, client.LinkError("GetPet", "$response.body#/id", err)
+	}
+	if err := client.LinkConst(&out.Session, json.RawMessage("\"s1\"")); err != nil {
+		return nil, client.LinkError("GetPet", "\"s1\"", err)
+	}
+	return &out, nil
+}
+
+// CopyPetLink returns the request of CopyPet that the link "CopyPet" of
+// this response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) CopyPetLink(req *CreatePetRequest) (*CopyPetRequest, error) {
+	var out CopyPetRequest
+	if err := client.LinkValue(&out.PetID, r.Body, oapi.Response, "/id"); err != nil {
+		return nil, client.LinkError("CopyPet", "$response.body#/id", err)
+	}
+	if err := client.LinkValue(&out.Destination, req.Body, oapi.Request, "/name"); err != nil {
+		return nil, client.LinkError("CopyPet", "$request.body#/name", err)
+	}
+	return &out, nil
+}
+
+// AgainLink returns the request of CreatePet that the link "Again" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) AgainLink(req *CreatePetRequest) (*CreatePetRequest, error) {
+	var out CreatePetRequest
+	if err := client.LinkValue(&out.Body, r.Body, oapi.Response, ""); err != nil {
+		return nil, client.LinkError("Again", "$response.body", err)
+	}
+	return &out, nil
 }

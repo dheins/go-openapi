@@ -274,3 +274,28 @@ test("typed server-sent events", { skip }, async () => {
   const invalid = await rejects(c.postTypedEvents({ body: [{ data: { name: "Ed" } }, { data: { name: "" } }] }), InvalidRequestError);
   assert.deepEqual(invalid.issues.map((i) => i.pointer), ["/1/data/name"]);
 });
+
+test("links", { skip }, async () => {
+  const c = client();
+  const req = { body: { name: "Cy", tag: "dog" } };
+  const created = await c.createPet(req);
+  assert.equal(created.status, 201);
+  // From the response's body, with a constant; from the request's body;
+  // the whole body as the next request's.
+  const got = await c.followCreatePetGetPet(created, req);
+  assert.equal(got.status === 200 && got.body.name, "Cy");
+  const copied = await c.followCreatePetCopyPet(created, req);
+  assert.equal(copied.status === 201 && copied.body.name, "Cy");
+  const again = await c.followCreatePetAgain(created, req);
+  assert.equal(again.status === 201 && again.body.tag, "dog");
+
+  // From a header.
+  const page = await c.listPets({ limit: 1 });
+  assert.equal(page.status, 200);
+  const all = await c.followListPetsAll(page, { limit: 1 });
+  assert.equal(all.status === 200 && page.status === 200 && all.body.length, page.status === 200 ? page.headers.xTotal : -1);
+
+  // A response without the link.
+  const taken = await c.createPet({ body: { name: "Taken" } });
+  await assert.rejects(c.followCreatePetGetPet(taken, req), /link GetPet: a 409 response has no such link/);
+});

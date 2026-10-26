@@ -105,6 +105,16 @@ func (b *builder) applySelection(sel *Selection) {
 		}
 	}
 
+	// A link to an operation that is left out is left out too.
+	kept := map[*Operation]bool{}
+	for _, o := range b.model.Operations {
+		kept[o] = true
+	}
+	for _, o := range b.model.Operations {
+		for _, r := range o.Responses {
+			r.Links = slices.DeleteFunc(slices.Clone(r.Links), func(l *Link) bool { return !kept[l.Operation] })
+		}
+	}
 	used := reachable(append(slices.Clone(b.model.Operations), b.model.Webhooks...))
 	var types []*Type
 	for _, t := range b.model.Types {

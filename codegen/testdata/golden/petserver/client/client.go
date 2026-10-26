@@ -4,6 +4,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
 	"github.com/dheins/go-openapi/runtime/client"
@@ -64,6 +65,23 @@ func (c *Client) ListPets(ctx context.Context, req *api.ListPetsRequest) (api.Li
 	return api.ReadListPetsResponse(c.cfg, resp)
 }
 
+// FollowListPetsAll follows the link "All" of a response of ListPets: it
+// sends the request of ListPets that AllLink builds from resp and req, the
+// request resp answers.
+func (c *Client) FollowListPetsAll(ctx context.Context, resp api.ListPetsResponse, req *api.ListPetsRequest) (api.ListPetsResponse, error) {
+	linked, ok := resp.(interface {
+		AllLink(*api.ListPetsRequest) (*api.ListPetsRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link All: a %T has no such link", resp)
+	}
+	next, err := linked.AllLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.ListPets(ctx, next)
+}
+
 // CreatePet calls POST /pets. A nil req sends no parameters or body.
 func (c *Client) CreatePet(ctx context.Context, req *api.CreatePetRequest) (api.CreatePetResponse, error) {
 	if req == nil {
@@ -78,6 +96,57 @@ func (c *Client) CreatePet(ctx context.Context, req *api.CreatePetRequest) (api.
 		return nil, err
 	}
 	return api.ReadCreatePetResponse(c.cfg, resp)
+}
+
+// FollowCreatePetGetPet follows the link "GetPet" of a response of
+// CreatePet: it sends the request of GetPet that GetPetLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetGetPet(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		GetPetLink(*api.CreatePetRequest) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link GetPet: a %T has no such link", resp)
+	}
+	next, err := linked.GetPetLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(ctx, next)
+}
+
+// FollowCreatePetCopyPet follows the link "CopyPet" of a response of
+// CreatePet: it sends the request of CopyPet that CopyPetLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetCopyPet(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.CopyPetResponse, error) {
+	linked, ok := resp.(interface {
+		CopyPetLink(*api.CreatePetRequest) (*api.CopyPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link CopyPet: a %T has no such link", resp)
+	}
+	next, err := linked.CopyPetLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.CopyPet(ctx, next)
+}
+
+// FollowCreatePetAgain follows the link "Again" of a response of CreatePet:
+// it sends the request of CreatePet that AgainLink builds from resp and
+// req, the request resp answers.
+func (c *Client) FollowCreatePetAgain(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.CreatePetResponse, error) {
+	linked, ok := resp.(interface {
+		AgainLink(*api.CreatePetRequest) (*api.CreatePetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Again: a %T has no such link", resp)
+	}
+	next, err := linked.AgainLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.CreatePet(ctx, next)
 }
 
 // GetPet calls GET /pets/{petId}. A nil req sends no parameters or body.

@@ -310,7 +310,82 @@ func (f *fileGen) clientOps(o *ir.Operation) string {
 		b.WriteString("\n")
 	}
 	f.readResponseFunc(w, o)
+	for _, r := range o.Responses {
+		for _, l := range r.Links {
+			b.WriteString("\n")
+			f.linkMethod(w, o, r, l)
+		}
+	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// linkMethod writes the method of response variant r of o that builds the
+// request the link l leads to, from r and the request it answers.
+func (f *fileGen) linkMethod(w func(int, string, ...any), o *ir.Operation, r *ir.Response, l *ir.Link) {
+	target := l.Operation
+	doc := fmt.Sprintf("%s returns the request of %s that the link %q of this response leads to, built from the response and req, the request of %s it answers.", l.Method, target.Name, l.Name, o.Name)
+	w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
+	if l.Doc != "" {
+		w(0, "%s", comment("", []string{"", l.Doc}))
+	}
+	oapi := f.imp(oapiImport, "oapi")
+	w(0, "func (r %s) %s(req *%s) (*%s, error) {", r.TypeName, l.Method, o.RequestType, target.RequestType)
+	w(1, "var out %s", target.RequestType)
+	for _, v := range l.Values {
+		dst := "&out."
+		if v.Param != nil {
+			dst += v.Param.Field
+		} else {
+			dst += target.Body.Fields[0].Name
+		}
+		var cond, stmt string
+		switch {
+		case v.Const != nil:
+			stmt = fmt.Sprintf("client.LinkConst(%s, %s(%s))", dst, f.imp("encoding/json", "json")+".RawMessage", strconv.Quote(string(v.Const)))
+		case v.ResponseBody:
+			stmt = fmt.Sprintf("client.LinkValue(%s, r.Body, %s.Response, %q)", dst, oapi, v.Pointer)
+		case v.Header != "":
+			h := r.Header(v.Header)
+			var value string
+			cond, value = present("r."+h.Field, h.Type)
+			stmt = fmt.Sprintf("client.LinkValue(%s, %s, %s.Response, \"\")", dst, value, oapi)
+		case v.RequestBody:
+			field := o.Body.Fields[0]
+			var value string
+			cond, value = present("req."+field.Name, field.Type)
+			stmt = fmt.Sprintf("client.LinkValue(%s, %s, %s.Request, %q)", dst, value, oapi, v.Pointer)
+		default:
+			var value string
+			cond, value = present("req."+v.RequestParam.Field, v.RequestParam.Type)
+			stmt = fmt.Sprintf("client.LinkValue(%s, %s, %s.Request, \"\")", dst, value, oapi)
+		}
+		depth := 1
+		if cond != "" {
+			var dstType *ir.Ref
+			if v.Param != nil {
+				dstType = v.Param.Type
+			} else {
+				dstType = target.Body.Fields[0].Type
+			}
+			if dstType.Kind == ir.Optional || dstType.Kind == ir.Pointer {
+				// A value that is not set leaves an optional one unset.
+				w(1, "if %s {", cond)
+				depth = 2
+			} else {
+				w(1, "if !(%s) {", cond)
+				w(2, "return nil, client.LinkError(%q, %q, %s.New(\"it is not set\"))", l.Name, v.Expression, f.imp("errors", "errors"))
+				w(1, "}")
+			}
+		}
+		w(depth, "if err := %s; err != nil {", stmt)
+		w(depth+1, "return nil, client.LinkError(%q, %q, err)", l.Name, v.Expression)
+		w(depth, "}")
+		if depth == 2 {
+			w(1, "}")
+		}
+	}
+	w(1, "return &out, nil")
+	w(0, "}")
 }
 
 // present returns the condition under which expr, of type r, holds a
@@ -847,5 +922,47 @@ func (f *fileGen) clientMethod(o *ir.Operation) string {
 	w(1, "}")
 	w(1, "return %s(c.cfg, resp)", op("Read"+o.Name+"Response"))
 	w(0, "}")
+	for _, l := range operationLinks(o) {
+		b.WriteString("\n")
+		f.followMethod(w, o, l)
+	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// operationLinks returns the links of the responses of o, once each:
+// variants of a response share them.
+func operationLinks(o *ir.Operation) []*ir.Link {
+	var links []*ir.Link
+	for _, r := range o.Responses {
+		for _, l := range r.Links {
+			if !slices.Contains(links, l) {
+				links = append(links, l)
+			}
+		}
+	}
+	return links
+}
+
+// followMethod writes the method of Client that follows the link l of a
+// response of o: it builds the request l leads to and sends it.
+func (f *fileGen) followMethod(w func(int, string, ...any), o *ir.Operation, l *ir.Link) {
+	op := func(name string) string { return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, name) }
+	target := l.Operation
+	doc := fmt.Sprintf("%s follows the link %q of a response of %s: it sends the request of %s that %s builds from resp and req, the request resp answers.",
+		l.Follow, l.Name, o.Name, target.Name, l.Method)
+	w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
+	ctx := f.imp("context", "context")
+	w(0, "func (c *Client) %s(ctx %s.Context, resp %s, req *%s) (%s, error) {", l.Follow, ctx, op(o.ResponseType), op(o.RequestType), op(target.ResponseType))
+	w(1, "linked, ok := resp.(interface {")
+	w(2, "%s(*%s) (*%s, error)", l.Method, op(o.RequestType), op(target.RequestType))
+	w(1, "})")
+	w(1, "if !ok {")
+	w(2, "return nil, %s.Errorf(\"link %s: a %%T has no such link\", resp)", f.imp("fmt", "fmt"), l.Name)
+	w(1, "}")
+	w(1, "next, err := linked.%s(req)", l.Method)
+	w(1, "if err != nil {")
+	w(2, "return nil, err")
+	w(1, "}")
+	w(1, "return c.%s(ctx, next)", target.Name)
+	w(0, "}")
 }
