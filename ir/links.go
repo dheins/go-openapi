@@ -17,7 +17,7 @@ type Link struct {
 	// Follow the name of the client's method sending it
 	// (FollowCreatePetGetPet).
 	Name, Method, Follow string
-	Doc          string
+	Doc                  string
 	// Operation is the operation the link leads to.
 	Operation *Operation
 	// Values set the linked request's parameters and body, in document
