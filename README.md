@@ -14,7 +14,8 @@ JSON Schema 2020-12; Swagger 2.0 documents are converted as they are read.
 - `loader`: reads 3.0, 3.1 and 3.2 documents (JSON or YAML), upgrades 3.0,
   converts Swagger 2.0 to 3.1, and resolves `$ref`s across files
 - `validate`: structural validation against the official OpenAPI schemas
-  plus semantic rules, with file:line:col diagnostics
+  plus semantic rules (examples checked against their schemas among them),
+  with file:line:col diagnostics
 - `ir` and `codegen`: generate Go models from the schemas
 - `oapi`: the small library generated models use (`Optional`, `Nullable`,
   `Date`, validation errors)

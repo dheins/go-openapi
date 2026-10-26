@@ -386,6 +386,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   `goapi scan`.
 - *Not done*: see [features.md](../features.md).
 
+### M17 – Examples checked against their schemas ✅
+- [x] Rule `example-schema`: media types, parameters, headers and schemas,
+  by direction, with schemas compiled where they are
+- [x] `//goapi:example` for parameters and response headers
+
+**How it went**
+- *Compiling in place*: every loaded file is added to the JSON Schema
+  compiler under its URI, and schemas are compiled at their locations, so
+  references across files resolve as the loader resolved them; nothing is
+  fetched.
+- *Direction*: required read-only properties are left out of request
+  examples, and write-only ones out of response examples, so the
+  validator's `required` errors are filtered through the compiled
+  property's flags.
+- *Found on the way*: two wrong examples in this repository's own test
+  documents, the Swagger 2.0 kitchen sink and codescan's service fixture.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
