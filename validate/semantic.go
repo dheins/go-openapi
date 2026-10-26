@@ -31,6 +31,7 @@ type checker struct {
 	allOfs         []*oas.Schema
 	oneOfs         []*oas.Schema
 	patterns       []*oas.Schema
+	exampleSchemas []*oas.Schema
 }
 
 func semantic(spec *loader.Spec) ([]Diagnostic, error) {
@@ -49,6 +50,9 @@ func semantic(spec *loader.Spec) ([]Diagnostic, error) {
 	c.checkAllOfConflicts()
 	c.checkOneOfAmbiguity()
 	c.checkPatterns()
+	if err := c.checkExamples(); err != nil {
+		return nil, err
+	}
 	slices.SortStableFunc(c.diags, func(a, b Diagnostic) int {
 		return cmp.Or(
 			strings.Compare(a.Location.URI, b.Location.URI),
@@ -91,6 +95,9 @@ func (c *checker) collect() error {
 			}
 			if o.Pattern != "" || o.PatternProperties != nil {
 				c.patterns = append(c.patterns, o)
+			}
+			if o.Example != nil || len(o.Examples) > 0 {
+				c.exampleSchemas = append(c.exampleSchemas, o)
 			}
 		}
 		return nil

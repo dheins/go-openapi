@@ -50,6 +50,7 @@ const (
 	RuleAllOfConflict     = "allof-conflict"
 	RuleOneOfAmbiguous    = "oneof-ambiguous"
 	RulePattern           = "pattern"
+	RuleExampleSchema     = "example-schema"
 )
 
 // Diagnostic is one finding, tied to a place in a source file.

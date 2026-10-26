@@ -4,6 +4,16 @@
 
 ### Added
 
+- `goapi validate` rule `example-schema` (a warning): examples that do not
+  match their schemas. It checks the `example` and `examples` (`value`, and
+  3.2's `dataValue`) of media types, parameters and headers, the items of a
+  JSON Lines example against its `itemSchema`, and the examples of
+  schemas, with schemas compiled where they are, so references resolve as
+  loaded, and formats asserted. Read-only properties need not be in
+  request examples, nor write-only ones in response examples. The examples
+  of XML and binary media types, which are usually the serialized
+  document, `serializedValue` and `externalValue` are not checked.
+  `loader.Spec.Sources` returns the loaded files.
 - Webhooks and callbacks in `codescan`: `//goapi:webhook <name> METHOD`
   and `//goapi:callback <operationId> <name> METHOD <url-expression>` on
   a function declare them as `//goapi:operation` declares an operation,

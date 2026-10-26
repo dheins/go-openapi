@@ -64,6 +64,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/Pet'
                 type: array
+              example: []
         default:
           description: An error.
           content:
@@ -81,14 +82,6 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/Pet'
-            examples:
-              rex:
-                summary: A dog, with "tags"
-                value:
-                  name: Rex
-              tom:
-                value:
-                  name: Tom
           application/xml:
             schema:
               $ref: '#/components/schemas/Pet'
@@ -114,6 +107,7 @@ paths:
                 $ref: '#/components/schemas/Problem'
               example:
                 title: Conflict
+                status: 409
       deprecated: true
     additionalOperations:
       PURGE:
@@ -146,11 +140,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
-              example:
-                id: 1
-                name: Rex
-                tags:
-                  - good dog
         "404":
           description: Not Found.
       security:
@@ -217,6 +206,14 @@ paths:
               type: object
               required:
                 - url
+            examples:
+              hooks:
+                summary: A "hook" URL
+                value:
+                  url: https://example.com/hooks
+              other:
+                value:
+                  url: https://example.com/other
         required: true
       responses:
         "201":

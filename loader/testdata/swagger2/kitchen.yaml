@@ -79,8 +79,8 @@ paths:
               $ref: "#/definitions/Pet"
           examples:
             application/json:
-              - id: 1
-                name: Rex
+              - {id: 1, kind: dog,
+                 name: Rex}
         default:
           $ref: "#/responses/Error"
     post:
