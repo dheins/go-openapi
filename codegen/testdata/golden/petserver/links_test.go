@@ -62,3 +62,41 @@ func TestLinks(t *testing.T) {
 		t.Errorf("a limit over int32: %v", err)
 	}
 }
+
+func TestFollowLinks(t *testing.T) {
+	ctx := context.Background()
+	s, c := newTestClient(t, petclient.Credentials{})
+	req := &api.CreatePetRequest{Body: model.Pet{Name: "Bo"}}
+	created, err := c.CreatePet(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Following a link builds its request and sends it.
+	if p := as[api.GetPet200JSONResponse](t)(c.FollowCreatePetGetPet(ctx, created, req)); p.Body.Name != "Bo" {
+		t.Errorf("followed to %+v", p.Body)
+	}
+	if got := s.seen["GetPet"].(*api.GetPetRequest); got.Session.Value != "s1" {
+		t.Errorf("GetPet received %+v", got)
+	}
+	if p := as[api.CopyPet201JSONResponse](t)(c.FollowCreatePetCopyPet(ctx, created, req)); p.Body.Name != "Bo" || p.Body.ID == created.(api.CreatePet201JSONResponse).Body.ID {
+		t.Errorf("copied to %+v", p.Body)
+	}
+	list := &api.ListPetsRequest{Limit: oapi.Some(int32(1))}
+	page, err := c.ListPets(ctx, list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := as[api.ListPets200JSONResponse](t)(c.FollowListPetsAll(ctx, page, list))
+	if len(all.Body) != int(page.(api.ListPets200JSONResponse).XTotal) || len(all.Body) < 2 {
+		t.Errorf("all %d pets, of %d", len(all.Body), page.(api.ListPets200JSONResponse).XTotal)
+	}
+
+	// A response without the link cannot be followed.
+	conflict, err := c.CreatePet(ctx, &api.CreatePetRequest{Body: model.Pet{Name: "Taken"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.FollowCreatePetGetPet(ctx, conflict, req); err == nil || !strings.Contains(err.Error(), "link GetPet: a api.CreatePet4XXJSONResponse has no such link") {
+		t.Errorf("following a 409: %v", err)
+	}
+}

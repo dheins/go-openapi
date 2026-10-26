@@ -287,7 +287,7 @@ func (b *builder) buildOperations() {
 		}
 	}
 	b.buildWebhooks(methods)
-	b.resolveLinks()
+	b.resolveLinks(methods)
 	b.model.BasePath, b.model.ServerURL = basePath(doc), serverURL(doc)
 }
 

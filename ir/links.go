@@ -12,9 +12,11 @@ import (
 // Link is a link of a response: how the request of another operation is
 // made from the response and the request it answers.
 type Link struct {
-	// Name is the link's key in the document, and Method the name of the
-	// response variant's method building the request (GetPetLink).
-	Name, Method string
+	// Name is the link's key in the document, Method the name of the
+	// response variant's method building the request (GetPetLink), and
+	// Follow the name of the client's method sending it
+	// (FollowCreatePetGetPet).
+	Name, Method, Follow string
 	Doc          string
 	// Operation is the operation the link leads to.
 	Operation *Operation
@@ -51,8 +53,9 @@ type pendingLinks struct {
 }
 
 // resolveLinks gives the responses their links, now that the operations
-// they lead to are built.
-func (b *builder) resolveLinks() {
+// they lead to are built. The client's methods following them are named
+// in methods, with the operations'.
+func (b *builder) resolveLinks(methods namespace) {
 	byID := map[string]*Operation{}
 	for _, o := range b.model.Operations {
 		if o.ID != "" {
@@ -72,6 +75,7 @@ func (b *builder) resolveLinks() {
 				continue
 			}
 			link.Method = names.claim(GoName(name) + "Link")
+			link.Follow = methods.claim("Follow" + pl.answers.Name + GoName(name))
 			followed := false
 			for _, v := range pl.variants {
 				if linkFits(link, v) {

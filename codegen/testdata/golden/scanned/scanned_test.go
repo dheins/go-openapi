@@ -137,6 +137,11 @@ func TestScannedRoundTrip(t *testing.T) {
 		t.Errorf("invalid diet: %v", err)
 	}
 
+	// The link the scanned //goapi:link declares.
+	if r, err := c.FollowCreatePetGetPet(ctx, resp, &api.CreatePetRequest{}); err != nil || r.(api.GetPet200JSONResponse).Body.Name != "Fang" {
+		t.Errorf("follow: %+v %v", r, err)
+	}
+
 	list, err := c.ListPets(ctx, &api.ListPetsRequest{Limit: 5, Kind: oapi.Some([]model.Kind{model.KindCat})})
 	if page, ok := list.(api.ListPets200JSONResponse); err != nil || !ok || len(page.Body) != 1 || page.Body[0].Name != "Tom" || page.XTotal != 1 {
 		t.Errorf("list: %+v %v", list, err)

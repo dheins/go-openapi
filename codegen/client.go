@@ -922,5 +922,47 @@ func (f *fileGen) clientMethod(o *ir.Operation) string {
 	w(1, "}")
 	w(1, "return %s(c.cfg, resp)", op("Read"+o.Name+"Response"))
 	w(0, "}")
+	for _, l := range operationLinks(o) {
+		b.WriteString("\n")
+		f.followMethod(w, o, l)
+	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// operationLinks returns the links of the responses of o, once each:
+// variants of a response share them.
+func operationLinks(o *ir.Operation) []*ir.Link {
+	var links []*ir.Link
+	for _, r := range o.Responses {
+		for _, l := range r.Links {
+			if !slices.Contains(links, l) {
+				links = append(links, l)
+			}
+		}
+	}
+	return links
+}
+
+// followMethod writes the method of Client that follows the link l of a
+// response of o: it builds the request l leads to and sends it.
+func (f *fileGen) followMethod(w func(int, string, ...any), o *ir.Operation, l *ir.Link) {
+	op := func(name string) string { return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, name) }
+	target := l.Operation
+	doc := fmt.Sprintf("%s follows the link %q of a response of %s: it sends the request of %s that %s builds from resp and req, the request resp answers.",
+		l.Follow, l.Name, o.Name, target.Name, l.Method)
+	w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
+	ctx := f.imp("context", "context")
+	w(0, "func (c *Client) %s(ctx %s.Context, resp %s, req *%s) (%s, error) {", l.Follow, ctx, op(o.ResponseType), op(o.RequestType), op(target.ResponseType))
+	w(1, "linked, ok := resp.(interface {")
+	w(2, "%s(*%s) (*%s, error)", l.Method, op(o.RequestType), op(target.RequestType))
+	w(1, "})")
+	w(1, "if !ok {")
+	w(2, "return nil, %s.Errorf(\"link %s: a %%T has no such link\", resp)", f.imp("fmt", "fmt"), l.Name)
+	w(1, "}")
+	w(1, "next, err := linked.%s(req)", l.Method)
+	w(1, "if err != nil {")
+	w(2, "return nil, err")
+	w(1, "}")
+	w(1, "return c.%s(ctx, next)", target.Name)
+	w(0, "}")
 }

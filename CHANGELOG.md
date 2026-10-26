@@ -11,7 +11,9 @@
   (`path.id`) or not, and the request body are taken from
   `$response.body#/…`, `$response.header.…`, `$request.body#/…`,
   `$request.path|query|header.…` or constants. An optional value that is
-  not set leaves an optional one unset. Links naming a server, other
+  not set leaves an optional one unset. Generated clients follow them in
+  one call (`c.FollowCreatePetGetPet(ctx, resp, req)`), building the
+  request and sending it. Links naming a server, other
   expressions, unknown operations or parameters, and links reading a body
   or header no variant has are warned about and get no method; selection
   leaves out links to the operations it leaves out.

@@ -4,6 +4,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/scanned/api"
 	"github.com/dheins/go-openapi/runtime/client"
@@ -74,6 +75,23 @@ func (c *Client) CreatePet(ctx context.Context, req *api.CreatePetRequest) (api.
 		return nil, err
 	}
 	return api.ReadCreatePetResponse(c.cfg, resp)
+}
+
+// FollowCreatePetGetPet follows the link "GetPet" of a response of
+// CreatePet: it sends the request of GetPet that GetPetLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetGetPet(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		GetPetLink(*api.CreatePetRequest) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link GetPet: a %T has no such link", resp)
+	}
+	next, err := linked.GetPetLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(ctx, next)
 }
 
 // GetPet calls GET /pets/{id}. A nil req sends no parameters or body.
