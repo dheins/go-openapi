@@ -188,6 +188,27 @@ const lookupSpec: OperationSpec = {
   responses: [{ status: "204" }],
 };
 
+/** The inputs of getContent. */
+export interface GetContentRequest {
+  code: number;
+  where?: $m.Filter;
+  xNote?: string;
+  xPrefs?: $m.Prefs;
+  session?: $m.Prefs;
+  label?: string;
+}
+
+/** The responses of getContent. */
+export type GetContentResponse =
+  | { status: 204; headers: { xCode?: number; xWhere?: $m.Filter; xPrefs?: $m.Prefs } };
+
+const getContentSpec: OperationSpec = {
+  method: "GET",
+  path: "/content/{code}",
+  params: [{ key: "code", name: "code", in: "path", style: "", explode: false, shape: "scalar", json: true, required: true, schema: { kind: "integer", minimum: 1 } }, { key: "where", name: "where", in: "query", style: "", explode: false, shape: "object", json: true, schema: $ref(() => $m.FilterSchema) }, { key: "xNote", name: "X-Note", in: "header", style: "", explode: false, shape: "scalar", json: true, schema: { kind: "string", maxLength: 20 } }, { key: "xPrefs", name: "X-Prefs", in: "header", style: "", explode: false, shape: "scalar", json: true, schema: $ref(() => $m.PrefsSchema) }, { key: "session", name: "session", in: "cookie", style: "", explode: false, shape: "scalar", json: true, schema: $ref(() => $m.PrefsSchema) }, { key: "label", name: "label", in: "cookie", style: "", explode: false, shape: "scalar", json: true, schema: { kind: "string" } }],
+  responses: [{ status: "204", headers: [{ key: "xCode", name: "X-Code", json: true, schema: { kind: "integer" } }, { key: "xWhere", name: "X-Where", json: true, schema: $ref(() => $m.FilterSchema) }, { key: "xPrefs", name: "X-Prefs", json: true, schema: $ref(() => $m.PrefsSchema) }] }],
+};
+
 /** The inputs of getPhoto. */
 export interface GetPhotoRequest {
   petId: number;
@@ -668,6 +689,15 @@ export class Client {
   /** GET /lookup. */
   lookup(req: LookupRequest = {}, call?: CallOptions): Promise<LookupResponse> {
     return send(this.#cfg, lookupSpec, req, call) as Promise<LookupResponse>;
+  }
+
+  /**
+   * GET /content/{code}.
+   *
+   * Parameters and headers serialized with media types.
+   */
+  getContent(req: GetContentRequest, call?: CallOptions): Promise<GetContentResponse> {
+    return send(this.#cfg, getContentSpec, req, call) as Promise<GetContentResponse>;
   }
 
   /** GET /pets/{petId}/photo. */

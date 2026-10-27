@@ -36,6 +36,10 @@ type Handler interface {
 	GetReports(ctx context.Context, req *GetReportsRequest) (GetReportsResponse, error)
 	// Lookup handles GET /lookup.
 	Lookup(ctx context.Context, req *LookupRequest) (LookupResponse, error)
+	// GetContent handles GET /content/{code}.
+	//
+	// Parameters and headers serialized with media types.
+	GetContent(ctx context.Context, req *GetContentRequest) (GetContentResponse, error)
 	// GetPhoto handles GET /pets/{petId}/photo.
 	GetPhoto(ctx context.Context, req *GetPhotoRequest) (GetPhotoResponse, error)
 	// UploadPhoto handles PUT /pets/{petId}/photo.

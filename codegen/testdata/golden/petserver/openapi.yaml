@@ -267,6 +267,69 @@ paths:
       responses:
         "204":
           description: Accepted.
+  /content/{code}:
+    get:
+      operationId: getContent
+      description: Parameters and headers serialized with media types.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          content:
+            text/plain:
+              schema:
+                type: integer
+                minimum: 1
+        - name: where
+          in: query
+          content:
+            application/x-www-form-urlencoded:
+              schema:
+                $ref: "#/components/schemas/Filter"
+        - name: X-Note
+          in: header
+          content:
+            text/plain:
+              schema:
+                type: string
+                maxLength: 20
+        - name: X-Prefs
+          in: header
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Prefs"
+        - name: session
+          in: cookie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prefs"
+        - name: label
+          in: cookie
+          content:
+            text/plain:
+              schema:
+                type: string
+      responses:
+        "204":
+          description: The values, echoed.
+          headers:
+            X-Code:
+              content:
+                text/plain:
+                  schema:
+                    type: integer
+            X-Where:
+              content:
+                application/x-www-form-urlencoded:
+                  schema:
+                    $ref: "#/components/schemas/Filter"
+            X-Prefs:
+              content:
+                application/xml:
+                  schema:
+                    $ref: "#/components/schemas/Prefs"
   /pets/{petId}/photo:
     parameters:
       - name: petId
@@ -337,6 +400,12 @@ paths:
                     schema:
                       type: string
                       pattern: "^[a-z0-9]{3,}$"
+                  X-Label:
+                    content:
+                      text/plain:
+                        schema:
+                          type: string
+                          maxLength: 5
               scans:
                 contentType: "image/png, image/jpeg; q=1"
       responses:

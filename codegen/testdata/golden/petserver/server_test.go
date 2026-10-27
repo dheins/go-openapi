@@ -206,6 +206,11 @@ func (s *store) PutCard(_ context.Context, req *api.PutCardRequest) (api.PutCard
 	return api.PutCard204Response{}, nil
 }
 
+func (s *store) GetContent(_ context.Context, req *api.GetContentRequest) (api.GetContentResponse, error) {
+	s.seen["GetContent"] = req
+	return api.GetContent204Response{XCode: oapi.Some(req.Code), XWhere: req.Where, XPrefs: req.XPrefs}, nil
+}
+
 func (s *store) BatchPets(_ context.Context, req *api.BatchPetsRequest) (api.BatchPetsResponse, error) {
 	s.seen["BatchPets"] = req
 	// Each pet is marked as stored, except one named "Unstored".
@@ -1308,5 +1313,34 @@ func TestHandlerLogs(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("log entries:\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestContentParams(t *testing.T) {
+	s, h := newTestServer()
+	r := do(t, h, "GET", "/content/7?where=role%3Dadmin%26age%3D3%26tags%3Da%26tags%3Db", "", "",
+		"X-Note", "a, b; c", "X-Prefs", `<Prefs><theme>dark</theme><compact>true</compact></Prefs>`,
+		"Cookie", "session=%7B%22theme%22%3A%22light%22%7D; label=hi%20there")
+	if r.status != 204 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	got := s.seen["GetContent"].(*api.GetContentRequest)
+	if got.Code != 7 || got.Where.Value.Role != "admin" || got.Where.Value.Age.Value != 3 || len(got.Where.Value.Tags.Value) != 2 ||
+		got.XNote.Value != "a, b; c" || got.XPrefs.Value.Theme.Value != "dark" || !got.XPrefs.Value.Compact.Value ||
+		got.Session.Value.Theme.Value != "light" || got.Label.Value != "hi there" {
+		t.Errorf("request = %+v", got)
+	}
+	// Response headers are written with their media types.
+	if r.header.Get("X-Code") != "7" || r.header.Get("X-Where") != "age=3&role=admin&tags=a&tags=b" ||
+		r.header.Get("X-Prefs") != "<Prefs><theme>dark</theme><compact>true</compact></Prefs>" {
+		t.Errorf("headers = %v", r.header)
+	}
+	// Values are checked against their schemas; a form that does not
+	// decode is not validated further.
+	r = do(t, h, "GET", "/content/0?where=age%3D-1", "", "", "X-Note", strings.Repeat("n", 21), "X-Prefs", "<Prefs><compact>maybe</compact></Prefs>")
+	want := []string{"header X-Note: length must be at most 20", `header X-Prefs /compact: expected boolean, got string`,
+		"path code: must be at least 1", "query where /role: required property is missing"}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q\nwant %q", got, want)
 	}
 }

@@ -24,6 +24,16 @@ var uploadRecordsMultipartProperties = server.Property{Type: "object", Propertie
 		errs.Add("", err.Error())
 	}
 	return errs.Err()
+}}, {Name: "X-Label", Check: func(vals []string) error {
+	v, err := server.DecodeTextContent[string](vals[0])
+	if err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	if oapi.StringLength(v) > 5 {
+		errs.Add("", "length must be at most 5")
+	}
+	return errs.Err()
 }}}}, "scans": {Type: "file", Array: true, ContentTypes: []string{"image/png", "image/jpeg"}}, "attachment": {Type: "file"}}}
 
 // HandleUploadRecords returns the HTTP handler of UploadRecords.

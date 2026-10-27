@@ -454,7 +454,7 @@ func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
 		}
 		if p := pathParams[rest[open+1:end]]; p != nil {
 			if p.Content != "" {
-				w(1, "r.ContentParam(\"path\", %q, req.%s)", p.Name, p.Field)
+				w(1, "%s", f.contentParam(o, p, "req."+p.Field))
 			} else {
 				f.imp(serverImport, "server")
 				w(1, "r.PathParam(%s, req.%s)", f.paramVar(o, p), p.Field)
@@ -474,7 +474,7 @@ func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
 		case p.In == "querystring":
 			stmt = fmt.Sprintf("r.QueryString(%s)", value)
 		case p.Content != "":
-			stmt = fmt.Sprintf("r.ContentParam(%q, %q, %s)", p.In, p.Name, value)
+			stmt = f.contentParam(o, p, value)
 		default:
 			f.imp(serverImport, "server")
 			method := map[string]string{"query": "QueryParam", "header": "HeaderParam", "cookie": "CookieParam"}[p.In]
@@ -621,6 +621,21 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 	w(3, "return nil, &client.InvalidRequest{Problem: b.Problem()}")
 	w(2, "}")
 	w(1, "}")
+}
+
+// contentParam returns the statement sending value, the value of
+// parameter p, serialized with its media type.
+func (f *fileGen) contentParam(o *ir.Operation, p *ir.Param, value string) string {
+	switch p.ContentKind {
+	case "text":
+		return fmt.Sprintf("r.TextContentParam(%q, %q, %s)", p.In, p.Name, value)
+	case "form":
+		return fmt.Sprintf("r.FormContentParam(%q, %q, %s)", p.In, p.Name, value)
+	case "xml":
+		shape := f.declareVar(lowerFirst(o.Name)+"Request"+p.Field+"XMLShape", xmlNodeLiteral(p.XML))
+		return fmt.Sprintf("r.XMLContentParam(%q, %q, %s, %s)", p.In, p.Name, value, shape)
+	}
+	return fmt.Sprintf("r.ContentParam(%q, %q, %s)", p.In, p.Name, value)
 }
 
 // partsHaveHeaders reports whether a file among props, the properties of
@@ -817,8 +832,12 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		w(2, "var %s %s", x, f.goType(inner))
 		var read string
 		switch {
-		case h.Content != "":
+		case h.ContentKind == "json":
 			read = fmt.Sprintf("client.JSONHeader(resp, %q, &%s)", h.Name, x)
+		case h.Content != "":
+			typ, hint := f.goType(inner), lowerFirst(r.TypeName)+"Read"+ir.GoName(h.Name)
+			decode := f.decodeContent(h.ContentKind, typ, "raw", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Response")
+			read = fmt.Sprintf("client.ContentHeader(resp, %q, func(raw string) (%s, error) { return %s }, &%s)", h.Name, typ, decode, x)
 		case h.Array:
 			elem := f.goType(h.Elem)
 			read = fmt.Sprintf("client.Header(resp, %q, func(vals []string) ([]%s, error) { return %s.ParseArray[%s](client.SplitHeader(vals)) }, &%s)",

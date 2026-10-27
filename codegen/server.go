@@ -809,6 +809,29 @@ func (f *fileGen) partHeaders(headers []*ir.Header) string {
 	return "[]server.PartHeader{" + strings.Join(hs, ", ") + "}"
 }
 
+// decodeContent returns the expression decoding raw, the text of a value
+// with content of kind, into a typ, in direction dir: a form needs the
+// object's properties, which form returns, and XML the document's shape,
+// declared under hint.
+func (f *fileGen) decodeContent(kind, typ, raw string, form func() string, xml *ir.XMLNode, hint, dir string) string {
+	dir = f.imp(oapiImport, "oapi") + "." + dir
+	switch kind {
+	case "text":
+		return fmt.Sprintf("server.DecodeTextContent[%s](%s)", typ, raw)
+	case "form":
+		return fmt.Sprintf("server.DecodeFormContent[%s](%s, %s, %s)", typ, raw, form(), dir)
+	case "xml":
+		return fmt.Sprintf("server.DecodeXMLContent[%s](%s, %s, %s)", typ, raw, f.declareVar(hint+"XMLShape", xmlNodeLiteral(xml)), dir)
+	}
+	return fmt.Sprintf("server.DecodeContent[%s](%s)", typ, raw)
+}
+
+// headerFields returns the variable describing the object of header h,
+// serialized as a form.
+func (f *fileGen) headerFields(h *ir.Header, hint string) string {
+	return f.declareVar(hint+"Properties", f.objectProperty(h.Fields.Properties, h.Fields.Additional, h.Fields.Shape))
+}
+
 // partHeaderCheck returns the function checking the values of part
 // header h, as a header parameter's are parsed and validated, or "" if
 // there is nothing to check.
@@ -823,7 +846,8 @@ func (f *fileGen) partHeaderCheck(h *ir.Header) string {
 	var parse string
 	switch {
 	case h.Content != "":
-		parse = fmt.Sprintf("server.DecodeContent[%s](vals[0])", f.goType(h.Type))
+		hint := "partHeader" + ir.GoName(h.Name)
+		parse = f.decodeContent(h.ContentKind, f.goType(h.Type), "vals[0]", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Request")
 	case h.Array:
 		parse = fmt.Sprintf("server.ParseArray[%s](vals)", f.goType(h.Elem))
 	default:
@@ -895,10 +919,12 @@ func (f *fileGen) bindParam(w func(int, string, ...any), o *ir.Operation, p *ir.
 	elem := f.goType(p.Elem)
 	var convert string
 	switch {
-	case p.Object:
+	case p.In == "querystring" && p.Object:
 		convert = fmt.Sprintf("server.DecodeFields[%s](vals.Fields, %s)", elem, f.propertiesVar(o, p))
 	case p.Content != "":
-		convert = fmt.Sprintf("server.DecodeContent[%s](raw)", elem)
+		convert = f.decodeContent(p.ContentKind, elem, "raw", func() string { return f.propertiesVar(o, p) }, p.XML, lowerFirst(o.Name)+p.Field, "Request")
+	case p.Object:
+		convert = fmt.Sprintf("server.DecodeFields[%s](vals.Fields, %s)", elem, f.propertiesVar(o, p))
 	case p.Array:
 		convert = fmt.Sprintf("server.ParseArray[%s](vals.Items)", elem)
 	default:
@@ -1082,12 +1108,16 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(1, "header := make(http.Header)")
 	}
 	for i, h := range r.Headers {
-		format := "server.FormatScalar"
+		format := "server.FormatScalar(%s)"
 		switch {
-		case h.Content != "":
-			format = "server.FormatJSON"
+		case h.ContentKind == "json":
+			format = "server.FormatJSON(%s)"
+		case h.ContentKind == "form":
+			format = "server.EncodeFormContent(%s, " + f.imp(oapiImport, "oapi") + ".Response)"
+		case h.ContentKind == "xml":
+			format = "server.EncodeXMLContent(%s, " + f.declareVar(lowerFirst(r.TypeName)+ir.GoName(h.Name)+"XMLShape", xmlNodeLiteral(h.XML)) + ", " + f.imp(oapiImport, "oapi") + ".Response)"
 		case h.Array:
-			format = "server.FormatArray"
+			format = "server.FormatArray(%s)"
 		}
 		value, depth := "r."+h.Field, 1
 		switch h.Type.Kind {
@@ -1099,7 +1129,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 			value, depth = "*"+value, 2
 		}
 		v := "h" + strconv.Itoa(i)
-		w(depth, "%s, err := %s(%s)", v, format, value)
+		w(depth, "%s, err := %s", v, fmt.Sprintf(format, value))
 		w(depth, "if err != nil {")
 		w(depth+1, "return err")
 		w(depth, "}")
