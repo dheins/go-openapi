@@ -422,6 +422,19 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   TypeScript leaves any missing value out for the request's validation.
 - *Not done*: see [features.md](../features.md).
 
+### M19 – Values of multipart part headers ✅
+- [x] Part headers of `encoding`, `prefixEncoding` and `itemEncoding`
+  parsed and validated by their schemas, with a 400 at the part
+- [x] Go clients checking the headers of file parts before sending
+
+**How it went**
+- *Like parameters*: a part header is typed as a response header is, and
+  its check is a generated closure parsing and validating the values, so
+  the server reports it as it would a header parameter.
+- *Files only*: a client can check only the parts that carry headers,
+  files in `oapi.File.Header`; other parts have no field for them.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

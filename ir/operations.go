@@ -139,8 +139,10 @@ type ParamProperty struct {
 	// ContentTypes are the media types (or ranges) a multipart part may
 	// declare, from its encoding; empty allows any.
 	ContentTypes []string
-	// Headers are the headers a multipart part must carry.
-	Headers []string
+	// Headers are the headers of a multipart part its encoding declares:
+	// those that are Required must be there, and a value is checked
+	// against its Type.
+	Headers []*Header
 	// Shape names this property's shape, an object a property inside it
 	// refers to: the name of its type. Ref is set instead of Type,
 	// Properties and Additional on a property that has the shape of an
@@ -840,7 +842,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 		}
 		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field, Events: events}
 		if kind == "parts" {
-			media.Parts = b.parts(field.Value, m.Deref())
+			media.Parts = b.parts(field.Value, m.Deref(), o.Name+"Part")
 		}
 		if kind == "xml" {
 			node, why := b.xmlRoot(field.Value, schema)
@@ -860,7 +862,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 				continue
 			}
 			if kind == "multipart" {
-				b.partEncodings(m.Deref(), props)
+				b.partEncodings(m.Deref(), props, o.Name+"Part")
 			}
 			media.Properties, media.Additional, media.Shape = props, additional, obj.Shape
 		}
@@ -1054,20 +1056,21 @@ func bodyFieldName(fields namespace, kind, mediaType string) string {
 // partEncodings applies the encoding object of a multipart media type to
 // its properties: the content types each part may have and the headers
 // it must carry.
-func (b *builder) partEncodings(m *oas.MediaType, props []ParamProperty) {
+func (b *builder) partEncodings(m *oas.MediaType, props []ParamProperty, hint string) {
 	for name, enc := range m.Encoding.All() {
 		i := slices.IndexFunc(props, func(p ParamProperty) bool { return p.Name == name })
 		if i < 0 || enc == nil {
 			b.warnAt(m, []string{"encoding", name}, fmt.Sprintf("the encoding of %q names no property and is ignored", name))
 			continue
 		}
-		props[i].ContentTypes, props[i].Headers = b.encodingRules(enc)
+		props[i].ContentTypes, props[i].Headers = b.encodingRules(enc, hint+GoName(name))
 	}
 }
 
 // encodingRules returns the content types (or ranges) a part with
-// encoding enc may declare and the headers it must carry.
-func (b *builder) encodingRules(enc *oas.Encoding) (contentTypes, headers []string) {
+// encoding enc may declare and the headers it declares; hint names their
+// types.
+func (b *builder) encodingRules(enc *oas.Encoding, hint string) (contentTypes []string, headers []*Header) {
 	for ct := range strings.SplitSeq(enc.ContentType, ",") {
 		// Parameters such as charset do not decide whether a part matches.
 		ct, _, _ = strings.Cut(ct, ";")
@@ -1076,17 +1079,17 @@ func (b *builder) encodingRules(enc *oas.Encoding) (contentTypes, headers []stri
 		}
 	}
 	for hname, h := range enc.Headers.All() {
-		h = h.Deref()
 		// The part's Content-Type is described by contentType.
-		if h == nil || strings.EqualFold(hname, "Content-Type") {
+		if h.Deref() == nil || strings.EqualFold(hname, "Content-Type") {
 			continue
 		}
-		if h.Required {
-			headers = append(headers, http.CanonicalHeaderKey(hname))
+		header, why := b.typedHeader(http.CanonicalHeaderKey(hname), h.Deref(), hint+GoName(hname))
+		if why != "" {
+			// Its presence is still checked.
+			b.warnAt(h, nil, fmt.Sprintf("part header %q %s; only its presence is checked", hname, why))
+			header = &Header{Name: http.CanonicalHeaderKey(hname), Required: h.Deref().Required}
 		}
-		if h.Schema != nil || h.Content.Len() > 0 {
-			b.warnAt(enc, []string{"headers", hname}, fmt.Sprintf("the value of part header %q is not checked yet, only its presence", hname))
-		}
+		headers = append(headers, header)
 	}
 	if enc.Style != "" || enc.Explode != nil || enc.AllowReserved != nil {
 		b.warnAt(enc, nil, "style, explode and allowReserved do not apply to multipart parts and are ignored")
@@ -1104,8 +1107,8 @@ type Parts struct {
 }
 
 // parts describes the parts of a body of type value, a slice, with the
-// positional encodings of m.
-func (b *builder) parts(value *Ref, m *oas.MediaType) *Parts {
+// positional encodings of m; hint names the types of their headers.
+func (b *builder) parts(value *Ref, m *oas.MediaType, hint string) *Parts {
 	elem := value
 	for elem.Kind == Named && (elem.Type.Kind == Defined || elem.Type.Kind == Alias) {
 		elem = elem.Type.Underlying
@@ -1118,15 +1121,15 @@ func (b *builder) parts(value *Ref, m *oas.MediaType) *Parts {
 	case jsonType(elem) == "string":
 		p.Item = "text"
 	}
-	for _, enc := range m.PrefixEncoding {
+	for i, enc := range m.PrefixEncoding {
 		var rule ParamProperty
 		if enc != nil {
-			rule.ContentTypes, rule.Headers = b.encodingRules(enc)
+			rule.ContentTypes, rule.Headers = b.encodingRules(enc, fmt.Sprintf("%s%d", hint, i+1))
 		}
 		p.Prefix = append(p.Prefix, rule)
 	}
 	if m.ItemEncoding != nil {
-		p.Rest.ContentTypes, p.Rest.Headers = b.encodingRules(m.ItemEncoding)
+		p.Rest.ContentTypes, p.Rest.Headers = b.encodingRules(m.ItemEncoding, hint+"Item")
 	}
 	if m.Encoding.Len() > 0 {
 		b.warnAt(m, []string{"encoding"}, "encoding by name applies to multipart/form-data only; use prefixEncoding and itemEncoding for positional parts")
@@ -1309,7 +1312,7 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			suffix = "XML"
 		case "parts":
 			v.Body = b.bodyValue(kind, media.Schema, o.Name+statusName+"ResponseBody")
-			v.Parts = b.parts(v.Body, media)
+			v.Parts = b.parts(v.Body, media, o.Name+statusName+"Part")
 			_, sub, _ := strings.Cut(mt, "/")
 			suffix = GoName(sub)
 		case "text":
@@ -1358,31 +1361,9 @@ func (b *builder) responseHeaders(o *Operation, statusName string, r *oas.Respon
 		if hdr == nil {
 			continue
 		}
-		header := &Header{Name: name, Doc: strings.TrimSpace(hdr.Description), Required: hdr.Required}
-		schema := hdr.Schema
-		for mt, m := range hdr.Content.All() {
-			header.Content, schema = strings.ToLower(mt), m.Deref().Schema
-			break
-		}
-		if header.Content != "" && !isJSONMediaType(header.Content) {
-			b.warnAt(h, nil, fmt.Sprintf("header %q with content of type %s is not supported yet and is not sent", name, header.Content))
-			continue
-		}
-		ref := stripNullable(b.use(schema, o.Name+statusName+GoName(name), nil))
-		switch {
-		case header.Content != "":
-			// Any value can be written as JSON.
-			header.Elem = ref
-			header.Type = ref
-		case isScalar(ref):
-			header.Elem = ref
-			header.Type = ref
-		case ref.Kind == Slice && isScalar(stripNullable(ref.Elem)):
-			header.Array = true
-			header.Elem = stripNullable(ref.Elem)
-			header.Type = &Ref{Kind: Slice, Elem: header.Elem}
-		default:
-			b.warnAt(h, nil, fmt.Sprintf("header %q is not a primitive value or an array of them and is not sent", name))
+		header, why := b.typedHeader(name, hdr, o.Name+statusName+GoName(name))
+		if why != "" {
+			b.warnAt(h, nil, fmt.Sprintf("header %q %s and is not sent", name, why))
 			continue
 		}
 		if !header.Required {
@@ -1392,6 +1373,41 @@ func (b *builder) responseHeaders(o *Operation, statusName string, r *oas.Respon
 		headers = append(headers, header)
 	}
 	return headers
+}
+
+// String returns the header's name, as fmt prints a header.
+func (h *Header) String() string { return h.Name }
+
+// typedHeader returns the header name, h, with the type of its value: a
+// primitive value, an array of them, or JSON with content. It says why it
+// cannot be typed instead, if it cannot. hint names its types.
+func (b *builder) typedHeader(name string, h *oas.Header, hint string) (*Header, string) {
+	header := &Header{Name: name, Doc: strings.TrimSpace(h.Description), Required: h.Required}
+	schema := h.Schema
+	for mt, m := range h.Content.All() {
+		header.Content, schema = strings.ToLower(mt), m.Deref().Schema
+		break
+	}
+	if header.Content != "" && !isJSONMediaType(header.Content) {
+		return nil, fmt.Sprintf("with content of type %s is not supported yet", header.Content)
+	}
+	ref := stripNullable(b.use(schema, hint, nil))
+	switch {
+	case header.Content != "":
+		// Any value can be written as JSON.
+		header.Elem = ref
+		header.Type = ref
+	case isScalar(ref):
+		header.Elem = ref
+		header.Type = ref
+	case ref.Kind == Slice && isScalar(stripNullable(ref.Elem)):
+		header.Array = true
+		header.Elem = stripNullable(ref.Elem)
+		header.Type = &Ref{Kind: Slice, Elem: header.Elem}
+	default:
+		return nil, "is not a primitive value or an array of them"
+	}
+	return header, ""
 }
 
 // isJSONMediaType reports whether a content key is JSON: application/json

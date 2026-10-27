@@ -413,3 +413,48 @@ func TestClientSecurity(t *testing.T) {
 		t.Errorf("default server URL: %v", err)
 	}
 }
+
+func TestClientPartHeaders(t *testing.T) {
+	ctx := context.Background()
+	_, c := newTestClient(t, petclient.Credentials{})
+	report := func(sum string) *api.UploadRecordsRequest {
+		return &api.UploadRecordsRequest{PetID: 1, Body: model.UploadRecordsRequestBody{
+			Report: oapi.File{Name: "r.pdf", ContentType: "application/pdf", Header: textproto.MIMEHeader{"X-Checksum": {sum}}, Data: []byte("%PDF")},
+		}}
+	}
+	if _, err := c.UploadRecords(ctx, report("abc")); err != nil {
+		t.Fatal(err)
+	}
+	// The headers of file parts are checked before sending, against their
+	// schemas, as the server checks them.
+	var invalid *client.InvalidRequest
+	if _, err := c.UploadRecords(ctx, report("AB!")); !errors.As(err, &invalid) || len(invalid.Problem.Errors) != 1 ||
+		invalid.Problem.Errors[0].Pointer != "/report" || !strings.Contains(invalid.Problem.Errors[0].Detail, `part header "X-Checksum": must match the pattern`) {
+		t.Errorf("bad checksum: %v", err)
+	}
+	missing := report("abc")
+	missing.Body.Report.Header = nil
+	if _, err := c.UploadRecords(ctx, missing); !errors.As(err, &invalid) || invalid.Problem.Errors[0].Detail != `part header "X-Checksum" is missing` {
+		t.Errorf("no checksum: %v", err)
+	}
+
+	// Positional parts, by position.
+	images := []oapi.File{
+		{ContentType: "image/png", Header: textproto.MIMEHeader{"X-Order": {"1"}}, Data: []byte("1")},
+		{ContentType: "image/png", Header: textproto.MIMEHeader{"X-Order": {"0"}}, Data: []byte("2")},
+	}
+	if _, err := c.UploadBundle(ctx, &api.UploadBundleRequest{Body: images}); !errors.As(err, &invalid) || len(invalid.Problem.Errors) != 1 ||
+		invalid.Problem.Errors[0].Pointer != "/1" || invalid.Problem.Errors[0].Detail != `part header "X-Order": must be at least 1` {
+		t.Errorf("bad order: %v", err)
+	}
+	// Without validation, the server finds the same problems.
+	_, lax := newTestClient(t, petclient.Credentials{}, client.WithoutRequestValidation())
+	_, err := lax.UploadBundle(ctx, &api.UploadBundleRequest{Body: images})
+	if u := unexpected(t, err, 400); u.Problem == nil || len(u.Problem.Errors) != 1 || u.Problem.Errors[0].Detail != `part header "X-Order": must be at least 1` {
+		t.Errorf("server-side bad order: %+v", u.Problem)
+	}
+	_, err = lax.UploadRecords(ctx, report("AB!"))
+	if u := unexpected(t, err, 400); u.Problem == nil || len(u.Problem.Errors) != 1 || u.Problem.Errors[0].Pointer != "/report" {
+		t.Errorf("server-side bad checksum: %+v", u.Problem)
+	}
+}

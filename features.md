@@ -44,9 +44,9 @@ shipped in.
   and multipart bodies streamed with `itemSchema`. — later
 - XML for unions, maps, recursive types and `nodeType: none` on objects
   (answered with 415 today). — later
-- Checking the values of multipart part headers against their schemas
-  (only `required` is checked), and `contentEncoding` (`[]byte`) parts.
-  — later
+- Multipart part headers whose schemas are objects, or whose `content` is
+  not JSON (only their presence is checked), and `contentEncoding`
+  (`[]byte`) parts. — later
 - Arrays of arrays in form and multipart bodies and object parameters
   (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects
   (indices are read and written). — later
@@ -112,6 +112,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Values of multipart part headers checked against their schemas, by
+  servers and, for file parts, Go clients before sending. (16ac1cc,
+  6526b20)
 - [x] Links: methods building the request a link leads to, and Go and
   TypeScript client methods following it. (ba52f1c, 1d34beb, ef45b59)
 - [x] Examples checked against their schemas: `goapi validate` rule

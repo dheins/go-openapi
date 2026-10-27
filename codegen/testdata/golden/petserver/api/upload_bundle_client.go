@@ -11,13 +11,30 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var uploadBundleRequestRelatedParts = server.Parts{Item: "file", Rest: server.Property{ContentTypes: []string{"image/*"}}}
+var uploadBundleRequestRelatedParts = server.Parts{Item: "file", Rest: server.Property{ContentTypes: []string{"image/*"}, Headers: []server.PartHeader{{Name: "X-Order", Check: func(vals []string) error {
+	v, err := server.ParseScalar[int64](vals)
+	if err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	if v < 1 {
+		errs.Add("", "must be at least 1")
+	}
+	return errs.Err()
+}}}}}
 
 var uploadBundle200RelatedResponseReadParts = server.Parts{Item: "file"}
 
 // NewUploadBundleRequest builds the HTTP request of UploadBundle, POST
 // /bundle, to send with c.
 func NewUploadBundleRequest(ctx context.Context, c *client.Config, req *UploadBundleRequest) (*http.Request, error) {
+	if c.ValidateRequests {
+		var b server.Binder
+		b.Body(server.CheckFileParts(req.Body, uploadBundleRequestRelatedParts))
+		if b.Failed() {
+			return nil, &client.InvalidRequest{Problem: b.Problem()}
+		}
+	}
 	r := client.NewRequest("POST")
 	r.Path("/bundle")
 	client.PartsBody(r, "multipart/related", req.Body, uploadBundleRequestRelatedParts)

@@ -822,6 +822,12 @@ func TestMultipartFileParts(t *testing.T) {
 	if got := problemErrors(t, r); !slices.Equal(got, []string{`body /report: part header "X-Checksum" is missing`}) {
 		t.Errorf("errors = %q", got)
 	}
+	// The header's value is checked against its schema.
+	ct, body = recordsBody(t, part("report", "r.pdf", "application/pdf", "X-Checksum", "AB!"), []byte("%PDF"))
+	r = do(t, h, "POST", "/pets/1/records", ct, body)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{`body /report: part header "X-Checksum": must match the pattern ^[a-z0-9]{3,}$`}) {
+		t.Errorf("errors = %q", got)
+	}
 }
 
 func TestBodiesWithDifferentSchemas(t *testing.T) {
@@ -1035,6 +1041,22 @@ func TestPositionalParts(t *testing.T) {
 	want = []string{`body /0: part header "X-Seq" is missing`, `body /1: content type "text/plain" is not allowed; expected application/json`,
 		"body /2/name: expected string, got number"}
 	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+	// Header values are parsed and checked as their schemas say: an
+	// integer, and the items of an array.
+	ct, body = partsBody(t, "mixed",
+		header("Content-Type", "application/json", "X-Seq", "0"), `{"name": "Rex"}`,
+		header("Content-Type", "application/json", "X-Tags", "ok, toolong"), `{"name": "Tom"}`,
+	)
+	r = do(t, h, "POST", "/pets/batch", ct, body)
+	want = []string{`body /0: part header "X-Seq": must be at least 1`, `body /1: part header "X-Tags": /1: length must be at most 3`}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+	ct, body = partsBody(t, "mixed", header("Content-Type", "application/json", "X-Seq", "one"), `{"name": "Rex"}`)
+	r = do(t, h, "POST", "/pets/batch", ct, body)
+	if got := problemErrors(t, r); len(got) != 1 || !strings.HasPrefix(got[0], `body /0: part header "X-Seq": `) {
 		t.Errorf("errors = %q", got)
 	}
 

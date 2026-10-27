@@ -455,8 +455,14 @@ its schema is `format: binary` (3.0) or, the 3.1 way, a string with a
 `contentMediaType` or a schema without a type; a part need not have a file
 name. The `encoding` object is applied to multipart parts: a part that
 declares a content type must match `contentType` (a list of media types or
-ranges), and the `required` part headers must be present (their values are
-not checked yet). In a JSON
+ranges), and the `required` part headers must be present. A part header's
+value is parsed by its schema, as a header parameter's is (a primitive
+value, an array of them in the simple style, or JSON with `content`), and
+validated: a bad value is a 400 at the part
+(`body /report: part header "X-Checksum": must match the pattern ...`).
+A header of another schema is only checked to be present, with a warning.
+With request validation on, a generated Go client checks the headers of
+file parts (`oapi.File.Header`) before sending. In a JSON
 body, an `oapi.File` is a string: its data must be UTF-8, or encoding fails
 (use `contentEncoding: base64` for binary data in JSON, generated as
 `[]byte`). When an
@@ -597,7 +603,8 @@ part's index (`body /2/name: ...`). Otherwise, also with `prefixItems`,
 the body is the parts themselves, a `[]oapi.File` with each part's headers
 (`Content-ID` and so on). `prefixEncoding` applies to the first parts and
 `itemEncoding` to the others: a part that declares a content type must
-match, and required part headers must be present. Responses of these
+match, and part headers must be present when required and valid when
+given, as above. Responses of these
 types (`...MixedResponse`, `...RelatedResponse`) are written the same way,
 each part with the first content type its encoding names, else the file's
 own, `text/plain` or `application/json`.

@@ -588,6 +588,27 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 		for _, fd := range o.Body.Fields {
 			add("req."+fd.Name, fd.Type, "", "b.Body(errs.Err())")
 		}
+		// The headers of file parts, which carry them in oapi.File.Header.
+		for _, m := range o.Body.Media {
+			var check string
+			cond, value := present("req."+m.Field.Name, m.Field.Type)
+			switch {
+			case m.Kind == "multipart" && partsHaveHeaders(m.Properties):
+				props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", f.objectProperty(m.Properties, m.Additional, m.Shape))
+				check = fmt.Sprintf("b.Body(server.CheckFileHeaders(%s, %s))", value, props)
+			case m.Kind == "parts" && m.Parts.Item == "file" && slices.ContainsFunc(append(slices.Clone(m.Parts.Prefix), m.Parts.Rest), func(p ir.ParamProperty) bool { return len(p.Headers) > 0 }):
+				_, sub, _ := strings.Cut(m.MediaType, "/")
+				parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+				check = fmt.Sprintf("b.Body(server.CheckFileParts(%s, %s))", value, parts)
+			default:
+				continue
+			}
+			if cond == "" {
+				checks.WriteString("\t\t" + check + "\n")
+			} else {
+				checks.WriteString("\t\tif " + cond + " {\n\t\t\t" + check + "\n\t\t}\n")
+			}
+		}
 	}
 	if checks.Len() == 0 {
 		return
@@ -599,6 +620,12 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 	w(3, "return nil, &client.InvalidRequest{Problem: b.Problem()}")
 	w(2, "}")
 	w(1, "}")
+}
+
+// partsHaveHeaders reports whether a file among props, the properties of
+// a multipart body, declares part headers.
+func partsHaveHeaders(props []ir.ParamProperty) bool {
+	return slices.ContainsFunc(props, func(p ir.ParamProperty) bool { return p.Type == "file" && len(p.Headers) > 0 })
 }
 
 // requestBody writes the encoding of the body in the media type
@@ -651,11 +678,11 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("r.FormBody(%s, %s)", ct, value)
 		case "multipart":
 			f.imp(serverImport, "server")
-			props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", objectProperty(m.Properties, m.Additional, m.Shape))
+			props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", f.objectProperty(m.Properties, m.Additional, m.Shape))
 			stmt = fmt.Sprintf("r.MultipartBody(%s, %s)", value, props)
 		case "parts":
 			f.imp(serverImport, "server")
-			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", partsLiteral(m.Parts))
+			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
 			stmt = fmt.Sprintf("client.PartsBody(r, %s, %s, %s)", ct, value, parts)
 		case "text":
 			stmt = fmt.Sprintf("r.TextBody(%s, string(%s))", ct, value)
@@ -761,7 +788,7 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 	case "parts":
 		readBody("body")
 		f.imp(serverImport, "server")
-		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", partsLiteral(r.Parts))
+		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", f.partsLiteral(r.Parts))
 		w(2, "items, err := client.DecodeParts[%s](resp, body, %s)", f.goType(sliceElem(r.Body)), parts)
 		w(2, "if err != nil {")
 		w(3, "return nil, err")

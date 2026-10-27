@@ -103,8 +103,8 @@ func checkPart(header textproto.MIMEHeader, prop Property) string {
 		}
 	}
 	for _, h := range prop.Headers {
-		if len(header.Values(h)) == 0 {
-			return fmt.Sprintf("part header %q is missing", h)
+		if msg := h.check(header); msg != "" {
+			return msg
 		}
 	}
 	return ""
@@ -114,6 +114,74 @@ var (
 	fileType      = reflect.TypeFor[oapi.File]()
 	fileSliceType = reflect.TypeFor[[]oapi.File]()
 )
+
+// CheckFileHeaders checks the headers of the files of v, a multipart body,
+// against the encodings of the properties of obj, as a server reading the
+// body does: in their oapi.File.Header. Problems are located at the
+// property (/report), or its item (/scans/1).
+func CheckFileHeaders(v any, obj Property) error {
+	var errs oapi.ValidationErrors
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer && !rv.IsNil() {
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil
+	}
+	obj = obj.shape()
+	for i := range rv.NumField() {
+		name, _, _ := strings.Cut(rv.Type().Field(i).Tag.Get("json"), ",")
+		prop, ok := obj.Properties[name]
+		if !ok || prop.Type != "file" || len(prop.Headers) == 0 {
+			continue
+		}
+		files := heldFiles(rv.Field(i))
+		for j, file := range files {
+			at := oapi.Field("", name)
+			if prop.Array || len(files) > 1 {
+				at = oapi.Index(at, j)
+			}
+			if msg := checkPart(file.Header, Property{Headers: prop.Headers}); msg != "" {
+				errs.Add(at, msg)
+			}
+		}
+	}
+	return errs.Err()
+}
+
+// CheckFileParts checks the headers of files, the parts of a multipart
+// body of positional parts, against the encodings of p, by position.
+func CheckFileParts(files []oapi.File, p Parts) error {
+	var errs oapi.ValidationErrors
+	for i, file := range files {
+		if msg := checkPart(file.Header, Property{Headers: p.encoding(i).Headers}); msg != "" {
+			errs.Add(oapi.Index("", i), msg)
+		}
+	}
+	return errs.Err()
+}
+
+// heldFiles returns the files a field holds: one, several, or, inside an
+// Optional that is not set or behind a nil pointer, none.
+func heldFiles(f reflect.Value) []oapi.File {
+	switch {
+	case f.Type() == fileType:
+		return []oapi.File{f.Interface().(oapi.File)}
+	case f.Type() == fileSliceType:
+		return f.Interface().([]oapi.File)
+	case f.Kind() == reflect.Pointer:
+		if f.IsNil() {
+			return nil
+		}
+		return heldFiles(f.Elem())
+	case f.Kind() == reflect.Struct && f.FieldByName("Set").IsValid() && f.FieldByName("Value").IsValid():
+		if !f.FieldByName("Set").Bool() {
+			return nil
+		}
+		return heldFiles(f.FieldByName("Value"))
+	}
+	return nil
+}
 
 // setFiles stores files in the fields of *dst whose JSON names match.
 func setFiles(dst any, files map[string][]oapi.File) error {

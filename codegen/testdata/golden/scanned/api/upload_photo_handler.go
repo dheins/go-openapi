@@ -12,7 +12,7 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var uploadPhotoMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"photo": {Type: "file", ContentTypes: []string{"image/png", "image/jpeg"}, Headers: []string{"X-Checksum"}}, "caption": {Type: "string"}}}
+var uploadPhotoMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"photo": {Type: "file", ContentTypes: []string{"image/png", "image/jpeg"}, Headers: []server.PartHeader{{Name: "X-Checksum", Required: true}}}, "caption": {Type: "string"}}}
 
 // HandleUploadPhoto returns the HTTP handler of UploadPhoto.
 //

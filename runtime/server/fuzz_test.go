@@ -61,16 +61,26 @@ func FuzzNegotiate(f *testing.F) {
 func FuzzMultipart(f *testing.F) {
 	f.Add([]byte("--b\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nRex\r\n--b--\r\n"), "b")
 	f.Add([]byte("--b\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"a\"\r\n\r\nPNG\r\n--b--\r\n"), "b")
+	f.Add([]byte("--b\r\nX-Seq: 1\r\nX-Tags: 1, \"2\"\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nRex\r\n--b--\r\n"), "b")
 	f.Fuzz(func(t *testing.T, body []byte, boundary string) {
 		type upload struct {
 			Name  string `json:"name"`
 			Photo []byte `json:"photo"`
 		}
-		props := Property{Type: "object", Properties: map[string]Property{"name": {Type: "string"}, "photo": {Type: "file"}}}
+		// Part headers are parsed: an integer, and an array.
+		seq := PartHeader{Name: "X-Seq", Required: true, Check: func(vals []string) error {
+			_, err := ParseScalar[int64](vals)
+			return err
+		}}
+		tags := PartHeader{Name: "X-Tags", Array: true, Check: func(vals []string) error {
+			_, err := ParseArray[int32](vals)
+			return err
+		}}
+		props := Property{Type: "object", Properties: map[string]Property{"name": {Type: "string", Headers: []PartHeader{tags}}, "photo": {Type: "file"}}}
 		_, _ = DecodeMultipart[upload](bytes.Clone(body), "multipart/form-data; boundary="+boundary, props)
 		// The same body as positional parts, of each kind of item.
 		ct := "multipart/mixed; boundary=" + boundary
-		rules := Parts{Prefix: []Property{{ContentTypes: []string{"application/json"}, Headers: []string{"X-Seq"}}}}
+		rules := Parts{Prefix: []Property{{ContentTypes: []string{"application/json"}, Headers: []PartHeader{seq}}}, Rest: Property{Headers: []PartHeader{tags}}}
 		rules.Item = "json"
 		_, _ = DecodeParts[upload](bytes.Clone(body), ct, rules)
 		rules.Item = "text"

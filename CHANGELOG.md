@@ -4,6 +4,15 @@
 
 ### Added
 
+- The values of multipart part headers are checked, not only their
+  presence: a header an `encoding`, `prefixEncoding` or `itemEncoding`
+  declares is parsed by its schema (a primitive value, an array of them in
+  the simple style, or JSON with `content`) and validated, as header
+  parameters are. A bad value is a 400 at the part
+  (`body /report: part header "X-Checksum": …`). Generated Go clients check
+  the headers of file parts (`oapi.File.Header`) before sending, when
+  requests are validated (`server.CheckFileHeaders`,
+  `server.CheckFileParts`).
 - Links in generated Go code: a response variant gets a method per link of
   its response (`resp.GetPetLink(req)`) building the request of the
   operation the link leads to, by `operationId` or `operationRef`, from
@@ -314,6 +323,9 @@
 
 ### Changed
 
+- `server.Property.Headers` is a `[]server.PartHeader` (name, whether it is
+  required, and a function checking its value) instead of the names of the
+  required headers. Regenerate code that declares multipart encodings.
 - When a webhook or callback declares security, `NewSender` takes the
   `SenderCredentials` first, and the receiver's `HandleX` function takes a
   `ReceiverSecurityHandler` last. Documents whose webhooks and callbacks
