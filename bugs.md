@@ -83,6 +83,9 @@ checked off under [Fixed](#fixed), by the release they shipped in.
 
 Unreleased:
 
+- [x] **Cookie parameters with JSON content lost their quotes.**
+  `http.Cookie` drops `"` and other bytes a cookie cannot hold; Go clients
+  percent-encode them, and servers decode them.
 - [x] **TypeScript clients read server-sent events more loosely.** Their
   parser ended lines only at LF and skipped events without data; it
   follows the format now, as the Go runtime does: CRLF, LF or CR, events

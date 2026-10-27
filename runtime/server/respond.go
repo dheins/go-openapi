@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -112,6 +114,39 @@ func FormatArray[T any](vs []T) (string, error) {
 		items[i] = s
 	}
 	return strings.Join(items, ","), nil
+}
+
+// EncodeFormContent writes v, an object, as the text of a parameter or
+// header serialized as application/x-www-form-urlencoded, encoded in
+// direction dir: nested objects as a[b] fields, arrays as repeated ones.
+func EncodeFormContent(v any, dir oapi.Direction) (string, error) {
+	fields, err := ObjectFields(v, true, dir)
+	if err != nil {
+		return "", fmt.Errorf("formatting form value: %w", err)
+	}
+	form := url.Values{}
+	for _, f := range fields {
+		for _, val := range f.Values {
+			form.Add(f.Name(), val)
+		}
+	}
+	return form.Encode(), nil
+}
+
+// EncodeXMLContent writes v as the text of a parameter or header
+// serialized as the XML document root describes, encoded in direction
+// dir.
+func EncodeXMLContent(v any, root *XMLNode, dir oapi.Direction) (string, error) {
+	data, err := oapi.EncodeValue(v, dir)
+	if err != nil {
+		return "", fmt.Errorf("formatting XML value: %w", err)
+	}
+	doc, err := JSONToXML(data, root)
+	if err != nil {
+		return "", fmt.Errorf("formatting XML value: %w", err)
+	}
+	// A header holds the element alone, without the declaration's line.
+	return strings.TrimPrefix(string(doc), xml.Header), nil
 }
 
 // FormatJSON formats the value of a header serialized as JSON, leaving

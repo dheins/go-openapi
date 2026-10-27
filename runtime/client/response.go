@@ -166,6 +166,12 @@ func JSONHeader(resp *http.Response, name string, dst any) (bool, error) {
 	return true, nil
 }
 
+// ContentHeader reads the header name of resp, serialized with a media
+// type, into dst with decode, reporting whether it is present.
+func ContentHeader[T any](resp *http.Response, name string, decode func(string) (T, error), dst *T) (bool, error) {
+	return Header(resp, name, func(vals []string) (T, error) { return decode(strings.Join(vals, ", ")) }, dst)
+}
+
 // JSONLines returns the items of a JSON Lines response as they arrive.
 // The body is closed when the loop ends; a loop that is never run leaves
 // it open, so range over the items or close resp.Body.

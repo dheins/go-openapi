@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
@@ -75,6 +76,48 @@ func FuzzParamRoundTrip(f *testing.F) {
 		}
 		if err != nil || !slices.Equal(got.Items, items) {
 			t.Fatalf("%s %s: sent %q, got %q (%v); url %s", st.in, st.p.Style, items, got.Items, err, req.URL)
+		}
+	})
+}
+
+// FuzzContentRoundTrip checks that values the client serializes with a
+// media type (JSON, text, a form) in the query, a header or a cookie read
+// back the same through the server's decoders. Headers cannot hold
+// control characters, so such text is skipped there.
+func FuzzContentRoundTrip(f *testing.F) {
+	f.Add("a, b; c", `"q" \ %41`, uint8(0))
+	f.Add("", "x=y&z", uint8(2))
+	f.Fuzz(func(t *testing.T, text, name string, place uint8) {
+		if !utf8.ValidString(text) || !utf8.ValidString(name) {
+			return
+		}
+		in := []string{"query", "header", "cookie"}[place%3]
+		if in == "header" && (strings.ContainsFunc(text+name, func(r rune) bool { return r < 0x20 || r == 0x7f }) ||
+			strings.TrimSpace(text) != text || text == "") {
+			return
+		}
+		r := NewRequest("GET")
+		r.ContentParam(in, "j", owner{Name: name, Age: 1})
+		r.TextContentParam(in, "t", text)
+		r.FormContentParam(in, "f", owner{Name: name, Age: 2})
+		req := build(t, r)
+		query := req.URL.Query()
+		raw := func(n string) string {
+			v, ok := server.ContentValue(req, query, in, n)
+			if !ok {
+				t.Fatalf("%s %s is missing", in, n)
+			}
+			return v
+		}
+		if got, err := server.DecodeContent[owner](raw("j")); err != nil || got != (owner{Name: name, Age: 1}) {
+			t.Fatalf("%s JSON: sent %q, got %+v (%v)", in, name, got, err)
+		}
+		if got, err := server.DecodeTextContent[string](raw("t")); err != nil || got != text {
+			t.Fatalf("%s text: sent %q, got %q (%v)", in, text, got, err)
+		}
+		props := server.Property{Type: "object", Properties: map[string]server.Property{"age": {Type: "integer"}}}
+		if got, err := server.DecodeFormContent[owner](raw("f"), props, oapi.Request); err != nil || got != (owner{Name: name, Age: 2}) {
+			t.Fatalf("%s form: sent %q, got %+v (%v)", in, name, got, err)
 		}
 	})
 }

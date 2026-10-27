@@ -385,3 +385,61 @@ type stringBody struct{ *strings.Reader }
 func (stringBody) Close() error { return nil }
 
 func readCloser(s string) stringBody { return stringBody{strings.NewReader(s)} }
+
+func TestContentParamsRoundTrip(t *testing.T) {
+	ownerXML := &server.XMLNode{Name: "owner", Type: "object", Properties: []server.XMLProperty{
+		{Name: "name", Node: &server.XMLNode{Name: "name", Type: "string"}},
+		{Name: "age", Node: &server.XMLNode{Name: "age", Kind: "attribute", Type: "integer"}},
+	}}
+	props := server.Property{Type: "object", Properties: map[string]server.Property{
+		"tags":  {Type: "string", Array: true},
+		"owner": {Type: "object", Properties: map[string]server.Property{"age": {Type: "integer"}}},
+	}}
+	in := filter{Role: "a&b=c", Tags: []string{"x y", "z"}, Owner: oapi.Some(owner{"Ann", 3})}
+	for _, place := range []string{"query", "header", "cookie"} {
+		r := NewRequest("GET")
+		r.TextContentParam(place, "text", "a, b; c")
+		r.FormContentParam(place, "form", in)
+		r.XMLContentParam(place, "xml", owner{"Ann & Bo", 4}, ownerXML)
+		// JSON keeps its quotes, in cookies too.
+		r.ContentParam(place, "json", owner{`"Ann"; Bo`, 5})
+		req := build(t, r)
+		query := req.URL.Query()
+		raw := func(name string) string {
+			v, ok := server.ContentValue(req, query, place, name)
+			if !ok {
+				t.Fatalf("%s %s is missing", place, name)
+			}
+			return v
+		}
+		// Text is taken whole, commas and all.
+		if got, err := server.DecodeTextContent[string](raw("text")); err != nil || got != "a, b; c" {
+			t.Errorf("%s text = %q, %v", place, got, err)
+		}
+		if got, err := server.DecodeFormContent[filter](raw("form"), props, oapi.Request); err != nil || !reflect.DeepEqual(got, in) {
+			t.Errorf("%s form = %+v, %v", place, got, err)
+		}
+		if got, err := server.DecodeXMLContent[owner](raw("xml"), ownerXML, oapi.Request); err != nil || got != (owner{"Ann & Bo", 4}) {
+			t.Errorf("%s xml = %+v, %v (%q)", place, got, err, raw("xml"))
+		}
+		if got, err := server.DecodeContent[owner](raw("json")); err != nil || got != (owner{`"Ann"; Bo`, 5}) {
+			t.Errorf("%s json = %+v, %v (%q)", place, got, err, raw("json"))
+		}
+	}
+	r := NewRequest("GET")
+	r.Path("/n/")
+	r.TextContentParam("path", "n", int64(7))
+	if got := build(t, r).URL.EscapedPath(); got != "/v1/n/7" {
+		t.Errorf("path = %s", got)
+	}
+	if _, err := server.DecodeTextContent[int64]("seven"); err == nil {
+		t.Error("text that is not a number")
+	}
+	// Response headers are written the same way.
+	if got, err := server.EncodeFormContent(owner{"Ann", 3}, oapi.Response); err != nil || got != "age=3&name=Ann" {
+		t.Errorf("form header = %q, %v", got, err)
+	}
+	if got, err := server.EncodeXMLContent(owner{"Ann", 3}, ownerXML, oapi.Response); err != nil || got != `<owner age="3"><name>Ann</name></owner>` {
+		t.Errorf("XML header = %q, %v", got, err)
+	}
+}

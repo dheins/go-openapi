@@ -304,6 +304,11 @@
 
 ### Fixed
 
+- Cookie parameters with JSON `content` lost their quotes: Go's
+  `http.Cookie` drops the bytes a cookie value cannot hold, so
+  `{"name":"Ann"}` arrived as `{name:Ann}`. Generated Go clients
+  percent-encode those bytes (and `%`) in content cookies, and servers
+  decode them, taking a value that does not decode as it is.
 - TypeScript clients read server-sent events as the format defines them:
   lines end with CRLF, LF or CR (a lone CR did not end one), events
   without data are kept, and an event the stream ends inside is dropped.
