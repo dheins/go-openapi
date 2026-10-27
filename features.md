@@ -45,12 +45,14 @@ shipped in.
 - XML for unions, maps, recursive types and `nodeType: none` on objects
   (answered with 415 today). — later
 - Multipart part headers whose schemas are objects, or whose `content` is
-  not JSON (only their presence is checked), and `contentEncoding`
-  (`[]byte`) parts. — later
+  not JSON, text, a form or XML (only their presence is checked), and
+  `contentEncoding` (`[]byte`) parts. — later
 - Arrays of arrays in form and multipart bodies and object parameters
   (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects
   (indices are read and written). — later
-- Parameters and response headers with `content` other than JSON. — later
+- Parameters and response headers with `content` other than JSON, text,
+  forms and XML, and `querystring` parameters with text or XML content.
+  — later
 - Links to operations of other documents (`operationRef` to another
   file), links naming a `server`, and runtime expressions other than
   `$response.body`, `$response.header` and `$request.*` in links
@@ -76,7 +78,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - TypeScript clients: full duplex, reading a streamed response while the
   request still streams (`duplex: "half"` sends the request first). — later
 - TypeScript clients: XML and positional multipart bodies and responses,
-  headers of multipart parts (`FormData` cannot set them), and `int64`
+  parameters and response headers with XML `content`, headers of
+  multipart parts (`FormData` cannot set them), and `int64`
   values beyond 2^53 (they are `number`s). Cookie parameters cannot be
   sent from browsers, which do not let scripts set `Cookie`. — later
 
@@ -108,6 +111,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Parameters, response headers and part headers with text, form and
+  XML `content`, in servers and Go clients, and text and form in
+  TypeScript clients. (e99f176, a82434e, d394670)
 - [x] Headers of JSON and text positional parts, in `oapi.Part` items, read
   and written by servers and Go clients. (07c14a1, d1e3bb2)
 - [x] Values of multipart part headers checked against their schemas, by

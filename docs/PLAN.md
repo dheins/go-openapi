@@ -449,6 +449,21 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   the item's own validation ignore the headers.
 - *Not done*: see [features.md](../features.md).
 
+### M21 – Content other than JSON in parameters and headers ✅
+- [x] Text, form and XML `content` for parameters, response headers and
+  part headers, in servers and Go clients
+- [x] Text and form `content` in TypeScript clients
+
+**How it went**
+- *One switch*: a content kind decided once in the model picks the
+  decoder and encoder everywhere, so JSON generates what it did.
+- *Shared fields*: writing an object as form fields moved from the client
+  runtime to the server's (`server.ObjectFields`), which response headers
+  need.
+- *Found on the way*: cookies with JSON content lost their quotes, which
+  `http.Cookie` drops; content cookies are percent-encoded now.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

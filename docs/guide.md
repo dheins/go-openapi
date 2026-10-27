@@ -416,10 +416,25 @@ func (s *store) ListPets(ctx context.Context, req *api.ListPetsRequest) (api.Lis
 Supported parameters: path (`simple`, `label`, `matrix`), query (`form`,
 `spaceDelimited`, `pipeDelimited`, `deepObject`), header (`simple`) and
 cookie (`form`), each as a value, an array or an object of values, with or
-without `explode`; parameters with JSON `content`; the 3.2 `querystring`
-location (form-encoded or JSON); `allowEmptyValue` (`?q=` is the empty
-string, or no items for an array; for numbers and booleans it means the
-parameter is not given); defaults.
+without `explode`; parameters with `content` (see below); the 3.2
+`querystring` location (form-encoded or JSON); `allowEmptyValue` (`?q=` is
+the empty string, or no items for an array; for numbers and booleans it
+means the parameter is not given); defaults.
+
+A parameter with `content` is written whole in its media type:
+- JSON (`application/json`, `+json`): any value, as compact JSON.
+- Text (`text/plain`, `text/*`): a primitive value as its text, taken
+  whole: `X-Note: a, b` is the string `a, b`, not two items.
+- Form (`application/x-www-form-urlencoded`): an object as form fields
+  inside the value, `?where=role%3Dadmin%26age%3D3`, nested as form
+  bodies are.
+- XML (`application/xml`, `+xml`): an object as the document its schema
+  describes, `X-Prefs: <Prefs><theme>dark</theme></Prefs>`.
+
+A schema the media type cannot hold (an object as text, say), and other
+media types, leave the operation unsupported, with a warning. In cookies,
+clients percent-encode what a cookie value cannot hold (quotes, `;`, `,`,
+spaces), and servers decode it.
 
 Objects in parameters, form bodies and multipart bodies may nest objects
 and maps (`additionalProperties`), written with brackets as `deepObject`
@@ -457,7 +472,8 @@ name. The `encoding` object is applied to multipart parts: a part that
 declares a content type must match `contentType` (a list of media types or
 ranges), and the `required` part headers must be present. A part header's
 value is parsed by its schema, as a header parameter's is (a primitive
-value, an array of them in the simple style, or JSON with `content`), and
+value, an array of them in the simple style, or with `content` in any of
+the media types above), and
 validated: a bad value is a 400 at the part
 (`body /report: part header "X-Checksum": must match the pattern ...`).
 A header of another schema is only checked to be present, with a warning.
@@ -624,8 +640,9 @@ return api.GetPet404Response{}, nil
 return api.CreatePet4XXJSONResponse{StatusCode: 409, Body: problem}, nil // ranges and default carry a StatusCode
 ```
 
-Response headers are fields of the response type; a header with JSON
-`content` holds its schema's type and is sent as compact JSON. Media types
+Response headers are fields of the response type; a header with
+`content` holds its schema's type and is written in its media type, as
+parameters are (JSON, text, a form or XML). Media types
 become
 separate types: `...JSONResponse`, `...XMLResponse`, `...TextResponse`, binary ones named
 after the subtype (`...PNGResponse`; `image/*` adds a `ContentType` field),
@@ -939,7 +956,9 @@ if (resp.status === 200) {
 
 Not supported by the TypeScript client yet; `generate ts-client` warns
 about each one it leaves out:
-- XML and positional multipart bodies and responses.
+- XML and positional multipart bodies and responses, parameters with XML
+  `content` (the operation is left out) and response headers with it (the
+  header is).
 - Headers of multipart parts, which `FormData` cannot set.
 - Webhooks and callbacks, which a server sends.
 - Cookie parameters in browsers, which do not let scripts set `Cookie`. Elsewhere they are sent, and in browsers the browser's own cookies are.

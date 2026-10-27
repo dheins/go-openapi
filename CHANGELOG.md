@@ -4,6 +4,19 @@
 
 ### Added
 
+- Parameters, response headers and multipart part headers with `content`
+  other than JSON: `text/plain` (a primitive value as its text, without
+  splitting at commas), `application/x-www-form-urlencoded` (an object as
+  form fields inside the value) and XML (an object as the document its
+  schema describes). Servers decode and validate them and write response
+  headers; Go clients send them and read response headers
+  (`TextContentParam`, `FormContentParam`, `XMLContentParam`,
+  `client.ContentHeader`); TypeScript clients send and read text and form
+  content, and leave out operations with XML parameters and response
+  headers with XML content, with a warning. Runtime helpers:
+  `server.DecodeTextContent`, `DecodeFormContent`, `DecodeXMLContent`,
+  `EncodeFormContent`, `EncodeXMLContent`, and `server.ObjectFields`,
+  moved from the client runtime.
 - Headers of JSON and text positional parts: when `prefixEncoding` or
   `itemEncoding` declares part headers, a body or response of positional
   parts is a `[]oapi.Part[T]`, each item with its part's `Header` and its
@@ -308,7 +321,9 @@
   `http.Cookie` drops the bytes a cookie value cannot hold, so
   `{"name":"Ann"}` arrived as `{name:Ann}`. Generated Go clients
   percent-encode those bytes (and `%`) in content cookies, and servers
-  decode them, taking a value that does not decode as it is.
+  decode them, taking a value that does not decode as it is. TypeScript
+  clients already percent-encoded them, so servers read their JSON
+  cookies too.
 - TypeScript clients read server-sent events as the format defines them:
   lines end with CRLF, LF or CR (a lone CR did not end one), events
   without data are kept, and an event the stream ends inside is dropped.
@@ -336,6 +351,9 @@
 
 ### Changed
 
+- The TypeScript runtime's parameter and header descriptors have
+  `content: "json" | "text" | "form"` instead of `json: true`. Regenerate
+  TypeScript clients.
 - A body or response of JSON or text positional parts whose encodings
   declare headers is a `[]oapi.Part[T]` instead of a `[]T`: use
   `item.Value` for the item.
