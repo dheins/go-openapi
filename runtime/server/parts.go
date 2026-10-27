@@ -71,6 +71,13 @@ func DecodePartsAs[T any](body []byte, contentType string, p Parts, dir oapi.Dir
 			continue
 		}
 		var item T
+		// An oapi.Part keeps the part's headers next to its value.
+		var dst any = &item
+		if mp, ok := dst.(oapi.MIMEPart); ok && p.Item != "file" {
+			var header *textproto.MIMEHeader
+			header, dst = mp.MIMEPart()
+			*header = part.Header
+		}
 		switch p.Item {
 		case "file":
 			file, ok := any(&item).(*oapi.File)
@@ -80,9 +87,9 @@ func DecodePartsAs[T any](body []byte, contentType string, p Parts, dir oapi.Dir
 			*file = oapi.File{Name: part.FileName(), ContentType: part.Header.Get("Content-Type"), Header: part.Header, Data: data}
 		case "text":
 			// Through JSON, so that enums and formats are checked as usual.
-			errs.Nested(path, oapi.DecodeValue(oapi.AppendString(nil, string(data)), &item, dir))
+			errs.Nested(path, oapi.DecodeValue(oapi.AppendString(nil, string(data)), dst, dir))
 		default:
-			errs.Nested(path, oapi.DecodeValue(data, &item, dir))
+			errs.Nested(path, oapi.DecodeValue(data, dst, dir))
 		}
 		items = append(items, item)
 	}
@@ -121,6 +128,14 @@ func EncodeParts[T any](items []T, contentType string, p Parts, dir oapi.Directi
 		h := textproto.MIMEHeader{}
 		var data []byte
 		var partType string
+		var src any = item
+		if mp, ok := any(&item).(oapi.MIMEPart); ok && p.Item != "file" {
+			var header *textproto.MIMEHeader
+			header, src = mp.MIMEPart()
+			for k, vs := range *header {
+				h[k] = vs
+			}
+		}
 		switch p.Item {
 		case "file":
 			file, ok := any(item).(oapi.File)
@@ -135,7 +150,7 @@ func EncodeParts[T any](items []T, contentType string, p Parts, dir oapi.Directi
 				partType = "application/octet-stream"
 			}
 		case "text":
-			text, err := oapi.EncodeValue(item, dir)
+			text, err := oapi.EncodeValue(src, dir)
 			if err != nil {
 				return nil, "", fmt.Errorf("part %d: %w", i, err)
 			}
@@ -146,7 +161,7 @@ func EncodeParts[T any](items []T, contentType string, p Parts, dir oapi.Directi
 			data, partType = []byte(s), "text/plain; charset=utf-8"
 		default:
 			var err error
-			if data, err = oapi.EncodeValue(item, dir); err != nil {
+			if data, err = oapi.EncodeValue(src, dir); err != nil {
 				return nil, "", fmt.Errorf("part %d: %w", i, err)
 			}
 			partType = "application/json"

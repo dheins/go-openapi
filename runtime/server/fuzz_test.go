@@ -83,8 +83,10 @@ func FuzzMultipart(f *testing.F) {
 		rules := Parts{Prefix: []Property{{ContentTypes: []string{"application/json"}, Headers: []PartHeader{seq}}}, Rest: Property{Headers: []PartHeader{tags}}}
 		rules.Item = "json"
 		_, _ = DecodeParts[upload](bytes.Clone(body), ct, rules)
+		_, _ = DecodeParts[oapi.Part[upload]](bytes.Clone(body), ct, rules)
 		rules.Item = "text"
 		_, _ = DecodeParts[string](bytes.Clone(body), ct, rules)
+		_, _ = DecodeParts[oapi.Part[string]](bytes.Clone(body), ct, rules)
 		rules.Item = "file"
 		_, _ = DecodeParts[oapi.File](bytes.Clone(body), ct, rules)
 	})

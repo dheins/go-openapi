@@ -599,7 +599,7 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 			case m.Kind == "parts" && m.Parts.Item == "file" && slices.ContainsFunc(append(slices.Clone(m.Parts.Prefix), m.Parts.Rest), func(p ir.ParamProperty) bool { return len(p.Headers) > 0 }):
 				_, sub, _ := strings.Cut(m.MediaType, "/")
 				parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
-				check = fmt.Sprintf("b.Body(server.CheckFileParts(%s, %s))", value, parts)
+				check = fmt.Sprintf("b.Body(server.CheckParts(%s, %s))", value, parts)
 			default:
 				continue
 			}

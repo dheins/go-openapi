@@ -12,7 +12,7 @@
   (`body /report: part header "X-Checksum": …`). Generated Go clients check
   the headers of file parts (`oapi.File.Header`) before sending, when
   requests are validated (`server.CheckFileHeaders`,
-  `server.CheckFileParts`).
+  `server.CheckParts`).
 - Links in generated Go code: a response variant gets a method per link of
   its response (`resp.GetPetLink(req)`) building the request of the
   operation the link leads to, by `operationId` or `operationRef`, from

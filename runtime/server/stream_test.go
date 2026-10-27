@@ -186,3 +186,51 @@ func TestCheckFileHeaders(t *testing.T) {
 		t.Errorf("unset files: %v", err)
 	}
 }
+
+func TestPartValues(t *testing.T) {
+	seq := []PartHeader{{Name: "X-Seq", Required: true, Check: func(vals []string) error {
+		if vals[0] != "1" {
+			return &oapi.ValidationError{Message: "must be 1"}
+		}
+		return nil
+	}}}
+	rules := Parts{Item: "json", Prefix: []Property{{Headers: seq}}}
+	items := []oapi.Part[streamPet]{
+		{Header: textproto.MIMEHeader{"X-Seq": {"1"}, "Content-Type": {"text/plain"}}, Value: streamPet{Name: "a"}},
+		{Value: streamPet{Name: "b"}},
+	}
+	if err := CheckParts(items, rules); err != nil {
+		t.Fatal(err)
+	}
+	// The part's headers are written with it, and read back next to its
+	// value; Content-Type is the encoding's, not the item's.
+	body, ct, err := EncodeParts(items, "multipart/mixed", rules, oapi.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeParts[oapi.Part[streamPet]](body, ct, rules)
+	if err != nil || len(got) != 2 || got[0].Value.Name != "a" || got[0].Header.Get("X-Seq") != "1" ||
+		got[0].Header.Get("Content-Type") != "application/json" || got[1].Value.Name != "b" {
+		t.Fatalf("decoded %+v, %v", got, err)
+	}
+	// Text items too.
+	text := Parts{Item: "text", Rest: Property{Headers: seq}}
+	body, ct, err = EncodeParts([]oapi.Part[string]{{Header: textproto.MIMEHeader{"X-Seq": {"1"}}, Value: "hi"}}, "multipart/mixed", text, oapi.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DecodeParts[oapi.Part[string]](body, ct, text); err != nil || len(got) != 1 || got[0].Value != "hi" || got[0].Header.Get("X-Seq") != "1" {
+		t.Fatalf("decoded %+v, %v", got, err)
+	}
+	// Bad and missing headers are found by position, before sending.
+	items[0].Header.Set("X-Seq", "2")
+	var errs oapi.ValidationErrors
+	if err := CheckParts(items, Parts{Item: "json", Rest: Property{Headers: seq}}); !errors.As(err, &errs) || len(errs) != 2 ||
+		errs[0].Path != "/0" || errs[0].Message != `part header "X-Seq": must be 1` || errs[1].Path != "/1" || errs[1].Message != `part header "X-Seq" is missing` {
+		t.Errorf("errors = %v", err)
+	}
+	// Items without headers have none to check.
+	if err := CheckParts([]streamPet{{}}, rules); err != nil {
+		t.Errorf("plain items: %v", err)
+	}
+}

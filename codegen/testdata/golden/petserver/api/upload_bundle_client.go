@@ -30,7 +30,7 @@ var uploadBundle200RelatedResponseReadParts = server.Parts{Item: "file"}
 func NewUploadBundleRequest(ctx context.Context, c *client.Config, req *UploadBundleRequest) (*http.Request, error) {
 	if c.ValidateRequests {
 		var b server.Binder
-		b.Body(server.CheckFileParts(req.Body, uploadBundleRequestRelatedParts))
+		b.Body(server.CheckParts(req.Body, uploadBundleRequestRelatedParts))
 		if b.Failed() {
 			return nil, &client.InvalidRequest{Problem: b.Problem()}
 		}
