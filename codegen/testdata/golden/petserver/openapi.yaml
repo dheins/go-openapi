@@ -293,12 +293,6 @@ paths:
               schema:
                 type: string
                 maxLength: 20
-        - name: X-Prefs
-          in: header
-          content:
-            application/xml:
-              schema:
-                $ref: "#/components/schemas/Prefs"
         - name: session
           in: cookie
           content:
@@ -325,6 +319,27 @@ paths:
                 application/x-www-form-urlencoded:
                   schema:
                     $ref: "#/components/schemas/Filter"
+            X-Prefs:
+              content:
+                application/xml:
+                  schema:
+                    $ref: "#/components/schemas/Prefs"
+  /prefs:
+    get:
+      operationId: echoPrefs
+      description: A header parameter serialized as XML.
+      parameters:
+        - name: X-Prefs
+          in: header
+          required: true
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Prefs"
+      responses:
+        "204":
+          description: The preferences, echoed.
+          headers:
             X-Prefs:
               content:
                 application/xml:

@@ -14,8 +14,6 @@ import (
 
 var getContentWhereProperties = server.Property{Type: "object", Properties: map[string]server.Property{"role": {Type: "string"}, "age": {Type: "integer"}, "tags": {Type: "string", Array: true}, "owner": {Type: "object", Properties: map[string]server.Property{"name": {Type: "string"}, "age": {Type: "integer"}}}, "labels": {Type: "object", Additional: &server.Property{Type: "integer"}}}}
 
-var getContentXPrefsXMLShape = &server.XMLNode{Name: "Prefs", Type: "object", Properties: []server.XMLProperty{{Name: "theme", Node: &server.XMLNode{Name: "theme", Type: "string"}}, {Name: "compact", Node: &server.XMLNode{Name: "compact", Type: "boolean"}}}}
-
 // HandleGetContent returns the HTTP handler of GetContent.
 //
 // It decodes and validates the
@@ -62,18 +60,6 @@ func HandleGetContent(c *server.Config, h Handler, sec SecurityHandler) http.Han
 					}
 				}
 				b.Param("header", "X-Note", errs.Err())
-			}
-		}
-		if raw, ok := server.ContentValue(r, nil, "header", "X-Prefs"); ok {
-			if v, err := server.DecodeXMLContent[model.Prefs](raw, getContentXPrefsXMLShape, oapi.Request); err != nil {
-				b.Param("header", "X-Prefs", err)
-			} else {
-				req.XPrefs = oapi.Some(v)
-				var errs oapi.ValidationErrors
-				if req.XPrefs.Set {
-					errs.Nested("", req.XPrefs.Value.Validate())
-				}
-				b.Param("header", "X-Prefs", errs.Err())
 			}
 		}
 		if raw, ok := server.ContentValue(r, nil, "cookie", "session"); ok {

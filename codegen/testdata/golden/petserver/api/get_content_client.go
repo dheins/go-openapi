@@ -12,8 +12,6 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var getContentRequestXPrefsXMLShape = &server.XMLNode{Name: "Prefs", Type: "object", Properties: []server.XMLProperty{{Name: "theme", Node: &server.XMLNode{Name: "theme", Type: "string"}}, {Name: "compact", Node: &server.XMLNode{Name: "compact", Type: "boolean"}}}}
-
 var getContent204ResponseReadXWhereProperties = server.Property{Type: "object", Properties: map[string]server.Property{"role": {Type: "string"}, "age": {Type: "integer"}, "tags": {Type: "string", Array: true}, "owner": {Type: "object", Properties: map[string]server.Property{"name": {Type: "string"}, "age": {Type: "integer"}}}, "labels": {Type: "object", Additional: &server.Property{Type: "integer"}}}}
 
 var getContent204ResponseReadXPrefsXMLShape = &server.XMLNode{Name: "Prefs", Type: "object", Properties: []server.XMLProperty{{Name: "theme", Node: &server.XMLNode{Name: "theme", Type: "string"}}, {Name: "compact", Node: &server.XMLNode{Name: "compact", Type: "boolean"}}}}
@@ -48,13 +46,6 @@ func NewGetContentRequest(ctx context.Context, c *client.Config, req *GetContent
 		}
 		{
 			var errs oapi.ValidationErrors
-			if req.XPrefs.Set {
-				errs.Nested("", req.XPrefs.Value.Validate())
-			}
-			b.Param("header", "X-Prefs", errs.Err())
-		}
-		{
-			var errs oapi.ValidationErrors
 			if req.Session.Set {
 				errs.Nested("", req.Session.Value.Validate())
 			}
@@ -72,9 +63,6 @@ func NewGetContentRequest(ctx context.Context, c *client.Config, req *GetContent
 	}
 	if req.XNote.Set {
 		r.TextContentParam("header", "X-Note", req.XNote.Value)
-	}
-	if req.XPrefs.Set {
-		r.XMLContentParam("header", "X-Prefs", req.XPrefs.Value, getContentRequestXPrefsXMLShape)
 	}
 	if req.Session.Set {
 		r.ContentParam("cookie", "session", req.Session.Value)

@@ -411,11 +411,15 @@ export interface ParamSpec {
   readonly style: string;
   readonly explode: boolean;
   readonly shape: "scalar" | "array" | "object";
-  /** The parameter is serialized as JSON (content), not in a style. */
-  readonly json?: boolean;
+  /** The parameter is serialized with a media type (content), not in a
+   * style: as JSON, as text, or as form fields. */
+  readonly content?: Content;
   readonly required?: boolean;
   readonly schema: Schema;
 }
+
+/** How a parameter or header with content is written. */
+export type Content = "json" | "text" | "form";
 
 export interface BodyMediaSpec {
   readonly mediaType: string;
@@ -440,7 +444,7 @@ export interface HeaderSpec {
   readonly name: string;
   readonly required?: boolean;
   readonly array?: boolean;
-  readonly json?: boolean;
+  readonly content?: Content;
   readonly schema: Schema;
 }
 
@@ -705,9 +709,24 @@ function simple(p: ParamSpec, v: unknown, item: (s: string) => string): string {
   return item(text(v));
 }
 
+// contentText writes the value of a parameter with content as its media
+// type has it.
+function contentText(content: Content, v: unknown): string {
+  switch (content) {
+    case "text":
+      return text(v);
+    case "form": {
+      const out: [string, string][] = [];
+      fields(v, "", out);
+      return new URLSearchParams(out).toString();
+    }
+  }
+  return JSON.stringify(v);
+}
+
 function pathValue(p: ParamSpec, v: unknown): string {
-  if (p.json) {
-    return unreserved(JSON.stringify(v));
+  if (p.content !== undefined) {
+    return unreserved(contentText(p.content, v));
   }
   switch (p.style) {
     case "label":
@@ -737,8 +756,8 @@ function pathValue(p: ParamSpec, v: unknown): string {
 }
 
 function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown): void {
-  if (p.json) {
-    q.append(p.name, JSON.stringify(v));
+  if (p.content !== undefined) {
+    q.append(p.name, contentText(p.content, v));
     return;
   }
   if (p.style === "deepObject") {
@@ -803,7 +822,7 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
         queryValue(b.query, p, v);
         break;
       case "querystring":
-        if (p.json) {
+        if (p.content === "json") {
           b.rawQuery = encodeURIComponent(JSON.stringify(v));
         } else {
           const out: [string, string][] = [];
@@ -814,11 +833,11 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
         }
         break;
       case "header":
-        b.headers.set(p.name, p.json ? JSON.stringify(v) : simple(p, v, quoteItem));
+        b.headers.set(p.name, p.content !== undefined ? contentText(p.content, v) : simple(p, v, quoteItem));
         break;
       case "cookie":
-        if (p.json) {
-          b.cookies.push(`${p.name}=${encodeURIComponent(JSON.stringify(v))}`);
+        if (p.content !== undefined) {
+          b.cookies.push(`${p.name}=${encodeURIComponent(contentText(p.content, v))}`);
         } else if (p.shape === "array" && Array.isArray(v) && p.explode) {
           for (const x of v) {
             b.cookies.push(`${p.name}=${encodeURIComponent(text(x))}`);
@@ -1219,24 +1238,76 @@ async function unexpected(resp: Response): Promise<UnexpectedResponseError> {
 }
 
 function headerValue(h: HeaderSpec, raw: string): unknown {
-  if (h.json) {
-    return JSON.parse(raw);
+  switch (h.content) {
+    case "json":
+      return JSON.parse(raw);
+    case "text":
+      return scalarValue(h.schema, raw);
+    case "form":
+      return formValue(h.schema, raw);
   }
-  const scalar = (s: string): unknown => {
-    let schema = h.schema;
-    while (schema.kind === "ref" || schema.kind === "nullable" || schema.kind === "array") {
-      schema = schema.kind === "ref" ? schema.to() : schema.kind === "nullable" ? schema.of : schema.items;
-    }
-    switch (schema.kind) {
-      case "integer":
-      case "number":
-        return Number(s);
-      case "boolean":
-        return s === "true" ? true : s === "false" ? false : s;
-    }
-    return s;
-  };
-  return h.array ? raw.split(",").map((s) => scalar(s.trim())) : scalar(raw.trim());
+  return h.array ? raw.split(",").map((s) => scalarValue(h.schema, s.trim())) : scalarValue(h.schema, raw.trim());
+}
+
+// scalarValue converts text to the primitive value schema describes (or
+// the items of an array schema): numbers and booleans by their text, and
+// anything else as the text, for validation to check.
+function scalarValue(schema: Schema, s: string): unknown {
+  while (schema.kind === "ref" || schema.kind === "nullable" || schema.kind === "array") {
+    schema = schema.kind === "ref" ? schema.to() : schema.kind === "nullable" ? schema.of : schema.items;
+  }
+  switch (schema.kind) {
+    case "integer":
+    case "number":
+      return Number(s);
+    case "boolean":
+      return s === "true" ? true : s === "false" ? false : s;
+  }
+  return s;
+}
+
+// formValue reads an object written as form fields, the inverse of
+// fields: a[b]=1 is a nested property, a repeated field an array, and
+// a[0][b]=1 an item of an array of objects. Values are converted by the
+// schema.
+function formValue(schema: Schema, raw: string): Values {
+  const out: Values = {};
+  for (const [name, value] of new URLSearchParams(raw)) {
+    const open = name.indexOf("[");
+    const path = open < 0 ? [name] : [name.slice(0, open), ...Array.from(name.slice(open).matchAll(/\[([^\]]*)\]/g), (m) => m[1] ?? "")];
+    setField(out, schema, path, value);
+  }
+  return out;
+}
+
+function setField(container: Values, schema: Schema, path: readonly string[], value: string): void {
+  let s = resolve(schema);
+  if (s.kind === "nullable") {
+    s = resolve(s.of);
+  }
+  const [key = "", ...rest] = path;
+  let sub: Schema = { kind: "any" };
+  if (s.kind === "object") {
+    const additional = s.additional === false || s.additional === undefined ? sub : s.additional;
+    sub = s.properties[key]?.schema ?? additional;
+  } else if (s.kind === "map") {
+    sub = s.values;
+  } else if (s.kind === "array") {
+    sub = s.items;
+  }
+  let inner = resolve(sub);
+  if (inner.kind === "nullable") {
+    inner = resolve(inner.of);
+  }
+  if (rest.length > 0) {
+    container[key] ??= inner.kind === "array" ? [] : {};
+    setField(container[key] as Values, inner, rest, value);
+  } else if (inner.kind === "array") {
+    container[key] ??= [];
+    (container[key] as unknown[]).push(scalarValue(inner.items, value));
+  } else {
+    container[key] = scalarValue(inner, value);
+  }
 }
 
 async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Promise<unknown> {

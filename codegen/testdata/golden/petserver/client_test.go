@@ -500,8 +500,8 @@ func TestClientContentParams(t *testing.T) {
 	s, c := newTestClient(t, petclient.Credentials{})
 	where := model.Filter{Role: "a&b=c", Tags: oapi.Some([]string{"x y", "z"}), Owner: oapi.Some(model.FilterOwner{Name: oapi.Some("Ann")})}
 	prefs := model.Prefs{Theme: oapi.Some(`"dark" & <light>`), Compact: oapi.Some(true)}
-	req := &api.GetContentRequest{Code: 12, Where: oapi.Some(where), XNote: oapi.Some("a, b"), XPrefs: oapi.Some(prefs),
-		Session: oapi.Some(model.Prefs{Theme: oapi.Some(`"q"; x`)}), Label: oapi.Some("hi, there; you")}
+	req := &api.GetContentRequest{Code: 12, Where: oapi.Some(where), XNote: oapi.Some("a, b"),
+		Session: oapi.Some(prefs), Label: oapi.Some("hi, there; you")}
 	resp, err := c.GetContent(ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -512,6 +512,10 @@ func TestClientContentParams(t *testing.T) {
 	// The response headers read back as the server wrote them.
 	if got := resp.(api.GetContent204Response); got.XCode.Value != 12 || !reflect.DeepEqual(got.XWhere.Value, where) || !reflect.DeepEqual(got.XPrefs.Value, prefs) {
 		t.Errorf("response = %+v", got)
+	}
+	echo, err := c.EchoPrefs(ctx, &api.EchoPrefsRequest{XPrefs: prefs})
+	if err != nil || !reflect.DeepEqual(echo.(api.EchoPrefs204Response).XPrefs.Value, prefs) {
+		t.Errorf("echo = %+v, %v", echo, err)
 	}
 	// Values are checked before sending.
 	var invalid *client.InvalidRequest

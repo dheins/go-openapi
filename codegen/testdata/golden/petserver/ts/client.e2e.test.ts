@@ -299,3 +299,12 @@ test("links", { skip }, async () => {
   const taken = await c.createPet({ body: { name: "Taken" } });
   await assert.rejects(c.followCreatePetGetPet(taken, req), /link GetPet: a 409 response has no such link/);
 });
+
+test("parameters and headers with content", { skip }, async () => {
+  const where: Filter = { role: "a&b=c", tags: ["x y", "z"], owner: { name: "Ann", age: 4 } };
+  const got = await client().getContent({ code: 12, where, xNote: "a, b", session: { theme: '"dark"; x', compact: true }, label: "hi, there; you" });
+  assert.equal(got.status, 204);
+  // Text and form headers are read back; the XML one is left out.
+  assert.deepEqual(got.headers, { xCode: 12, xWhere: where });
+  await rejects(client().getContent({ code: 0 }), InvalidRequestError);
+});

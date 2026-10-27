@@ -28,6 +28,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "getReports", Name: "GetReports", Method: "GET", Path: "/reports/{ids}"}, "/reports/{p0}", api.HandleGetReports(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "lookup", Name: "Lookup", Method: "GET", Path: "/lookup"}, "/lookup", api.HandleLookup(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getContent", Name: "GetContent", Method: "GET", Path: "/content/{code}"}, "/content/{p0}", api.HandleGetContent(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "echoPrefs", Name: "EchoPrefs", Method: "GET", Path: "/prefs"}, "/prefs", api.HandleEchoPrefs(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getPhoto", Name: "GetPhoto", Method: "GET", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleGetPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadPhoto", Name: "UploadPhoto", Method: "PUT", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleUploadPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadRecords", Name: "UploadRecords", Method: "POST", Path: "/pets/{petId}/records"}, "/pets/{p0}/records", api.HandleUploadRecords(cfg, h, sec))

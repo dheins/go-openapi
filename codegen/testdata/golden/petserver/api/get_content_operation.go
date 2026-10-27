@@ -20,8 +20,6 @@ type GetContentRequest struct {
 	Where oapi.Optional[model.Filter]
 	// XNote is the header parameter "X-Note".
 	XNote oapi.Optional[string]
-	// XPrefs is the header parameter "X-Prefs".
-	XPrefs oapi.Optional[model.Prefs]
 	// Session is the cookie parameter "session".
 	Session oapi.Optional[model.Prefs]
 	// Label is the cookie parameter "label".
