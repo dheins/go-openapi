@@ -435,6 +435,20 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   files in `oapi.File.Header`; other parts have no field for them.
 - *Not done*: see [features.md](../features.md).
 
+### M20 – Headers of JSON and text parts ✅
+- [x] `oapi.Part[T]`: an item of positional parts with its part's headers
+- [x] Bodies and responses of JSON or text parts whose encodings declare
+  headers generated as `[]oapi.Part[T]`, read, written and checked by
+  servers and Go clients
+
+**How it went**
+- *Only where needed*: items become Parts only when an encoding declares
+  headers, so other documents generate what they did; media types
+  sharing a body share its Parts.
+- *Its value in JSON*: a Part encodes as its value, so `uniqueItems` and
+  the item's own validation ignore the headers.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

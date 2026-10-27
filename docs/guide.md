@@ -604,10 +604,15 @@ the body is the parts themselves, a `[]oapi.File` with each part's headers
 (`Content-ID` and so on). `prefixEncoding` applies to the first parts and
 `itemEncoding` to the others: a part that declares a content type must
 match, and part headers must be present when required and valid when
-given, as above. Responses of these
+given, as above. Files carry their headers in `oapi.File.Header`; when
+an encoding declares headers for JSON or text items, the body is a
+`[]oapi.Part[X]` instead, each item with its part's `Header` and its
+`Value`, so a handler reads them and a client sends them. Responses of these
 types (`...MixedResponse`, `...RelatedResponse`) are written the same way,
 each part with the first content type its encoding names, else the file's
-own, `text/plain` or `application/json`.
+own, `text/plain` or `application/json`, and with the headers of its
+`oapi.File` or `oapi.Part`; with `WithResponseValidation`, those headers
+are checked as a client reading them checks them.
 
 ## Responses
 

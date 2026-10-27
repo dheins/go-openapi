@@ -71,10 +71,6 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 ## Clients
 
-- Required headers of positional parts whose items are not files
-  (`prefixEncoding` or `itemEncoding` headers on JSON parts): a generated
-  client has no field for them, so a server checking them rejects the
-  request. File parts carry theirs in `oapi.File.Header`. — later
 - Retries, pagination and caching helpers: left to `Doer` middleware
   (`client.WithMiddleware`). — not planned
 - TypeScript clients: full duplex, reading a streamed response while the
@@ -112,6 +108,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Headers of JSON and text positional parts, in `oapi.Part` items, read
+  and written by servers and Go clients. (07c14a1, d1e3bb2)
 - [x] Values of multipart part headers checked against their schemas, by
   servers and, for file parts, Go clients before sending. (16ac1cc,
   6526b20)
