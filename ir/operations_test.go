@@ -687,3 +687,48 @@ paths:
 		t.Errorf("no warning about encoding by name in:\n%s", all)
 	}
 }
+
+func TestPartValues(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /batch:
+    post:
+      operationId: batch
+      requestBody:
+        content:
+          multipart/mixed:
+            schema: {$ref: "#/components/schemas/Pets"}
+          multipart/related:
+            schema: {$ref: "#/components/schemas/Pets"}
+            itemEncoding: {headers: {X-Seq: {schema: {type: integer}}}}
+      responses:
+        "200":
+          description: ok
+          content:
+            multipart/mixed:
+              schema: {type: array, items: {type: string}}
+              itemEncoding: {headers: {X-Seq: {required: true, schema: {type: integer}}}}
+        "201":
+          description: ok
+          content:
+            multipart/mixed: {schema: {type: array, items: {type: string}}}
+components:
+  schemas:
+    Pets: {type: array, minItems: 1, items: {type: object, properties: {name: {type: string}}}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Batch")
+	// The media types share the body; one declares headers, so its items
+	// are Parts, and the checks of the named array are kept.
+	body := o.Body.Fields[0].Value
+	if len(o.Body.Fields) != 1 || body.Kind != Slice || body.Elem.Kind != Part || body.Elem.Elem.Type.Name != "PetsItem" || body.Checks.MinItems == nil {
+		t.Errorf("body = %+v", body)
+	}
+	// Text items too; without headers, items stay as they are.
+	if r := o.Responses[0]; r.Body.Elem.Kind != Part || r.Body.Elem.Elem.Name != "string" {
+		t.Errorf("200 = %+v", r.Body)
+	}
+	if r := o.Responses[1]; r.Body.Elem.Kind != Builtin {
+		t.Errorf("201 = %+v", r.Body)
+	}
+}

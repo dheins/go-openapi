@@ -843,6 +843,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field, Events: events}
 		if kind == "parts" {
 			media.Parts = b.parts(field.Value, m.Deref(), o.Name+"Part")
+			field.Value = partValues(field.Value, media.Parts)
 		}
 		if kind == "xml" {
 			node, why := b.xmlRoot(field.Value, schema)
@@ -1106,6 +1107,11 @@ type Parts struct {
 	Rest   ParamProperty
 }
 
+// HasHeaders reports whether an encoding of the parts declares headers.
+func (p *Parts) HasHeaders() bool {
+	return len(p.Rest.Headers) > 0 || slices.ContainsFunc(p.Prefix, func(e ParamProperty) bool { return len(e.Headers) > 0 })
+}
+
 // parts describes the parts of a body of type value, a slice, with the
 // positional encodings of m; hint names the types of their headers.
 func (b *builder) parts(value *Ref, m *oas.MediaType, hint string) *Parts {
@@ -1135,6 +1141,24 @@ func (b *builder) parts(value *Ref, m *oas.MediaType, hint string) *Parts {
 		b.warnAt(m, []string{"encoding"}, "encoding by name applies to multipart/form-data only; use prefixEncoding and itemEncoding for positional parts")
 	}
 	return p
+}
+
+// partValues returns the type of a body of positional parts, value, a
+// slice: a slice of Parts when JSON or text items have headers to carry,
+// which files hold themselves. Media types sharing the body share the
+// slice of Parts, which holds items without headers as well.
+func partValues(value *Ref, p *Parts) *Ref {
+	if p.Item == "file" || !p.HasHeaders() {
+		return value
+	}
+	slice := value
+	for slice.Kind == Named && (slice.Type.Kind == Defined || slice.Type.Kind == Alias) {
+		slice = slice.Type.Underlying
+	}
+	if slice.Elem.Kind == Part {
+		return value
+	}
+	return &Ref{Kind: Slice, Checks: slice.Checks, Elem: &Ref{Kind: Part, Elem: slice.Elem}}
 }
 
 // markFileParts records which properties of multipart request bodies hold
@@ -1313,6 +1337,7 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 		case "parts":
 			v.Body = b.bodyValue(kind, media.Schema, o.Name+statusName+"ResponseBody")
 			v.Parts = b.parts(v.Body, media, o.Name+statusName+"Part")
+			v.Body = partValues(v.Body, v.Parts)
 			_, sub, _ := strings.Cut(mt, "/")
 			suffix = GoName(sub)
 		case "text":

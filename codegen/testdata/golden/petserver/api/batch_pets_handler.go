@@ -48,13 +48,13 @@ func HandleBatchPets(c *server.Config, h Handler, sec SecurityHandler) http.Hand
 		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"multipart/mixed"}, true); ok {
 			switch mediaType {
 			case "multipart/mixed":
-				if v, err := server.DecodeParts[model.Pet](body, r.Header.Get("Content-Type"), batchPetsMixedParts); err != nil {
+				if v, err := server.DecodeParts[oapi.Part[model.Pet]](body, r.Header.Get("Content-Type"), batchPetsMixedParts); err != nil {
 					b.Body(err)
 				} else {
-					req.Body = []model.Pet(v)
+					req.Body = []oapi.Part[model.Pet](v)
 					var errs oapi.ValidationErrors
 					for i4, item4 := range req.Body {
-						errs.Nested(oapi.Index("", i4), item4.Validate())
+						errs.Nested(oapi.Index("", i4), item4.Value.Validate())
 					}
 					b.Body(errs.Err())
 				}

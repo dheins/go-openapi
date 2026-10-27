@@ -448,6 +448,13 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Pet"
+              itemEncoding:
+                contentType: application/json
+                headers:
+                  X-Stored:
+                    required: true
+                    schema:
+                      type: boolean
   /bundle:
     post:
       operationId: uploadBundle

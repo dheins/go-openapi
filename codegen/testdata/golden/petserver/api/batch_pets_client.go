@@ -36,7 +36,13 @@ var batchPetsRequestMixedParts = server.Parts{Item: "json", Prefix: []server.Pro
 	return errs.Err()
 }}}}}
 
-var batchPets200MixedResponseReadParts = server.Parts{Item: "json"}
+var batchPets200MixedResponseReadParts = server.Parts{Item: "json", Rest: server.Property{ContentTypes: []string{"application/json"}, Headers: []server.PartHeader{{Name: "X-Stored", Required: true, Check: func(vals []string) error {
+	_, err := server.ParseScalar[bool](vals)
+	if err != nil {
+		return err
+	}
+	return nil
+}}}}}
 
 // NewBatchPetsRequest builds the HTTP request of BatchPets, POST
 // /pets/batch, to send with c.
@@ -46,10 +52,11 @@ func NewBatchPetsRequest(ctx context.Context, c *client.Config, req *BatchPetsRe
 		{
 			var errs oapi.ValidationErrors
 			for i3, item3 := range req.Body {
-				errs.Nested(oapi.Index("", i3), item3.Validate())
+				errs.Nested(oapi.Index("", i3), item3.Value.Validate())
 			}
 			b.Body(errs.Err())
 		}
+		b.Body(server.CheckParts(req.Body, batchPetsRequestMixedParts))
 		if b.Failed() {
 			return nil, &client.InvalidRequest{Problem: b.Problem()}
 		}
@@ -73,15 +80,15 @@ func ReadBatchPetsResponse(c *client.Config, resp *http.Response) (BatchPetsResp
 		if err != nil {
 			return nil, err
 		}
-		items, err := client.DecodeParts[model.Pet](resp, body, batchPets200MixedResponseReadParts)
+		items, err := client.DecodeParts[oapi.Part[model.Pet]](resp, body, batchPets200MixedResponseReadParts)
 		if err != nil {
 			return nil, err
 		}
-		v.Body = []model.Pet(items)
+		v.Body = []oapi.Part[model.Pet](items)
 		if c.ValidateResponses {
 			var errs oapi.ValidationErrors
 			for i3, item3 := range v.Body {
-				errs.Nested(oapi.Index("", i3), item3.Validate())
+				errs.Nested(oapi.Index("", i3), item3.Value.Validate())
 			}
 			if err := client.Invalid(resp, errs.Err()); err != nil {
 				return nil, err

@@ -149,12 +149,24 @@ func CheckFileHeaders(v any, obj Property) error {
 	return errs.Err()
 }
 
-// CheckFileParts checks the headers of files, the parts of a multipart
-// body of positional parts, against the encodings of p, by position.
-func CheckFileParts(files []oapi.File, p Parts) error {
+// CheckParts checks the headers of items, the parts of a multipart body of
+// positional parts, against the encodings of p, by position: those of
+// files (oapi.File.Header) and of oapi.Part items. Other items carry no
+// headers to check.
+func CheckParts[T any](items []T, p Parts) error {
 	var errs oapi.ValidationErrors
-	for i, file := range files {
-		if msg := checkPart(file.Header, Property{Headers: p.encoding(i).Headers}); msg != "" {
+	for i, item := range items {
+		var header textproto.MIMEHeader
+		switch v := any(&item).(type) {
+		case *oapi.File:
+			header = v.Header
+		case oapi.MIMEPart:
+			h, _ := v.MIMEPart()
+			header = *h
+		default:
+			continue
+		}
+		if msg := checkPart(header, Property{Headers: p.encoding(i).Headers}); msg != "" {
 			errs.Add(oapi.Index("", i), msg)
 		}
 	}

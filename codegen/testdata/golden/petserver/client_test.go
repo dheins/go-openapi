@@ -301,13 +301,6 @@ func TestClientErrors(t *testing.T) {
 	_, err = c.GetPhoto(ctx, &api.GetPhotoRequest{PetID: 2})
 	unexpected(t, err, 500)
 
-	// Required part headers of items that are not files cannot be given,
-	// so the server rejects the parts.
-	_, err = c.BatchPets(ctx, &api.BatchPetsRequest{Body: []model.Pet{{Name: "Rex"}}})
-	if u := unexpected(t, err, 400); u.Problem == nil || len(u.Problem.Errors) != 1 || !strings.Contains(u.Problem.Errors[0].Detail, "X-Seq") {
-		t.Errorf("batch problem = %+v", u.Problem)
-	}
-
 	// Invalid requests are not sent, unless validation is off.
 	delete(s.seen, "ListPets")
 	_, err = c.ListPets(ctx, &api.ListPetsRequest{Limit: oapi.Some(int32(0))})
@@ -456,5 +449,42 @@ func TestClientPartHeaders(t *testing.T) {
 	_, err = lax.UploadRecords(ctx, report("AB!"))
 	if u := unexpected(t, err, 400); u.Problem == nil || len(u.Problem.Errors) != 1 || u.Problem.Errors[0].Pointer != "/report" {
 		t.Errorf("server-side bad checksum: %+v", u.Problem)
+	}
+
+	// JSON parts carry their headers in oapi.Part, both ways.
+	pets := func(seq string, names ...string) *api.BatchPetsRequest {
+		req := &api.BatchPetsRequest{}
+		for i, name := range names {
+			p := oapi.Part[model.Pet]{Value: model.Pet{Name: name}}
+			if i == 0 {
+				p.Header = textproto.MIMEHeader{"X-Seq": {seq}}
+			}
+			req.Body = append(req.Body, p)
+		}
+		return req
+	}
+	resp, err := c.BatchPets(ctx, pets("1", "Rex", "Tom"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.(api.BatchPets200MixedResponse).Body; len(got) != 2 || got[1].Value.Name != "Tom" || got[1].Header.Get("X-Stored") != "true" {
+		t.Errorf("stored = %+v", got)
+	}
+	if _, err := c.BatchPets(ctx, pets("0", "Rex")); !errors.As(err, &invalid) || len(invalid.Problem.Errors) != 1 ||
+		invalid.Problem.Errors[0].Pointer != "/0" || invalid.Problem.Errors[0].Detail != `part header "X-Seq": must be at least 1` {
+		t.Errorf("bad seq: %v", err)
+	}
+	if _, err := c.BatchPets(ctx, &api.BatchPetsRequest{Body: []oapi.Part[model.Pet]{{Value: model.Pet{Name: "Rex"}}}}); !errors.As(err, &invalid) ||
+		invalid.Problem.Errors[0].Detail != `part header "X-Seq" is missing` {
+		t.Errorf("no seq: %v", err)
+	}
+	_, err = lax.BatchPets(ctx, pets("0", "Rex"))
+	if u := unexpected(t, err, 400); u.Problem == nil || len(u.Problem.Errors) != 1 || u.Problem.Errors[0].Detail != `part header "X-Seq": must be at least 1` {
+		t.Errorf("server-side bad seq: %+v", u.Problem)
+	}
+	// A response part without its required header is invalid.
+	var invalidResp *client.InvalidResponse
+	if _, err := c.BatchPets(ctx, pets("1", "Unstored")); !errors.As(err, &invalidResp) {
+		t.Errorf("response part without its header: %v", err)
 	}
 }

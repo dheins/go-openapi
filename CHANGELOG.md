@@ -4,6 +4,14 @@
 
 ### Added
 
+- Headers of JSON and text positional parts: when `prefixEncoding` or
+  `itemEncoding` declares part headers, a body or response of positional
+  parts is a `[]oapi.Part[T]`, each item with its part's `Header` and its
+  `Value`. Servers read them and write them; Go clients send them, check
+  them before sending, and read them in responses. With response
+  validation on, servers check the part headers of their responses.
+  `server.CheckParts` checks the headers of `oapi.File` and `oapi.Part`
+  items.
 - The values of multipart part headers are checked, not only their
   presence: a header an `encoding`, `prefixEncoding` or `itemEncoding`
   declares is parsed by its schema (a primitive value, an array of them in
@@ -12,7 +20,7 @@
   (`body /report: part header "X-Checksum": …`). Generated Go clients check
   the headers of file parts (`oapi.File.Header`) before sending, when
   requests are validated (`server.CheckFileHeaders`,
-  `server.CheckFileParts`).
+  `server.CheckParts`).
 - Links in generated Go code: a response variant gets a method per link of
   its response (`resp.GetPetLink(req)`) building the request of the
   operation the link leads to, by `operationId` or `operationRef`, from
@@ -323,6 +331,9 @@
 
 ### Changed
 
+- A body or response of JSON or text positional parts whose encodings
+  declare headers is a `[]oapi.Part[T]` instead of a `[]T`: use
+  `item.Value` for the item.
 - `server.Property.Headers` is a `[]server.PartHeader` (name, whether it is
   required, and a function checking its value) instead of the names of the
   required headers. Regenerate code that declares multipart encodings.

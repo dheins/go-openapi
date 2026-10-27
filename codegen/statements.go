@@ -589,6 +589,10 @@ func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 	case ir.Pointer:
 		v.guarded(expr+" != nil", "(*"+expr+")", path, r.Elem, hint, depth)
 		return
+	case ir.Part:
+		// The part's headers are checked as it is read or written.
+		v.ref(expr+".Value", path, r.Elem, hint, depth)
+		return
 	case ir.Named:
 		if r.Type.Kind == ir.Alias {
 			v.ref(expr, path, r.Type.Underlying, hint, depth)
