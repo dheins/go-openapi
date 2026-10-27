@@ -11,9 +11,9 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var uploadPhotoIDParam = server.Param{Name: "id", Style: "simple", Explode: false, Shape: server.Scalar}
-
 var uploadPhotoRequestMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"photo": {Type: "file", ContentTypes: []string{"image/png", "image/jpeg"}, Headers: []server.PartHeader{{Name: "X-Checksum", Required: true}}}, "caption": {Type: "string"}}}
+
+var uploadPhotoIDParam = server.Param{Name: "id", Style: "simple", Explode: false, Shape: server.Scalar}
 
 // NewUploadPhotoRequest builds the HTTP request of UploadPhoto, POST
 // /pets/{id}/uploads, to send with c.
@@ -25,6 +25,7 @@ func NewUploadPhotoRequest(ctx context.Context, c *client.Config, req *UploadPho
 			errs.Nested("", req.Body.Validate())
 			b.Body(errs.Err())
 		}
+		b.Body(server.CheckFileHeaders(req.Body, uploadPhotoRequestMultipartProperties))
 		if b.Failed() {
 			return nil, &client.InvalidRequest{Problem: b.Problem()}
 		}

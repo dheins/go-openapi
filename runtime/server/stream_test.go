@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"slices"
 	"strings"
 	"testing"
@@ -153,5 +154,35 @@ func TestWriteTypedEvents(t *testing.T) {
 	}
 	if got := w.Body.String(); got != "event: pet\ndata: {\"name\":\"a\"}\n\n" {
 		t.Errorf("written %q", got)
+	}
+}
+
+func TestCheckFileHeaders(t *testing.T) {
+	type upload struct {
+		One  oapi.File                  `json:"one"`
+		Many oapi.Optional[[]oapi.File] `json:"many"`
+		None *oapi.File                 `json:"none"`
+	}
+	seq := []PartHeader{{Name: "X-Seq", Required: true, Check: func(vals []string) error {
+		if vals[0] != "1" {
+			return &oapi.ValidationError{Message: "must be 1"}
+		}
+		return nil
+	}}}
+	obj := Property{Type: "object", Properties: map[string]Property{
+		"one":  {Type: "file", Headers: seq},
+		"many": {Type: "file", Array: true, Headers: seq},
+		"none": {Type: "file", Headers: seq},
+	}}
+	good := oapi.File{Header: textproto.MIMEHeader{"X-Seq": {"1"}}}
+	v := upload{One: good, Many: oapi.Some([]oapi.File{good, {Header: textproto.MIMEHeader{"X-Seq": {"2"}}}, {}})}
+	var errs oapi.ValidationErrors
+	if err := CheckFileHeaders(v, obj); !errors.As(err, &errs) || len(errs) != 2 ||
+		errs[0].Path != "/many/1" || errs[0].Message != `part header "X-Seq": must be 1` || errs[1].Path != "/many/2" || errs[1].Message != `part header "X-Seq" is missing` {
+		t.Errorf("errors = %v", err)
+	}
+	// A file that is not set has no headers to check.
+	if err := CheckFileHeaders(&upload{One: good}, obj); err != nil {
+		t.Errorf("unset files: %v", err)
 	}
 }

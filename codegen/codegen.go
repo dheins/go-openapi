@@ -242,6 +242,9 @@ type fileGen struct {
 	gen      *generator
 	imports  map[string]string // path -> package name
 	varDecls []string
+	// declared are the variables declared, by hint and value, so that the
+	// same one is declared once.
+	declared map[[2]string]string
 	// patterns are the variables of the patterns of patternProperties,
 	// by type and pattern.
 	patterns map[[2]string]string
@@ -281,7 +284,14 @@ func (f *fileGen) imp(path, name string) string {
 // declareVar adds a package-level variable named after hint, unique
 // across all generated files, and returns its name.
 func (f *fileGen) declareVar(hint, init string) string {
+	if name, ok := f.declared[[2]string{hint, init}]; ok {
+		return name
+	}
+	if f.declared == nil {
+		f.declared = map[[2]string]string{}
+	}
 	name := hint
+	defer func() { f.declared[[2]string{hint, init}] = name }()
 	for i := 2; f.gen.vars[name]; i++ {
 		name = hint + strconv.Itoa(i)
 	}

@@ -11,7 +11,17 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var uploadBundleRelatedParts = server.Parts{Item: "file", Rest: server.Property{ContentTypes: []string{"image/*"}}}
+var uploadBundleRelatedParts = server.Parts{Item: "file", Rest: server.Property{ContentTypes: []string{"image/*"}, Headers: []server.PartHeader{{Name: "X-Order", Check: func(vals []string) error {
+	v, err := server.ParseScalar[int64](vals)
+	if err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	if v < 1 {
+		errs.Add("", "must be at least 1")
+	}
+	return errs.Err()
+}}}}}
 
 // HandleUploadBundle returns the HTTP handler of UploadBundle.
 //

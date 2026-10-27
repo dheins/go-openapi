@@ -9,7 +9,10 @@
   declares is parsed by its schema (a primitive value, an array of them in
   the simple style, or JSON with `content`) and validated, as header
   parameters are. A bad value is a 400 at the part
-  (`body /report: part header "X-Checksum": …`).
+  (`body /report: part header "X-Checksum": …`). Generated Go clients check
+  the headers of file parts (`oapi.File.Header`) before sending, when
+  requests are validated (`server.CheckFileHeaders`,
+  `server.CheckFileParts`).
 - Links in generated Go code: a response variant gets a method per link of
   its response (`resp.GetPetLink(req)`) building the request of the
   operation the link leads to, by `operationId` or `operationRef`, from

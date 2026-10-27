@@ -457,6 +457,11 @@ paths:
           multipart/related:
             itemEncoding:
               contentType: image/*
+              headers:
+                X-Order:
+                  schema:
+                    type: integer
+                    minimum: 1
       responses:
         "200":
           description: The images back.

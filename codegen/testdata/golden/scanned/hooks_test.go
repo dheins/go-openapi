@@ -139,9 +139,11 @@ func TestScannedMultipart(t *testing.T) {
 	if _, err := c.UploadPhoto(ctx, &api.UploadPhotoRequest{ID: 1, Body: model.Upload{Photo: gif}}); !errors.As(err, &unexpected) || unexpected.StatusCode != 400 {
 		t.Errorf("a GIF: %v", err)
 	}
+	// A missing part header is found before sending.
 	unsigned := photo
 	unsigned.Header = nil
-	if _, err := c.UploadPhoto(ctx, &api.UploadPhotoRequest{ID: 1, Body: model.Upload{Photo: unsigned}}); !errors.As(err, &unexpected) || unexpected.StatusCode != 400 {
+	var invalid *client.InvalidRequest
+	if _, err := c.UploadPhoto(ctx, &api.UploadPhotoRequest{ID: 1, Body: model.Upload{Photo: unsigned}}); !errors.As(err, &invalid) || invalid.Problem.Errors[0].Pointer != "/photo" {
 		t.Errorf("no checksum: %v", err)
 	}
 }
