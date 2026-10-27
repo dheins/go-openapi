@@ -33,15 +33,15 @@ func (r *Request) JSONBody(contentType string, v any) {
 // FormBody sets the body to v, an object, as form fields: nested objects
 // with brackets (a[b]=v), arrays as repeated fields.
 func (r *Request) FormBody(contentType string, v any) {
-	fields, err := objectFields(v, true)
+	fields, err := server.ObjectFields(v, true, oapi.Request)
 	if err != nil {
 		r.fail(fmt.Errorf("body: %w", err))
 		return
 	}
 	form := url.Values{}
 	for _, f := range fields {
-		for _, val := range f.values {
-			form.Add(f.name(), val)
+		for _, val := range f.Values {
+			form.Add(f.Name(), val)
 		}
 	}
 	r.body, r.contentType = []byte(form.Encode()), contentType
@@ -362,7 +362,7 @@ func writeValue(mw *multipart.Writer, name string, v reflect.Value, prop server.
 		}
 	}
 	for _, item := range items {
-		val := textOf(item)
+		val := server.FieldText(item)
 		ct := "text/plain; charset=utf-8"
 		if len(item) > 0 && item[0] == '{' {
 			ct = "application/json"

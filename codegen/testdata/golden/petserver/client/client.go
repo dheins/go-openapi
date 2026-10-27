@@ -266,6 +266,43 @@ func (c *Client) Lookup(ctx context.Context, req *api.LookupRequest) (api.Lookup
 	return api.ReadLookupResponse(c.cfg, resp)
 }
 
+// GetContent calls GET /content/{code}. A nil req sends no parameters or
+// body.
+//
+// Parameters and headers serialized with media types.
+func (c *Client) GetContent(ctx context.Context, req *api.GetContentRequest) (api.GetContentResponse, error) {
+	if req == nil {
+		req = &api.GetContentRequest{}
+	}
+	hreq, err := api.NewGetContentRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadGetContentResponse(c.cfg, resp)
+}
+
+// EchoPrefs calls GET /prefs. A nil req sends no parameters or body.
+//
+// A header parameter serialized as XML.
+func (c *Client) EchoPrefs(ctx context.Context, req *api.EchoPrefsRequest) (api.EchoPrefsResponse, error) {
+	if req == nil {
+		req = &api.EchoPrefsRequest{}
+	}
+	hreq, err := api.NewEchoPrefsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadEchoPrefsResponse(c.cfg, resp)
+}
+
 // GetPhoto calls GET /pets/{petId}/photo. A nil req sends no parameters or
 // body.
 func (c *Client) GetPhoto(ctx context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {

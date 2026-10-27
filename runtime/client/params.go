@@ -3,13 +3,11 @@ package client
 import (
 	"bytes"
 	"encoding/json"
-	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"reflect"
-	"strconv"
 	"strings"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -103,16 +101,16 @@ func pathValue(p server.Param, v any) (string, error) {
 		}
 		return strings.Join(items, ","), nil
 	}
-	fields, err := objectFields(v, false)
+	fields, err := server.ObjectFields(v, false, oapi.Request)
 	if err != nil {
 		return "", err
 	}
 	pairs := make([]string, 0, 2*len(fields))
 	var exploded []string
 	for _, f := range fields {
-		val := url.PathEscape(strings.Join(f.values, ","))
-		pairs = append(pairs, url.PathEscape(f.name()), val)
-		exploded = append(exploded, url.PathEscape(f.name())+"="+val)
+		val := url.PathEscape(strings.Join(f.Values, ","))
+		pairs = append(pairs, url.PathEscape(f.Name()), val)
+		exploded = append(exploded, url.PathEscape(f.Name())+"="+val)
 	}
 	switch p.Style {
 	case "label":
@@ -169,37 +167,37 @@ func queryValue(q url.Values, p server.Param, v any) error {
 		return nil
 	}
 	if p.Style == "deepObject" {
-		fields, err := objectFields(v, true)
+		fields, err := server.ObjectFields(v, true, oapi.Request)
 		if err != nil {
 			return err
 		}
 		for _, f := range fields {
 			key := p.Name
-			for _, seg := range f.path {
+			for _, seg := range f.Path {
 				key += "[" + seg + "]"
 			}
-			for _, val := range f.values {
+			for _, val := range f.Values {
 				q.Add(key, val)
 			}
 		}
 		return nil
 	}
-	fields, err := objectFields(v, false)
+	fields, err := server.ObjectFields(v, false, oapi.Request)
 	if err != nil {
 		return err
 	}
 	if p.Explode {
 		// Each property is a parameter of its own.
 		for _, f := range fields {
-			for _, val := range f.values {
-				q.Add(f.name(), val)
+			for _, val := range f.Values {
+				q.Add(f.Name(), val)
 			}
 		}
 		return nil
 	}
 	var pairs []string
 	for _, f := range fields {
-		pairs = append(pairs, f.name(), strings.Join(f.values, ","))
+		pairs = append(pairs, f.Name(), strings.Join(f.Values, ","))
 	}
 	q.Add(p.Name, strings.Join(pairs, ","))
 	return nil
@@ -230,17 +228,17 @@ func simpleValue(p server.Param, v any, item func(string) string) (string, error
 		}
 		return strings.Join(items, ","), err
 	}
-	fields, err := objectFields(v, false)
+	fields, err := server.ObjectFields(v, false, oapi.Request)
 	if err != nil {
 		return "", err
 	}
 	var parts []string
 	for _, f := range fields {
-		val := strings.Join(f.values, ",")
+		val := strings.Join(f.Values, ",")
 		if p.Explode {
-			parts = append(parts, item(f.name()+"="+val))
+			parts = append(parts, item(f.Name()+"="+val))
 		} else {
-			parts = append(parts, item(f.name()), item(val))
+			parts = append(parts, item(f.Name()), item(val))
 		}
 	}
 	return strings.Join(parts, ","), nil
@@ -273,13 +271,13 @@ func (r *Request) CookieParam(p server.Param, v any) {
 			add(p.Name, it)
 		}
 	case p.Shape == server.Object && p.Explode:
-		fields, err := objectFields(v, false)
+		fields, err := server.ObjectFields(v, false, oapi.Request)
 		if err != nil {
 			r.fail(fmt.Errorf("cookie %q: %w", p.Name, err))
 			return
 		}
 		for _, f := range fields {
-			add(f.name(), strings.Join(f.values, ","))
+			add(f.Name(), strings.Join(f.Values, ","))
 		}
 	default:
 		s, err := simpleValue(server.Param{Name: p.Name, Shape: p.Shape}, v, plainItem)
@@ -304,29 +302,83 @@ func (r *Request) ContentParam(in, name string, v any) {
 		r.fail(fmt.Errorf("%s parameter %q: %w", in, name, err))
 		return
 	}
+	r.setContent(in, name, compact.String())
+}
+
+// TextContentParam sets a parameter serialized as text/plain: v, a
+// primitive value, as its text.
+func (r *Request) TextContentParam(in, name string, v any) {
+	text, err := server.FormatScalar(v)
+	if err != nil {
+		r.fail(fmt.Errorf("%s parameter %q: %w", in, name, err))
+		return
+	}
+	r.setContent(in, name, text)
+}
+
+// FormContentParam sets a parameter serialized as
+// application/x-www-form-urlencoded: v, an object, as form fields.
+func (r *Request) FormContentParam(in, name string, v any) {
+	text, err := server.EncodeFormContent(v, oapi.Request)
+	if err != nil {
+		r.fail(fmt.Errorf("%s parameter %q: %w", in, name, err))
+		return
+	}
+	r.setContent(in, name, text)
+}
+
+// XMLContentParam sets a parameter serialized as the XML document root
+// describes.
+func (r *Request) XMLContentParam(in, name string, v any, root *server.XMLNode) {
+	text, err := server.EncodeXMLContent(v, root, oapi.Request)
+	if err != nil {
+		r.fail(fmt.Errorf("%s parameter %q: %w", in, name, err))
+		return
+	}
+	r.setContent(in, name, text)
+}
+
+// setContent sets the text of a parameter serialized with a media type.
+func (r *Request) setContent(in, name, text string) {
 	switch in {
 	case "path":
-		r.path.WriteString(url.PathEscape(compact.String()))
+		r.path.WriteString(url.PathEscape(text))
 	case "query":
-		r.query.Set(name, compact.String())
+		r.query.Set(name, text)
 	case "header":
-		r.header.Set(name, compact.String())
+		r.header.Set(name, text)
 	case "cookie":
-		r.cookies = append(r.cookies, &http.Cookie{Name: name, Value: compact.String(), Quoted: true})
+		r.cookies = append(r.cookies, &http.Cookie{Name: name, Value: cookieEscape(text)})
 	}
+}
+
+// cookieEscape percent-encodes the bytes a cookie value cannot hold
+// (quotes, separators, spaces, controls, non-ASCII) and %, which servers
+// decode.
+func cookieEscape(s string) string {
+	var b strings.Builder
+	for i := range len(s) {
+		c := s[i]
+		if c <= ' ' || c >= 0x7f || c == '"' || c == ',' || c == ';' || c == '\\' || c == '%' {
+			fmt.Fprintf(&b, "%%%02X", c)
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 // QueryFields sets the whole query string from v, an object serialized as
 // a form (a querystring parameter).
 func (r *Request) QueryFields(v any) {
-	fields, err := objectFields(v, true)
+	fields, err := server.ObjectFields(v, true, oapi.Request)
 	if err != nil {
 		r.fail(fmt.Errorf("querystring: %w", err))
 		return
 	}
 	for _, f := range fields {
-		for _, val := range f.values {
-			r.query.Add(f.name(), val)
+		for _, val := range f.Values {
+			r.query.Add(f.Name(), val)
 		}
 	}
 }
@@ -373,159 +425,4 @@ func arrayItems(v any) ([]string, error) {
 		items[i] = s
 	}
 	return items, nil
-}
-
-// field is a property of an object written as fields: its path (one name,
-// or more for a nested property) and its values (several for an array).
-type field struct {
-	path   []string
-	values []string
-}
-
-// name returns the field's name in a form: a[b][c].
-func (f field) name() string {
-	name := f.path[0]
-	for _, seg := range f.path[1:] {
-		name += "[" + seg + "]"
-	}
-	return name
-}
-
-// objectFields returns the properties of v, encoded as JSON in the request
-// direction, as fields in their order. With nested, objects inside are
-// fields of their own (a[b]); otherwise they, like arrays of objects, are
-// JSON text, which servers read as such.
-func objectFields(v any, nested bool) ([]field, error) {
-	data, err := oapi.EncodeRequest(v)
-	if err != nil {
-		return nil, err
-	}
-	dec := jsontext.NewDecoder(bytes.NewReader(data))
-	if tok, err := dec.ReadToken(); err != nil || tok.Kind() != '{' {
-		return nil, fmt.Errorf("expected an object, got %s", data)
-	}
-	var fields []field
-	if err := readFields(dec, nil, nested, &fields); err != nil {
-		return nil, err
-	}
-	return fields, nil
-}
-
-// readFields reads the members of an object, whose opening brace is read,
-// into fields under prefix.
-func readFields(dec *jsontext.Decoder, prefix []string, nested bool, fields *[]field) error {
-	for dec.PeekKind() != '}' {
-		tok, err := dec.ReadToken()
-		if err != nil {
-			return err
-		}
-		path := append(append([]string{}, prefix...), tok.String())
-		switch kind := dec.PeekKind(); {
-		case kind == '{' && nested:
-			if _, err := dec.ReadToken(); err != nil {
-				return err
-			}
-			if err := readFields(dec, path, nested, fields); err != nil {
-				return err
-			}
-		case kind == '[':
-			raw, err := dec.ReadValue()
-			if err != nil {
-				return err
-			}
-			if nested {
-				indexed, err := indexedFields(raw, path, fields)
-				if err != nil {
-					return err
-				}
-				if indexed {
-					continue
-				}
-			}
-			values, err := arrayValues(raw)
-			if err != nil {
-				return err
-			}
-			*fields = append(*fields, field{path: path, values: values})
-		case kind == 'n':
-			// An absent value: null is not sent as a field.
-			if err := dec.SkipValue(); err != nil {
-				return err
-			}
-		default:
-			raw, err := dec.ReadValue()
-			if err != nil {
-				return err
-			}
-			*fields = append(*fields, field{path: path, values: []string{textOf(raw)}})
-		}
-	}
-	_, err := dec.ReadToken()
-	return err
-}
-
-// indexedFields writes the JSON array raw at path with indices, if it
-// holds an object: a[0][b]=x for an object item, a[1]=y for a scalar one.
-// It reports whether it did; an array of scalars is left to the caller,
-// as a=x&a=y.
-func indexedFields(raw []byte, path []string, fields *[]field) (bool, error) {
-	var items []json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return false, err
-	}
-	hasObject := false
-	for _, it := range items {
-		if len(it) > 0 && it[0] == '{' {
-			hasObject = true
-			break
-		}
-	}
-	if !hasObject {
-		return false, nil
-	}
-	for i, it := range items {
-		at := append(append([]string{}, path...), strconv.Itoa(i))
-		switch {
-		case it[0] == '{':
-			dec := jsontext.NewDecoder(bytes.NewReader(it))
-			if _, err := dec.ReadToken(); err != nil {
-				return false, err
-			}
-			if err := readFields(dec, at, true, fields); err != nil {
-				return false, err
-			}
-		case string(it) == "null":
-			// An absent item, as null members are: the server reads the
-			// items that are given, in order.
-		default:
-			*fields = append(*fields, field{path: at, values: []string{textOf(it)}})
-		}
-	}
-	return true, nil
-}
-
-// arrayValues returns the items of a JSON array as text: scalars as
-// themselves, objects and arrays as JSON.
-func arrayValues(raw []byte) ([]string, error) {
-	var items []json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, err
-	}
-	values := make([]string, len(items))
-	for i, it := range items {
-		values[i] = textOf(it)
-	}
-	return values, nil
-}
-
-// textOf returns a JSON value as text: a string unquoted, anything else as
-// written.
-func textOf(raw []byte) string {
-	if len(raw) > 0 && raw[0] == '"' {
-		var s string
-		if json.Unmarshal(raw, &s) == nil {
-			return s
-		}
-	}
-	return string(raw)
 }

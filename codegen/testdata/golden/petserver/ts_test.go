@@ -54,6 +54,12 @@ func TestTypeScriptClient(t *testing.T) {
 	if got := s.seen["Lookup"].(*api.LookupRequest); !reflect.DeepEqual(got.Criteria.Value, filter) {
 		t.Errorf("lookup = %+v", got.Criteria.Value)
 	}
+	wantContent := &api.GetContentRequest{Code: 12,
+		Where: oapi.Some(model.Filter{Role: "a&b=c", Tags: oapi.Some([]string{"x y", "z"}), Owner: oapi.Some(model.FilterOwner{Name: oapi.Some("Ann"), Age: oapi.Some(int64(4))})}),
+		XNote: oapi.Some("a, b"), Session: oapi.Some(model.Prefs{Theme: oapi.Some(`"dark"; x`), Compact: oapi.Some(true)}), Label: oapi.Some("hi, there; you")}
+	if got := s.seen["GetContent"].(*api.GetContentRequest); !reflect.DeepEqual(got, wantContent) {
+		t.Errorf("content:\n got %+v\nwant %+v", got, wantContent)
+	}
 	// The last getPet is the link the TypeScript client followed, with
 	// the link's constant.
 	if got := s.seen["GetPet"].(*api.GetPetRequest); got.Session.Value != "s1" {

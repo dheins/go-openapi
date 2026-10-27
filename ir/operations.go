@@ -108,6 +108,11 @@ type Param struct {
 	Style   string
 	Explode bool
 	Content string
+	// ContentKind is how a value with Content is written: "json",
+	// "text" (a primitive value as its text), "form" (an object as form
+	// fields, with Properties) or "xml" (a document XML describes).
+	ContentKind string
+	XML         *XMLNode
 	// Array and Object give the shape of the value; an object has
 	// Properties, and Additional gives the type of any others. Shape
 	// names the object's shape when a property inside refers to it.
@@ -254,10 +259,15 @@ type Header struct {
 	Required bool
 	Array    bool
 	// Content is the media type a header with content is serialized
-	// with (JSON), or "" for a header in the simple style.
-	Content string
-	Elem    *Ref
-	Type    *Ref
+	// with, or "" for a header in the simple style; ContentKind is how,
+	// as for a Param, with Fields the object of a form and XML the
+	// document of XML.
+	Content     string
+	ContentKind string
+	Fields      *ParamProperty
+	XML         *XMLNode
+	Elem        *Ref
+	Type        *Ref
 }
 
 // reservedServerNames are exported identifiers the generated server
@@ -477,16 +487,27 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 			schema = m.Deref().Schema
 			break
 		}
-		formQuery := p.In == "querystring" && param.Content == "application/x-www-form-urlencoded"
-		if !isJSONMediaType(param.Content) && !formQuery {
+		param.ContentKind = contentKind(param.Content)
+		if param.ContentKind == "" || p.In == "querystring" && param.ContentKind != "json" && param.ContentKind != "form" {
 			return nil, fmt.Sprintf("parameter %q has content of type %q, which is not supported yet", p.Name, param.Content)
 		}
 		ref = stripNullable(b.use(schema, hint, nil))
 		param.Elem = ref
-		if formQuery {
-			if !b.objectParam(param, ref) {
-				return nil, fmt.Sprintf("querystring parameter %q must be an object of primitive values, arrays of them or objects of them", p.Name)
+		switch param.ContentKind {
+		case "text":
+			if !isScalar(ref) {
+				return nil, fmt.Sprintf("parameter %q has content of type %q, which holds a primitive value only", p.Name, param.Content)
 			}
+		case "form":
+			if !b.objectParam(param, ref) {
+				return nil, fmt.Sprintf("parameter %q has content of type %q, which must be an object of primitive values, arrays of them or objects of them", p.Name, param.Content)
+			}
+		case "xml":
+			node, why := b.xmlRoot(ref, schema)
+			if why != "" {
+				return nil, fmt.Sprintf("parameter %q has content of type %q: %s", p.Name, param.Content, why)
+			}
+			param.XML = node
 		}
 	} else {
 		param.Style = p.Style
@@ -1413,13 +1434,33 @@ func (b *builder) typedHeader(name string, h *oas.Header, hint string) (*Header,
 		header.Content, schema = strings.ToLower(mt), m.Deref().Schema
 		break
 	}
-	if header.Content != "" && !isJSONMediaType(header.Content) {
-		return nil, fmt.Sprintf("with content of type %s is not supported yet", header.Content)
+	if header.Content != "" {
+		if header.ContentKind = contentKind(header.Content); header.ContentKind == "" {
+			return nil, fmt.Sprintf("with content of type %s is not supported yet", header.Content)
+		}
 	}
 	ref := stripNullable(b.use(schema, hint, nil))
+	switch header.ContentKind {
+	case "text":
+		if !isScalar(ref) {
+			return nil, fmt.Sprintf("with content of type %s holds a primitive value only", header.Content)
+		}
+	case "form":
+		obj, ok := objectProperties(ref, false)
+		if !ok {
+			return nil, fmt.Sprintf("with content of type %s must be an object of primitive values, arrays of them or objects of them", header.Content)
+		}
+		header.Fields = &obj
+	case "xml":
+		node, why := b.xmlRoot(ref, schema)
+		if why != "" {
+			return nil, fmt.Sprintf("with content of type %s: %s", header.Content, why)
+		}
+		header.XML = node
+	}
 	switch {
 	case header.Content != "":
-		// Any value can be written as JSON.
+		// The value is written as a whole.
 		header.Elem = ref
 		header.Type = ref
 	case isScalar(ref):
@@ -1433,6 +1474,16 @@ func (b *builder) typedHeader(name string, h *oas.Header, hint string) (*Header,
 		return nil, "is not a primitive value or an array of them"
 	}
 	return header, ""
+}
+
+// contentKind classifies the media type of a parameter or header with
+// content: json, text, form or xml, or "" for one that cannot be written.
+func contentKind(mt string) string {
+	switch kind := mediaKind(mt); kind {
+	case "json", "text", "form", "xml":
+		return kind
+	}
+	return ""
 }
 
 // isJSONMediaType reports whether a content key is JSON: application/json

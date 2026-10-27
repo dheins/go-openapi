@@ -425,6 +425,12 @@ func TestClientPartHeaders(t *testing.T) {
 		invalid.Problem.Errors[0].Pointer != "/report" || !strings.Contains(invalid.Problem.Errors[0].Detail, `part header "X-Checksum": must match the pattern`) {
 		t.Errorf("bad checksum: %v", err)
 	}
+	// A header with text content is taken whole.
+	labelled := report("abc")
+	labelled.Body.Report.Header.Set("X-Label", "a, b, c")
+	if _, err := c.UploadRecords(ctx, labelled); !errors.As(err, &invalid) || invalid.Problem.Errors[0].Detail != `part header "X-Label": length must be at most 5` {
+		t.Errorf("long label: %v", err)
+	}
 	missing := report("abc")
 	missing.Body.Report.Header = nil
 	if _, err := c.UploadRecords(ctx, missing); !errors.As(err, &invalid) || invalid.Problem.Errors[0].Detail != `part header "X-Checksum" is missing` {
@@ -486,5 +492,34 @@ func TestClientPartHeaders(t *testing.T) {
 	var invalidResp *client.InvalidResponse
 	if _, err := c.BatchPets(ctx, pets("1", "Unstored")); !errors.As(err, &invalidResp) {
 		t.Errorf("response part without its header: %v", err)
+	}
+}
+
+func TestClientContentParams(t *testing.T) {
+	ctx := context.Background()
+	s, c := newTestClient(t, petclient.Credentials{})
+	where := model.Filter{Role: "a&b=c", Tags: oapi.Some([]string{"x y", "z"}), Owner: oapi.Some(model.FilterOwner{Name: oapi.Some("Ann")})}
+	prefs := model.Prefs{Theme: oapi.Some(`"dark" & <light>`), Compact: oapi.Some(true)}
+	req := &api.GetContentRequest{Code: 12, Where: oapi.Some(where), XNote: oapi.Some("a, b"),
+		Session: oapi.Some(prefs), Label: oapi.Some("hi, there; you")}
+	resp, err := c.GetContent(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.seen["GetContent"].(*api.GetContentRequest); !reflect.DeepEqual(got, req) {
+		t.Errorf("sent %+v\ngot  %+v", req, got)
+	}
+	// The response headers read back as the server wrote them.
+	if got := resp.(api.GetContent204Response); got.XCode.Value != 12 || !reflect.DeepEqual(got.XWhere.Value, where) || !reflect.DeepEqual(got.XPrefs.Value, prefs) {
+		t.Errorf("response = %+v", got)
+	}
+	echo, err := c.EchoPrefs(ctx, &api.EchoPrefsRequest{XPrefs: prefs})
+	if err != nil || !reflect.DeepEqual(echo.(api.EchoPrefs204Response).XPrefs.Value, prefs) {
+		t.Errorf("echo = %+v, %v", echo, err)
+	}
+	// Values are checked before sending.
+	var invalid *client.InvalidRequest
+	if _, err := c.GetContent(ctx, &api.GetContentRequest{Code: 0}); !errors.As(err, &invalid) || invalid.Problem.Errors[0].Parameter != "code" {
+		t.Errorf("invalid code: %v", err)
 	}
 }

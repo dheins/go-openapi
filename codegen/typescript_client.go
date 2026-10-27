@@ -280,9 +280,9 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 			}
 			fields = append(fields, "events: AsyncIterable<"+ev+">")
 		}
-		if len(r.Headers) > 0 {
+		if headers := tsHeaders(r); len(headers) > 0 {
 			var hs []string
-			for _, h := range r.Headers {
+			for _, h := range headers {
 				q := "?"
 				if h.Required {
 					q = ""
@@ -316,6 +316,19 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		}
 		g.warnings = append(g.warnings, fmt.Sprintf("%s: the TypeScript client cannot send %s bodies yet", o.Name, strings.Join(left, ", ")))
 	}
+	for _, p := range o.Params {
+		if p.ContentKind == "xml" {
+			g.warnings = append(g.warnings, fmt.Sprintf("%s: the TypeScript client cannot send parameters with XML content yet (%s); the operation is left out", o.Name, p.Name))
+			return "", false
+		}
+	}
+	for _, r := range o.Responses {
+		for _, h := range r.Headers {
+			if h.ContentKind == "xml" {
+				g.warnings = append(g.warnings, fmt.Sprintf("%s: the TypeScript client cannot read headers with XML content yet; header %s of response %s is left out", o.Name, h.Name, r.Status))
+			}
+		}
+	}
 	if responses := tsResponses(o); len(responses) < len(o.Responses) {
 		for _, r := range o.Responses {
 			if !slices.Contains(tsResponseKinds, r.Kind) {
@@ -336,8 +349,8 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		}
 		s := fmt.Sprintf("{ key: %s, name: %s, in: %q, style: %s, explode: %t, shape: %q",
 			jsString(keys[p]), jsString(p.Name), p.In, jsString(p.Style), p.Explode, shape)
-		if p.Content != "" && !(p.In == "querystring" && p.Object) {
-			s += ", json: true"
+		if p.Content != "" {
+			s += fmt.Sprintf(", content: %q", p.ContentKind)
 		}
 		if p.Required && p.Default == "" {
 			s += ", required: true"
@@ -387,10 +400,10 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		if perStatus[r.Status] > 1 {
 			s += ", withContentType: true"
 		}
-		if len(r.Headers) > 0 {
+		if headers := tsHeaders(r); len(headers) > 0 {
 			headerKeys := headerKeys(r)
 			var hs []string
-			for _, h := range r.Headers {
+			for _, h := range headers {
 				hdr := fmt.Sprintf("{ key: %s, name: %s", jsString(headerKeys[h]), jsString(h.Name))
 				if h.Required {
 					hdr += ", required: true"
@@ -399,7 +412,7 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 					hdr += ", array: true"
 				}
 				if h.Content != "" {
-					hdr += ", json: true"
+					hdr += fmt.Sprintf(", content: %q", h.ContentKind)
 				}
 				hs = append(hs, hdr+", schema: "+g.schema(h.Type)+" }")
 			}
@@ -443,6 +456,12 @@ func paramKeys(o *ir.Operation) map[*ir.Param]string {
 		keys[p] = uniqueKey(camelName(p.Name), taken)
 	}
 	return keys
+}
+
+// tsHeaders returns the headers of r the TypeScript runtime reads: not
+// those with XML content.
+func tsHeaders(r *ir.Response) []*ir.Header {
+	return slices.DeleteFunc(slices.Clone(r.Headers), func(h *ir.Header) bool { return h.ContentKind == "xml" })
 }
 
 // headerKeys returns the properties of the headers of r, as paramKeys.

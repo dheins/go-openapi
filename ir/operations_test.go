@@ -732,3 +732,60 @@ components:
 		t.Errorf("201 = %+v", r.Body)
 	}
 }
+
+func TestContentKinds(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /ok:
+    get:
+      operationId: ok
+      parameters:
+        - {name: n, in: query, content: {text/plain: {schema: {type: integer}}}}
+        - {name: f, in: header, content: {application/x-www-form-urlencoded: {schema: {type: object, properties: {a: {type: string}}}}}}
+        - {name: x, in: cookie, content: {application/xml: {schema: {type: object, properties: {a: {type: string}}}}}}
+      responses:
+        "204":
+          description: ok
+          headers:
+            X-T: {content: {text/csv: {schema: {type: string}}}}
+  /text:
+    get:
+      operationId: text
+      parameters:
+        - {name: t, in: query, content: {text/plain: {schema: {type: object}}}}
+      responses: {"204": {description: ok}}
+  /form:
+    get:
+      operationId: form
+      parameters:
+        - {name: f, in: query, content: {application/x-www-form-urlencoded: {schema: {type: string}}}}
+      responses: {"204": {description: ok}}
+  /qs:
+    get:
+      operationId: qs
+      parameters:
+        - {name: q, in: querystring, content: {text/plain: {schema: {type: string}}}}
+      responses: {"204": {description: ok}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Ok")
+	var kinds []string
+	for _, p := range o.Params {
+		kinds = append(kinds, p.Name+"="+p.ContentKind)
+	}
+	if got := strings.Join(kinds, " "); got != "n=text f=form x=xml" || o.Params[1].Properties == nil || o.Params[2].XML == nil {
+		t.Errorf("params = %s", got)
+	}
+	if h := o.Responses[0].Headers[0]; h.ContentKind != "text" {
+		t.Errorf("header = %+v", h)
+	}
+	for name, want := range map[string]string{
+		"Text": `parameter "t" has content of type "text/plain", which holds a primitive value only`,
+		"Form": `parameter "f" has content of type "application/x-www-form-urlencoded", which must be an object`,
+		"Qs":   `parameter "q" has content of type "text/plain", which is not supported yet`,
+	} {
+		if o := operationNamed(t, m, name); !strings.Contains(o.Unsupported, want) {
+			t.Errorf("%s: unsupported = %q", name, o.Unsupported)
+		}
+	}
+}

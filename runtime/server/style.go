@@ -271,6 +271,42 @@ func DecodeContent[T any](raw string) (T, error) {
 	return v, err
 }
 
+// DecodeTextContent decodes a parameter or header serialized as
+// text/plain: its text as a whole, without splitting it at commas.
+func DecodeTextContent[T any](raw string) (T, error) {
+	return ParseScalar[T]([]string{raw})
+}
+
+// DecodeFormContent decodes a parameter or header serialized as
+// application/x-www-form-urlencoded, an object written as form fields
+// (a=1&b=2), in direction dir: oapi.Response for a client reading a
+// response header.
+func DecodeFormContent[T any](raw string, obj Property, dir oapi.Direction) (T, error) {
+	var v T
+	fields, err := url.ParseQuery(raw)
+	if err != nil {
+		return v, &oapi.ValidationError{Message: "invalid form: " + err.Error()}
+	}
+	data, err := ObjectJSON(fields, obj)
+	if err != nil {
+		return v, err
+	}
+	err = oapi.DecodeValue(data, &v, dir)
+	return v, err
+}
+
+// DecodeXMLContent decodes a parameter or header serialized as an XML
+// document root describes, in direction dir.
+func DecodeXMLContent[T any](raw string, root *XMLNode, dir oapi.Direction) (T, error) {
+	var v T
+	data, err := XMLToJSON([]byte(raw), root)
+	if err != nil {
+		return v, err
+	}
+	err = oapi.DecodeValue(data, &v, dir)
+	return v, err
+}
+
 // ContentValue returns the text of a query, header or cookie parameter
 // serialized with a media type, and whether it is present.
 func ContentValue(r *http.Request, query url.Values, in, name string) (string, bool) {
@@ -285,6 +321,11 @@ func ContentValue(r *http.Request, query url.Values, in, name string) (string, b
 		}
 	case "cookie":
 		if c, err := r.Cookie(name); err == nil {
+			// Clients percent-encode what a cookie cannot hold; a value
+			// that does not decode is taken as it is.
+			if v, err := url.PathUnescape(c.Value); err == nil {
+				return v, true
+			}
 			return c.Value, true
 		}
 	}

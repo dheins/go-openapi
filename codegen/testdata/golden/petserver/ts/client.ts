@@ -36,7 +36,7 @@ const listPetsSpec: OperationSpec = {
   method: "GET",
   path: "/pets",
   params: [{ key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "tags", name: "tags", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "xRequestID", name: "X-Request-ID", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string", format: "uuid" } }, { key: "sort", name: "sort", in: "query", style: "form", explode: true, shape: "scalar", schema: $ref(() => $m.ListPetsSortSchema) }],
-  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: $ref(() => $m.PetSchema) }, headers: [{ key: "xNext", name: "X-Next", schema: { kind: "string" } }, { key: "xTotal", name: "X-Total", required: true, schema: { kind: "integer" } }, { key: "xPage", name: "X-Page", json: true, schema: $ref(() => $m.ListPets200XPageSchema) }] }, { status: "default", mediaType: "application/json", kind: "json", schema: $ref(() => $m.ErrorSchema) }],
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: $ref(() => $m.PetSchema) }, headers: [{ key: "xNext", name: "X-Next", schema: { kind: "string" } }, { key: "xTotal", name: "X-Total", required: true, schema: { kind: "integer" } }, { key: "xPage", name: "X-Page", content: "json", schema: $ref(() => $m.ListPets200XPageSchema) }] }, { status: "default", mediaType: "application/json", kind: "json", schema: $ref(() => $m.ErrorSchema) }],
 };
 
 const followListPetsAllLink: LinkSpec = { name: "All", responses: [{ status: "200" }], values: [{ key: "limit", expression: "$response.header.X-Total", from: "responseHeader", source: "xTotal" }, { key: "tags", expression: "$request.query.tags", from: "request", source: "tags" }] };
@@ -168,7 +168,7 @@ export type GetReportsResponse =
 const getReportsSpec: OperationSpec = {
   method: "GET",
   path: "/reports/{ids}",
-  params: [{ key: "ids", name: "ids", in: "path", style: "matrix", explode: true, shape: "array", required: true, schema: { kind: "array", items: { kind: "integer" } } }, { key: "filter", name: "filter", in: "query", style: "deepObject", explode: true, shape: "object", schema: $ref(() => $m.FilterSchema) }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "q", name: "q", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "string" } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer" } }, { key: "xMeta", name: "X-Meta", in: "header", style: "", explode: false, shape: "scalar", json: true, schema: $ref(() => $m.FilterSchema) }, { key: "prefs", name: "prefs", in: "cookie", style: "form", explode: true, shape: "object", schema: $ref(() => $m.PrefsSchema) }],
+  params: [{ key: "ids", name: "ids", in: "path", style: "matrix", explode: true, shape: "array", required: true, schema: { kind: "array", items: { kind: "integer" } } }, { key: "filter", name: "filter", in: "query", style: "deepObject", explode: true, shape: "object", schema: $ref(() => $m.FilterSchema) }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "q", name: "q", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "string" } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer" } }, { key: "xMeta", name: "X-Meta", in: "header", style: "", explode: false, shape: "scalar", content: "json", schema: $ref(() => $m.FilterSchema) }, { key: "prefs", name: "prefs", in: "cookie", style: "form", explode: true, shape: "object", schema: $ref(() => $m.PrefsSchema) }],
   responses: [{ status: "204" }],
 };
 
@@ -184,8 +184,28 @@ export type LookupResponse =
 const lookupSpec: OperationSpec = {
   method: "GET",
   path: "/lookup",
-  params: [{ key: "criteria", name: "criteria", in: "querystring", style: "", explode: false, shape: "object", schema: $ref(() => $m.FilterSchema) }],
+  params: [{ key: "criteria", name: "criteria", in: "querystring", style: "", explode: false, shape: "object", content: "form", schema: $ref(() => $m.FilterSchema) }],
   responses: [{ status: "204" }],
+};
+
+/** The inputs of getContent. */
+export interface GetContentRequest {
+  code: number;
+  where?: $m.Filter;
+  xNote?: string;
+  session?: $m.Prefs;
+  label?: string;
+}
+
+/** The responses of getContent. */
+export type GetContentResponse =
+  | { status: 204; headers: { xCode?: number; xWhere?: $m.Filter } };
+
+const getContentSpec: OperationSpec = {
+  method: "GET",
+  path: "/content/{code}",
+  params: [{ key: "code", name: "code", in: "path", style: "", explode: false, shape: "scalar", content: "text", required: true, schema: { kind: "integer", minimum: 1 } }, { key: "where", name: "where", in: "query", style: "", explode: false, shape: "object", content: "form", schema: $ref(() => $m.FilterSchema) }, { key: "xNote", name: "X-Note", in: "header", style: "", explode: false, shape: "scalar", content: "text", schema: { kind: "string", maxLength: 20 } }, { key: "session", name: "session", in: "cookie", style: "", explode: false, shape: "scalar", content: "json", schema: $ref(() => $m.PrefsSchema) }, { key: "label", name: "label", in: "cookie", style: "", explode: false, shape: "scalar", content: "text", schema: { kind: "string" } }],
+  responses: [{ status: "204", headers: [{ key: "xCode", name: "X-Code", content: "text", schema: { kind: "integer" } }, { key: "xWhere", name: "X-Where", content: "form", schema: $ref(() => $m.FilterSchema) }] }],
 };
 
 /** The inputs of getPhoto. */
@@ -668,6 +688,15 @@ export class Client {
   /** GET /lookup. */
   lookup(req: LookupRequest = {}, call?: CallOptions): Promise<LookupResponse> {
     return send(this.#cfg, lookupSpec, req, call) as Promise<LookupResponse>;
+  }
+
+  /**
+   * GET /content/{code}.
+   *
+   * Parameters and headers serialized with media types.
+   */
+  getContent(req: GetContentRequest, call?: CallOptions): Promise<GetContentResponse> {
+    return send(this.#cfg, getContentSpec, req, call) as Promise<GetContentResponse>;
   }
 
   /** GET /pets/{petId}/photo. */
