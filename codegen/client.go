@@ -588,7 +588,8 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 		for _, fd := range o.Body.Fields {
 			add("req."+fd.Name, fd.Type, "", "b.Body(errs.Err())")
 		}
-		// The headers of file parts, which carry them in oapi.File.Header.
+		// The headers of parts: files carry them in oapi.File.Header, and
+		// other items of positional parts in oapi.Part.Header.
 		for _, m := range o.Body.Media {
 			var check string
 			cond, value := present("req."+m.Field.Name, m.Field.Type)
@@ -596,7 +597,7 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 			case m.Kind == "multipart" && partsHaveHeaders(m.Properties):
 				props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", f.objectProperty(m.Properties, m.Additional, m.Shape))
 				check = fmt.Sprintf("b.Body(server.CheckFileHeaders(%s, %s))", value, props)
-			case m.Kind == "parts" && m.Parts.Item == "file" && slices.ContainsFunc(append(slices.Clone(m.Parts.Prefix), m.Parts.Rest), func(p ir.ParamProperty) bool { return len(p.Headers) > 0 }):
+			case m.Kind == "parts" && m.Parts.HasHeaders():
 				_, sub, _ := strings.Cut(m.MediaType, "/")
 				parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
 				check = fmt.Sprintf("b.Body(server.CheckParts(%s, %s))", value, parts)

@@ -252,7 +252,7 @@ func (g *tsGen) tsType(r *ir.Ref) string {
 		return elem + "[]"
 	case ir.Map:
 		return "{ [key: string]: " + g.tsType(r.Elem) + " }"
-	case ir.Optional, ir.Pointer:
+	case ir.Optional, ir.Pointer, ir.Part:
 		return g.tsType(r.Elem)
 	case ir.Nullable:
 		return g.tsType(r.Elem) + " | null"
@@ -368,7 +368,7 @@ func (g *tsGen) schema(r *ir.Ref) string {
 	switch r.Kind {
 	case ir.Named:
 		return fmt.Sprintf("$ref(() => %s%s)", g.qual, g.schemas[r.Type])
-	case ir.Optional, ir.Pointer:
+	case ir.Optional, ir.Pointer, ir.Part:
 		return g.schema(r.Elem)
 	case ir.Nullable:
 		return fmt.Sprintf(`{ kind: "nullable", of: %s }`, g.schema(r.Elem))

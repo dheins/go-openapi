@@ -208,7 +208,16 @@ func (s *store) PutCard(_ context.Context, req *api.PutCardRequest) (api.PutCard
 
 func (s *store) BatchPets(_ context.Context, req *api.BatchPetsRequest) (api.BatchPetsResponse, error) {
 	s.seen["BatchPets"] = req
-	return api.BatchPets200MixedResponse{Body: req.Body}, nil
+	// Each pet is marked as stored, except one named "Unstored".
+	var stored []oapi.Part[model.Pet]
+	for _, p := range req.Body {
+		header := textproto.MIMEHeader{"X-Stored": {"true"}}
+		if p.Value.Name == "Unstored" {
+			header = nil
+		}
+		stored = append(stored, oapi.Part[model.Pet]{Header: header, Value: p.Value})
+	}
+	return api.BatchPets200MixedResponse{Body: stored}, nil
 }
 
 func (s *store) UploadBundle(_ context.Context, req *api.UploadBundleRequest) (api.UploadBundleResponse, error) {
@@ -525,6 +534,11 @@ func TestResponseValidation(t *testing.T) {
 	}
 	if r := do(t, h, "GET", "/pets/1", "", ""); r.status != 200 {
 		t.Errorf("valid response: %d %s", r.status, r.body)
+	}
+	// Part headers are checked too: a part without its X-Stored.
+	ct, body := partsBody(t, "mixed", header("Content-Type", "application/json", "X-Seq", "1"), `{"name": "Unstored"}`)
+	if r := do(t, h, "POST", "/pets/batch", ct, body); r.status != 500 {
+		t.Errorf("response part without its header: %d %s", r.status, r.body)
 	}
 	// Without the option the handler's response goes out as it is.
 	_, plain := newTestServer()
@@ -1021,7 +1035,7 @@ func TestPositionalParts(t *testing.T) {
 	if r.status != 200 {
 		t.Fatalf("%d %s", r.status, r.body)
 	}
-	if got := s.seen["BatchPets"].(*api.BatchPetsRequest).Body; len(got) != 2 || got[0].Name != "Rex" || got[1].Name != "Tom" {
+	if got := s.seen["BatchPets"].(*api.BatchPetsRequest).Body; len(got) != 2 || got[0].Value.Name != "Rex" || got[0].Header.Get("X-Seq") != "1" || got[1].Value.Name != "Tom" {
 		t.Errorf("pets = %+v", got)
 	}
 	// Written back as JSON parts, as responses: the write-only secret is

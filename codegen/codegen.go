@@ -385,6 +385,8 @@ func (f *fileGen) goType(r *ir.Ref) string {
 		return f.imp("iter", "iter") + ".Seq2[" + f.goType(r.Elem) + ", error]"
 	case ir.Event:
 		return f.imp(serverImport, "server") + ".TypedEvent[" + f.goType(r.Elem) + "]"
+	case ir.Part:
+		return f.imp(oapiImport, "oapi") + ".Part[" + f.goType(r.Elem) + "]"
 	}
 	return "any"
 }

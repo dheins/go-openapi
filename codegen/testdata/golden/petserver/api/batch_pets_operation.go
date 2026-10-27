@@ -10,12 +10,18 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var batchPets200MixedResponseParts = server.Parts{Item: "json"}
+var batchPets200MixedResponseParts = server.Parts{Item: "json", Rest: server.Property{ContentTypes: []string{"application/json"}, Headers: []server.PartHeader{{Name: "X-Stored", Required: true, Check: func(vals []string) error {
+	_, err := server.ParseScalar[bool](vals)
+	if err != nil {
+		return err
+	}
+	return nil
+}}}}}
 
 // BatchPetsRequest holds the decoded and validated inputs of BatchPets.
 type BatchPetsRequest struct {
 	// Body is the request body.
-	Body []model.Pet
+	Body []oapi.Part[model.Pet]
 }
 
 // BatchPetsResponse is one of the responses of BatchPets:
@@ -28,15 +34,16 @@ type BatchPetsResponse interface {
 //
 // The pets stored.
 type BatchPets200MixedResponse struct {
-	Body []model.Pet
+	Body []oapi.Part[model.Pet]
 }
 
 func (r BatchPets200MixedResponse) writeBatchPetsResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
 	if c.ValidateResponses {
 		var errs oapi.ValidationErrors
 		for i2, item2 := range r.Body {
-			errs.Nested(oapi.Index("", i2), item2.Validate())
+			errs.Nested(oapi.Index("", i2), item2.Value.Validate())
 		}
+		errs.Nested("", server.CheckParts(r.Body, batchPets200MixedResponseParts))
 		if err := errs.Err(); err != nil {
 			return &server.InvalidResponse{Status: 200, Err: err}
 		}

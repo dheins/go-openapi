@@ -299,6 +299,9 @@ const (
 	// Event is server.TypedEvent[Elem]: a server-sent event whose data is
 	// an Elem.
 	Event
+	// Part is oapi.Part[Elem]: an item of positional multipart parts with
+	// the part's headers.
+	Part
 	// Any is any.
 	Any
 )

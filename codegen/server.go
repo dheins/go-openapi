@@ -1053,7 +1053,13 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(1, "}")
 	}
 	if r.Kind == "json" || r.Kind == "xml" || r.Kind == "parts" {
-		if stmts := f.validation("r.Body", r.Body, 2); stmts != "" {
+		stmts := f.validation("r.Body", r.Body, 2)
+		if r.Kind == "parts" && r.Parts.HasHeaders() {
+			// Reading the parts checks their headers; writing them does not.
+			parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+			stmts += fmt.Sprintf("\t\terrs.Nested(\"\", server.CheckParts(r.Body, %s))\n", parts)
+		}
+		if stmts != "" {
 			w(1, "if c.ValidateResponses {")
 			w(2, "var errs oapi.ValidationErrors")
 			w(0, "%s", strings.TrimSuffix(stmts, "\n"))
