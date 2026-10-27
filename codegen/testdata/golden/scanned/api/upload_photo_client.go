@@ -13,7 +13,7 @@ import (
 
 var uploadPhotoIDParam = server.Param{Name: "id", Style: "simple", Explode: false, Shape: server.Scalar}
 
-var uploadPhotoRequestMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"photo": {Type: "file", ContentTypes: []string{"image/png", "image/jpeg"}, Headers: []string{"X-Checksum"}}, "caption": {Type: "string"}}}
+var uploadPhotoRequestMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"photo": {Type: "file", ContentTypes: []string{"image/png", "image/jpeg"}, Headers: []server.PartHeader{{Name: "X-Checksum", Required: true}}}, "caption": {Type: "string"}}}
 
 // NewUploadPhotoRequest builds the HTTP request of UploadPhoto, POST
 // /pets/{id}/uploads, to send with c.

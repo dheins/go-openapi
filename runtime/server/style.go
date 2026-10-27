@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"slices"
 	"strconv"
@@ -325,8 +327,55 @@ type Property struct {
 	Properties   map[string]Property
 	Additional   *Property
 	ContentTypes []string
-	Headers      []string
+	Headers      []PartHeader
 	Ref          *Property
+}
+
+// PartHeader is a header of a multipart part, as its encoding declares
+// it: whether the part must carry it, and how to check its value.
+type PartHeader struct {
+	Name     string
+	Required bool
+	// Array says the value is a comma-separated list, given to Check as
+	// its items; otherwise Check gets one value.
+	Array bool
+	// Check, if not nil, parses and validates the value.
+	Check func(values []string) error
+}
+
+// check reports what is wrong with the header of a part, or "".
+func (h PartHeader) check(header textproto.MIMEHeader) string {
+	vals := header.Values(h.Name)
+	switch {
+	case len(vals) == 0 && h.Required:
+		return fmt.Sprintf("part header %q is missing", h.Name)
+	case len(vals) == 0 || h.Check == nil:
+		return ""
+	}
+	items := []string{strings.Join(vals, ", ")}
+	if h.Array {
+		items = nil
+		for _, v := range vals {
+			items = append(items, splitHeaderList(v)...)
+		}
+	}
+	if err := h.Check(items); err != nil {
+		var msgs []string
+		var list oapi.ValidationErrors
+		var single *oapi.ValidationError
+		switch {
+		case errors.As(err, &list):
+			for _, e := range list {
+				msgs = append(msgs, strings.TrimPrefix(e.Path+": ", ": ")+e.Message)
+			}
+		case errors.As(err, &single):
+			msgs = append(msgs, strings.TrimPrefix(single.Path+": ", ": ")+single.Message)
+		default:
+			msgs = append(msgs, err.Error())
+		}
+		return fmt.Sprintf("part header %q: %s", h.Name, strings.Join(msgs, "; "))
+	}
+	return ""
 }
 
 // shape returns p with the shape of its Ref, if it has one.

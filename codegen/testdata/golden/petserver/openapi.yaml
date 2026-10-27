@@ -336,6 +336,7 @@ paths:
                     required: true
                     schema:
                       type: string
+                      pattern: "^[a-z0-9]{3,}$"
               scans:
                 contentType: "image/png, image/jpeg; q=1"
       responses:
@@ -427,9 +428,17 @@ paths:
                   X-Seq:
                     required: true
                     schema:
-                      type: string
+                      type: integer
+                      minimum: 1
             itemEncoding:
               contentType: application/json
+              headers:
+                X-Tags:
+                  schema:
+                    type: array
+                    items:
+                      type: string
+                      maxLength: 3
       responses:
         "200":
           description: The pets stored.

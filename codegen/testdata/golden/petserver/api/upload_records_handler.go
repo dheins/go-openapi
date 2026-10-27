@@ -12,7 +12,19 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var uploadRecordsMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"report": {Type: "file", ContentTypes: []string{"application/pdf"}, Headers: []string{"X-Checksum"}}, "scans": {Type: "file", Array: true, ContentTypes: []string{"image/png", "image/jpeg"}}, "attachment": {Type: "file"}}}
+var paramPattern2 = oapi.MustCompilePattern("^[a-z0-9]{3,}$")
+
+var uploadRecordsMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"report": {Type: "file", ContentTypes: []string{"application/pdf"}, Headers: []server.PartHeader{{Name: "X-Checksum", Required: true, Check: func(vals []string) error {
+	v, err := server.ParseScalar[string](vals)
+	if err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	if err := paramPattern2.Check(v); err != nil {
+		errs.Add("", err.Error())
+	}
+	return errs.Err()
+}}}}, "scans": {Type: "file", Array: true, ContentTypes: []string{"image/png", "image/jpeg"}}, "attachment": {Type: "file"}}}
 
 // HandleUploadRecords returns the HTTP handler of UploadRecords.
 //

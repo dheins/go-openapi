@@ -651,11 +651,11 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("r.FormBody(%s, %s)", ct, value)
 		case "multipart":
 			f.imp(serverImport, "server")
-			props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", objectProperty(m.Properties, m.Additional, m.Shape))
+			props := f.declareVar(lowerFirst(o.Name)+"RequestMultipartProperties", f.objectProperty(m.Properties, m.Additional, m.Shape))
 			stmt = fmt.Sprintf("r.MultipartBody(%s, %s)", value, props)
 		case "parts":
 			f.imp(serverImport, "server")
-			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", partsLiteral(m.Parts))
+			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
 			stmt = fmt.Sprintf("client.PartsBody(r, %s, %s, %s)", ct, value, parts)
 		case "text":
 			stmt = fmt.Sprintf("r.TextBody(%s, string(%s))", ct, value)
@@ -761,7 +761,7 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 	case "parts":
 		readBody("body")
 		f.imp(serverImport, "server")
-		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", partsLiteral(r.Parts))
+		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", f.partsLiteral(r.Parts))
 		w(2, "items, err := client.DecodeParts[%s](resp, body, %s)", f.goType(sliceElem(r.Body)), parts)
 		w(2, "if err != nil {")
 		w(3, "return nil, err")

@@ -544,7 +544,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			pw(3, "}")
 		case "parts":
 			_, sub, _ := strings.Cut(m.MediaType, "/")
-			parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", partsLiteral(m.Parts))
+			parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
 			pw(3, "if v, err := server.DecodeParts[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", f.goType(sliceElem(m.Field.Value)), parts)
 			pw(4, "b.Body(err)")
 			pw(3, "} else {")
@@ -561,7 +561,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			validate(4)
 			pw(3, "}")
 		case "form", "multipart":
-			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", objectProperty(m.Properties, m.Additional, m.Shape))
+			props := f.declareVar(lowerFirst(o.Name)+ir.GoName(m.Kind)+"Properties", f.objectProperty(m.Properties, m.Additional, m.Shape))
 			if m.Kind == "form" {
 				pw(3, "if fields, err := server.FormFields(body); err != nil {")
 				pw(4, "b.Body(err)")
@@ -684,14 +684,14 @@ func (f *fileGen) itemValidation(r *ir.Ref) string {
 
 // partsLiteral renders how positional parts are read and written as a
 // server.Parts.
-func partsLiteral(p *ir.Parts) string {
+func (f *fileGen) partsLiteral(p *ir.Parts) string {
 	rule := func(r ir.ParamProperty) string {
 		var fields []string
 		if len(r.ContentTypes) > 0 {
 			fields = append(fields, "ContentTypes: "+stringSlice(r.ContentTypes))
 		}
 		if len(r.Headers) > 0 {
-			fields = append(fields, "Headers: "+stringSlice(r.Headers))
+			fields = append(fields, "Headers: "+f.partHeaders(r.Headers))
 		}
 		return "{" + strings.Join(fields, ", ") + "}"
 	}
@@ -759,8 +759,8 @@ func xmlNodeLiteral(n *ir.XMLNode) string {
 // shapes, which properties inside it refer to, is built by a function:
 // each shape is a *server.Property that its references point to, which
 // a literal cannot express.
-func objectProperty(props []ir.ParamProperty, additional *ir.ParamProperty, shape string) string {
-	r := &shapes{defs: map[string]string{}}
+func (f *fileGen) objectProperty(props []ir.ParamProperty, additional *ir.ParamProperty, shape string) string {
+	r := &shapes{defs: map[string]string{}, headers: f.partHeaders}
 	root := ir.ParamProperty{Type: "object", Properties: props, Additional: additional, Shape: shape}
 	lit := "server.Property" + r.fields(root)
 	if len(r.names) == 0 {
@@ -782,9 +782,65 @@ func objectProperty(props []ir.ParamProperty, additional *ir.ParamProperty, shap
 type shapes struct {
 	names []string
 	defs  map[string]string
+	// headers renders the headers of a part.
+	headers func([]*ir.Header) string
 }
 
 func shapeVar(name string) string { return lowerFirst(name) + "Shape" }
+
+// partHeaders renders the headers of a multipart part as a
+// []server.PartHeader, each with a function parsing and validating its
+// value, unless it is text with nothing to check.
+func (f *fileGen) partHeaders(headers []*ir.Header) string {
+	var hs []string
+	for _, h := range headers {
+		s := fmt.Sprintf("{Name: %q", h.Name)
+		if h.Required {
+			s += ", Required: true"
+		}
+		if h.Array {
+			s += ", Array: true"
+		}
+		if check := f.partHeaderCheck(h); check != "" {
+			s += ", Check: " + check
+		}
+		hs = append(hs, s+"}")
+	}
+	return "[]server.PartHeader{" + strings.Join(hs, ", ") + "}"
+}
+
+// partHeaderCheck returns the function checking the values of part
+// header h, as a header parameter's are parsed and validated, or "" if
+// there is nothing to check.
+func (f *fileGen) partHeaderCheck(h *ir.Header) string {
+	if h.Type == nil {
+		return ""
+	}
+	stmts := f.validation("v", h.Type, 1)
+	if stmts == "" && h.Content == "" && !h.Array && f.goType(h.Elem) == "string" {
+		return ""
+	}
+	var parse string
+	switch {
+	case h.Content != "":
+		parse = fmt.Sprintf("server.DecodeContent[%s](vals[0])", f.goType(h.Type))
+	case h.Array:
+		parse = fmt.Sprintf("server.ParseArray[%s](vals)", f.goType(h.Elem))
+	default:
+		parse = fmt.Sprintf("server.ParseScalar[%s](vals)", f.goType(h.Elem))
+	}
+	v := "v"
+	if stmts == "" {
+		v = "_"
+	}
+	check := fmt.Sprintf("func(vals []string) error {\n%s, err := %s\nif err != nil {\nreturn err\n}\n", v, parse)
+	if stmts != "" {
+		check += "var errs " + f.imp(oapiImport, "oapi") + ".ValidationErrors\n" + stmts + "return errs.Err()\n}"
+	} else {
+		check += "return nil\n}"
+	}
+	return check
+}
 
 // fields renders the braced fields of a server.Property literal. A
 // property with a named shape refers to it, and the shape is rendered
@@ -827,7 +883,7 @@ func (r *shapes) fields(prop ir.ParamProperty) string {
 		fmt.Fprintf(&b, ", ContentTypes: %s", stringSlice(prop.ContentTypes))
 	}
 	if len(prop.Headers) > 0 {
-		fmt.Fprintf(&b, ", Headers: %s", stringSlice(prop.Headers))
+		fmt.Fprintf(&b, ", Headers: %s", r.headers(prop.Headers))
 	}
 	b.WriteString("}")
 	return b.String()
@@ -940,7 +996,7 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 
 // propertiesVar declares the property types of an object parameter.
 func (f *fileGen) propertiesVar(o *ir.Operation, p *ir.Param) string {
-	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", objectProperty(p.Properties, p.Additional, p.Shape))
+	return f.declareVar(lowerFirst(o.Name)+p.Field+"Properties", f.objectProperty(p.Properties, p.Additional, p.Shape))
 }
 
 // bindValue writes the branches that record a parse error or store and
@@ -1050,7 +1106,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "json":
 		w(1, "return c.WriteJSON(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "parts":
-		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", partsLiteral(r.Parts))
+		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
 		w(1, "return server.WriteParts(w, %s, %s, r.Body, %s, %s)", status, contentType, parts, header)
 	case "xml":
 		shape := f.declareVar(lowerFirst(r.TypeName)+"XMLShape", xmlNodeLiteral(r.XML))

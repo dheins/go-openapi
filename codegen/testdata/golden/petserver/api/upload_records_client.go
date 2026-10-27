@@ -13,7 +13,19 @@ import (
 
 var uploadRecordsPetIDParam = server.Param{Name: "petId", Style: "simple", Explode: false, Shape: server.Scalar}
 
-var uploadRecordsRequestMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"report": {Type: "file", ContentTypes: []string{"application/pdf"}, Headers: []string{"X-Checksum"}}, "scans": {Type: "file", Array: true, ContentTypes: []string{"image/png", "image/jpeg"}}, "attachment": {Type: "file"}}}
+var paramPattern = oapi.MustCompilePattern("^[a-z0-9]{3,}$")
+
+var uploadRecordsRequestMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"report": {Type: "file", ContentTypes: []string{"application/pdf"}, Headers: []server.PartHeader{{Name: "X-Checksum", Required: true, Check: func(vals []string) error {
+	v, err := server.ParseScalar[string](vals)
+	if err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	if err := paramPattern.Check(v); err != nil {
+		errs.Add("", err.Error())
+	}
+	return errs.Err()
+}}}}, "scans": {Type: "file", Array: true, ContentTypes: []string{"image/png", "image/jpeg"}}, "attachment": {Type: "file"}}}
 
 // NewUploadRecordsRequest builds the HTTP request of UploadRecords, POST
 // /pets/{petId}/records, to send with c.

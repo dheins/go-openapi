@@ -12,7 +12,29 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var batchPetsRequestMixedParts = server.Parts{Item: "json", Prefix: []server.Property{{ContentTypes: []string{"application/json"}, Headers: []string{"X-Seq"}}}, Rest: server.Property{ContentTypes: []string{"application/json"}}}
+var batchPetsRequestMixedParts = server.Parts{Item: "json", Prefix: []server.Property{{ContentTypes: []string{"application/json"}, Headers: []server.PartHeader{{Name: "X-Seq", Required: true, Check: func(vals []string) error {
+	v, err := server.ParseScalar[int64](vals)
+	if err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	if v < 1 {
+		errs.Add("", "must be at least 1")
+	}
+	return errs.Err()
+}}}}}, Rest: server.Property{ContentTypes: []string{"application/json"}, Headers: []server.PartHeader{{Name: "X-Tags", Array: true, Check: func(vals []string) error {
+	v, err := server.ParseArray[string](vals)
+	if err != nil {
+		return err
+	}
+	var errs oapi.ValidationErrors
+	for i1, item1 := range v {
+		if oapi.StringLength(item1) > 3 {
+			errs.Add(oapi.Index("", i1), "length must be at most 3")
+		}
+	}
+	return errs.Err()
+}}}}}
 
 var batchPets200MixedResponseReadParts = server.Parts{Item: "json"}
 

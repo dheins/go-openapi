@@ -103,8 +103,8 @@ func checkPart(header textproto.MIMEHeader, prop Property) string {
 		}
 	}
 	for _, h := range prop.Headers {
-		if len(header.Values(h)) == 0 {
-			return fmt.Sprintf("part header %q is missing", h)
+		if msg := h.check(header); msg != "" {
+			return msg
 		}
 	}
 	return ""
