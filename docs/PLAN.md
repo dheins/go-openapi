@@ -464,6 +464,22 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   `http.Cookie` drops; content cookies are percent-encoded now.
 - *Not done*: see [features.md](../features.md).
 
+### M22 – Typed positional parts ✅
+- [x] `server.DecodeTuple`, `EncodeTuple`, `WriteTuple` and `CheckTuple`:
+  a struct of parts by position, with optional positions and the rest
+- [x] Bodies and responses with `prefixItems` generated as such structs,
+  with `Validate` at the parts' indices, in servers and Go clients
+
+**How it went**
+- *Not a model*: the struct lives with the operation, since it is no JSON
+  object; its problems are at part indices, not property names.
+- *Positions by tag*: fields are found by `part:"N"` tags, and optional
+  ones by their `oapi.Optional` type, so the runtime needs no more
+  description than the kinds of the positions.
+- *One reader*: the slice and tuple decoders share reading and decoding
+  a part, so content types, headers and kinds behave the same.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

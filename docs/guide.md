@@ -615,9 +615,9 @@ parts by position. With a schema `type: array` and `items: X`, the body is
 a `[]X`: each part is a file (an `oapi.File`, when the items are
 `format: binary` or have a `contentMediaType`), its text (string items) or
 its body decoded as JSON (anything else), and problems are reported at the
-part's index (`body /2/name: ...`). Otherwise, also with `prefixItems`,
-the body is the parts themselves, a `[]oapi.File` with each part's headers
-(`Content-ID` and so on). `prefixEncoding` applies to the first parts and
+part's index (`body /2/name: ...`). Without either, the body is the parts
+themselves, a `[]oapi.File` with each part's headers (`Content-ID` and so
+on). `prefixEncoding` applies to the first parts and
 `itemEncoding` to the others: a part that declares a content type must
 match, and part headers must be present when required and valid when
 given, as above. Files carry their headers in `oapi.File.Header`; when
@@ -629,6 +629,39 @@ each part with the first content type its encoding names, else the file's
 own, `text/plain` or `application/json`, and with the headers of its
 `oapi.File` or `oapi.Part`; with `WithResponseValidation`, those headers
 are checked as a client reading them checks them.
+
+With `prefixItems`, the parts are a tuple: the body is a struct with a
+field per position, each a file, text or JSON by its own schema, and
+`Rest` for the parts after them:
+
+```yaml
+schema:
+  type: array
+  minItems: 2
+  prefixItems:
+    - $ref: "#/components/schemas/Pet"           # JSON
+    - {type: string, contentMediaType: image/png} # a file
+    - {title: note, type: string}                 # text
+  items: {type: string, contentMediaType: text/csv}
+```
+
+```go
+type UploadReportRequestParts struct {
+	Pet   model.Pet                        `part:"0"`
+	Part2 oapi.File                        `part:"1"`
+	Note  oapi.Optional[oapi.Part[string]] `part:"2"` // X-Lang in prefixEncoding
+	// Rest are the parts after them.
+	Rest []oapi.File `part:"rest"`
+}
+```
+
+A field is named after the component it refers to, else its `title`,
+else its position (`Part2`). Positions from `minItems` on are optional
+(all are required without it), and a client sends an optional part only
+after the ones before it. `items` types `Rest`; without it any parts may
+follow, as files, and with `items: false` none. A missing part is
+reported at its index (`body /1: part is missing`), as are extra ones and
+the problems of each part; `minItems` and `maxItems` count them all.
 
 ## Responses
 

@@ -4,6 +4,15 @@
 
 ### Added
 
+- Typed positional parts: a multipart body or response of positional
+  parts with `prefixItems` is a generated struct (`<Op>RequestParts`)
+  with a field per position, a file, text or JSON by its schema, named
+  after its component or title, and `Rest` for the parts after them, as
+  `items` allows. Positions from `minItems` on are optional, positions
+  with headers are `oapi.Part`s, and `Validate` reports problems at the
+  parts' indices. Runtime: `server.DecodeTuple`, `EncodeTuple`,
+  `WriteTuple`, `CheckTuple`, `Parts.Kinds`, `client.TupleBody` and
+  `client.DecodeTuple`.
 - Parameters, response headers and multipart part headers with `content`
   other than JSON: `text/plain` (a primitive value as its text, without
   splitting at commas), `application/x-www-form-urlencoded` (an object as
@@ -351,6 +360,8 @@
 
 ### Changed
 
+- A positional multipart body or response with `prefixItems` is a struct
+  of its parts instead of a `[]oapi.File`.
 - The TypeScript runtime's parameter and header descriptors have
   `content: "json" | "text" | "form"` instead of `json: true`. Regenerate
   TypeScript clients.
