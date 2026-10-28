@@ -89,6 +89,19 @@ func FuzzMultipart(f *testing.F) {
 		_, _ = DecodeParts[oapi.Part[string]](bytes.Clone(body), ct, rules)
 		rules.Item = "file"
 		_, _ = DecodeParts[oapi.File](bytes.Clone(body), ct, rules)
+		// As a tuple: JSON, text and a file by position, then files.
+		type tuple struct {
+			Meta upload                       `part:"0"`
+			Note oapi.Optional[string]        `part:"1"`
+			Scan oapi.Optional[oapi.File]     `part:"2"`
+			More []oapi.Part[json.RawMessage] `part:"rest"`
+		}
+		rules.Kinds, rules.Item = []string{"json", "text", "file"}, "json"
+		if v, err := DecodeTuple[tuple](bytes.Clone(body), ct, rules, oapi.Request); err == nil {
+			if _, _, err := EncodeTuple(v, ct, rules, oapi.Response); err != nil {
+				t.Fatalf("encoding %+v: %v", v, err)
+			}
+		}
 	})
 }
 

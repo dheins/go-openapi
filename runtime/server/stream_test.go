@@ -234,3 +234,69 @@ func TestPartValues(t *testing.T) {
 		t.Errorf("plain items: %v", err)
 	}
 }
+
+func TestTuple(t *testing.T) {
+	type report struct {
+		Meta streamPet                        `part:"0"`
+		Scan oapi.File                        `part:"1"`
+		Note oapi.Optional[oapi.Part[string]] `part:"2"`
+		More []oapi.File                      `part:"rest"`
+	}
+	seq := []PartHeader{{Name: "X-Seq", Required: true}}
+	p := Parts{Item: "file", Kinds: []string{"json", "file", "text"},
+		Prefix: []Property{{ContentTypes: []string{"application/json"}}, {Headers: seq}, {}}}
+	scan := oapi.File{Name: "a.png", ContentType: "image/png", Header: textproto.MIMEHeader{"X-Seq": {"1"}}, Data: []byte("PNG")}
+	in := report{Meta: streamPet{Name: "Rex"}, Scan: scan,
+		Note: oapi.Some(oapi.Part[string]{Header: textproto.MIMEHeader{"X-Lang": {"en"}}, Value: "hi"}),
+		More: []oapi.File{{ContentType: "text/csv", Data: []byte("a,b")}}}
+	if err := CheckTuple(in, p); err != nil {
+		t.Fatal(err)
+	}
+	body, ct, err := EncodeTuple(in, "multipart/mixed", p, oapi.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeTuple[report](body, ct, p, oapi.Request)
+	if err != nil || got.Meta.Name != "Rex" || string(got.Scan.Data) != "PNG" || got.Scan.Header.Get("X-Seq") != "1" ||
+		got.Note.Value.Value != "hi" || got.Note.Value.Header.Get("X-Lang") != "en" || len(got.More) != 1 || string(got.More[0].Data) != "a,b" {
+		t.Fatalf("decoded %+v, %v", got, err)
+	}
+	// An optional position may be left out, at the end only.
+	short := report{Meta: in.Meta, Scan: scan}
+	if body, ct, err = EncodeTuple(&short, "multipart/mixed", p, oapi.Request); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DecodeTuple[report](body, ct, p, oapi.Request); err != nil || got.Note.Set || len(got.More) != 0 {
+		t.Errorf("short = %+v, %v", got, err)
+	}
+	short.More = in.More
+	if _, _, err := EncodeTuple(short, "multipart/mixed", p, oapi.Request); err == nil {
+		t.Error("parts after an unset one")
+	}
+	// Missing, extra and invalid parts are reported at their index.
+	type pair struct {
+		Meta streamPet `part:"0"`
+		Scan oapi.File `part:"1"`
+	}
+	pp := Parts{Kinds: []string{"json", "file"}, Prefix: p.Prefix[:2]}
+	body, ct, _ = EncodeParts([]oapi.File{{ContentType: "application/json", Data: []byte(`{"name": 1}`)}}, "multipart/mixed", Parts{Item: "file"}, oapi.Request)
+	var errs oapi.ValidationErrors
+	if _, err := DecodeTuple[pair](body, ct, pp, oapi.Request); !errors.As(err, &errs) || len(errs) != 2 ||
+		errs[0].Path != "/0" || errs[1].Path != "/1" || errs[1].Message != "part is missing" {
+		t.Errorf("missing: %v", err)
+	}
+	body, ct, _ = EncodeTuple(in, "multipart/mixed", p, oapi.Request)
+	if _, err := DecodeTuple[pair](body, ct, pp, oapi.Request); !errors.As(err, &errs) || len(errs) != 2 ||
+		errs[0].Path != "/2" || errs[0].Message != "unexpected part: the body has at most 2" {
+		t.Errorf("extra: %v", err)
+	}
+	unsigned := in
+	unsigned.Scan.Header = nil
+	if err := CheckTuple(unsigned, p); !errors.As(err, &errs) || len(errs) != 1 || errs[0].Path != "/1" {
+		t.Errorf("header: %v", err)
+	}
+	// A file position needs an oapi.File field.
+	if _, err := DecodeTuple[pair](body, ct, Parts{Kinds: []string{"file", "file"}}, oapi.Request); err == nil || errors.As(err, &errs) {
+		t.Errorf("wrong field type: %v", err)
+	}
+}

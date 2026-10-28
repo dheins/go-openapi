@@ -154,10 +154,28 @@ func CheckFileHeaders(v any, obj Property) error {
 // files (oapi.File.Header) and of oapi.Part items. Other items carry no
 // headers to check.
 func CheckParts[T any](items []T, p Parts) error {
+	list := make([]partItem, len(items))
+	for i := range items {
+		list[i] = partItem{&items[i], p.Item}
+	}
+	return checkItems(list, p)
+}
+
+// CheckTuple checks the headers of the parts of v, a tuple as DecodeTuple
+// reads it, against the encodings of p, by position, as CheckParts does.
+func CheckTuple(v any, p Parts) error {
+	items, err := tupleItems(v, p)
+	if err != nil {
+		return err
+	}
+	return checkItems(items, p)
+}
+
+func checkItems(items []partItem, p Parts) error {
 	var errs oapi.ValidationErrors
 	for i, item := range items {
 		var header textproto.MIMEHeader
-		switch v := any(&item).(type) {
+		switch v := item.ptr.(type) {
 		case *oapi.File:
 			header = v.Header
 		case oapi.MIMEPart:

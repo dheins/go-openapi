@@ -214,6 +214,17 @@ func PartsBody[T any](r *Request, contentType string, items []T, p server.Parts)
 	r.body, r.contentType = data, ct
 }
 
+// TupleBody sets the body to v, a tuple of parts (prefixItems) as
+// server.DecodeTuple reads it, as a multipart body of positional parts.
+func TupleBody(r *Request, contentType string, v any, p server.Parts) {
+	data, ct, err := server.EncodeTuple(v, contentType, p, oapi.Request)
+	if err != nil {
+		r.fail(fmt.Errorf("body: %w", err))
+		return
+	}
+	r.body, r.contentType = data, ct
+}
+
 // MultipartBody sets the body to v, a struct or a map with string keys, as
 // multipart/form-data: a part per property, files (properties of type file
 // in obj, or oapi.File values) with their name, content type and headers,
