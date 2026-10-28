@@ -523,3 +523,45 @@ func TestClientContentParams(t *testing.T) {
 		t.Errorf("invalid code: %v", err)
 	}
 }
+
+func TestClientTupleParts(t *testing.T) {
+	ctx := context.Background()
+	s, c := newTestClient(t, petclient.Credentials{})
+	parts := api.UploadReportRequestParts{
+		Pet:   model.Pet{Name: "Rex"},
+		Part2: oapi.File{ContentType: "image/png", Header: textproto.MIMEHeader{"X-Seq": {"2"}}, Data: []byte("PNG")},
+		Note:  oapi.Some(oapi.Part[string]{Header: textproto.MIMEHeader{"X-Lang": {"en"}}, Value: "hi"}),
+		Rest:  []oapi.File{{ContentType: "text/csv", Data: []byte("a,b")}},
+	}
+	resp, err := c.UploadReport(ctx, &api.UploadReportRequest{PetID: 1, Body: parts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := s.seen["UploadReport"].(*api.UploadReportRequest).Body
+	if got.Pet.Name != "Rex" || got.Part2.Header.Get("X-Seq") != "2" || got.Note.Value.Header.Get("X-Lang") != "en" || string(got.Rest[0].Data) != "a,b" {
+		t.Errorf("sent %+v", got)
+	}
+	if body := resp.(api.UploadReport200MixedResponse).Body; body.Pet.Name != "Rex" || body.Summary != "1 attachments, hi" {
+		t.Errorf("response = %+v", body)
+	}
+	// Without the note, the attachments cannot be sent; with them all,
+	// too many parts are; a scan without its header is not either.
+	var invalid *client.InvalidRequest
+	short := parts
+	short.Note = oapi.Optional[oapi.Part[string]]{}
+	if _, err := c.UploadReport(ctx, &api.UploadReportRequest{PetID: 1, Body: short}); err == nil {
+		t.Error("attachments after a missing note")
+	}
+	many := parts
+	many.Rest = append(many.Rest, parts.Rest[0])
+	if _, err := c.UploadReport(ctx, &api.UploadReportRequest{PetID: 1, Body: many}); !errors.As(err, &invalid) ||
+		invalid.Problem.Errors[0].Detail != "must have at most 4 parts" {
+		t.Errorf("too many parts: %v", err)
+	}
+	unsigned := parts
+	unsigned.Part2.Header = nil
+	if _, err := c.UploadReport(ctx, &api.UploadReportRequest{PetID: 1, Body: unsigned}); !errors.As(err, &invalid) ||
+		invalid.Problem.Errors[0].Pointer != "/1" {
+		t.Errorf("no seq: %v", err)
+	}
+}

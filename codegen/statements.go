@@ -593,6 +593,9 @@ func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 		// The part's headers are checked as it is read or written.
 		v.ref(expr+".Value", path, r.Elem, hint, depth)
 		return
+	case ir.Tuple:
+		v.line(depth, "errs.Nested(%s, %s.Validate())", path, expr)
+		return
 	case ir.Named:
 		if r.Type.Kind == ir.Alias {
 			v.ref(expr, path, r.Type.Underlying, hint, depth)

@@ -302,6 +302,9 @@ const (
 	// Part is oapi.Part[Elem]: an item of positional multipart parts with
 	// the part's headers.
 	Part
+	// Tuple is the struct of a body of positional parts with
+	// prefixItems, which Tuple describes.
+	Tuple
 	// Any is any.
 	Any
 )
@@ -316,6 +319,7 @@ type Ref struct {
 	Import string
 	Type   *Type
 	Elem   *Ref
+	Tuple  *TupleType
 	// Checks are the validation constraints on values of this expression.
 	Checks *Checks
 }

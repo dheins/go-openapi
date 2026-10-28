@@ -32,6 +32,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "getPhoto", Name: "GetPhoto", Method: "GET", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleGetPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadPhoto", Name: "UploadPhoto", Method: "PUT", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleUploadPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadRecords", Name: "UploadRecords", Method: "POST", Path: "/pets/{petId}/records"}, "/pets/{p0}/records", api.HandleUploadRecords(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "uploadReport", Name: "UploadReport", Method: "POST", Path: "/pets/{petId}/report"}, "/pets/{p0}/report", api.HandleUploadReport(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "importPet", Name: "ImportPet", Method: "POST", Path: "/pets/import"}, "/pets/import", api.HandleImportPet(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getCard", Name: "GetCard", Method: "GET", Path: "/pets/{petId}/card"}, "/pets/{p0}/card", api.HandleGetCard(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putCard", Name: "PutCard", Method: "PUT", Path: "/pets/{petId}/card"}, "/pets/{p0}/card", api.HandlePutCard(cfg, h, sec))

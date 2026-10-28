@@ -545,6 +545,15 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 		case "parts":
 			_, sub, _ := strings.Cut(m.MediaType, "/")
 			parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+			if m.Field.Value.Kind == ir.Tuple {
+				pw(3, "if v, err := server.DecodeTuple[%s](body, r.Header.Get(\"Content-Type\"), %s, %s.Request); err != nil {", elem(), parts, f.imp(oapiImport, "oapi"))
+				pw(4, "b.Body(err)")
+				pw(3, "} else {")
+				pw(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
+				validate(4)
+				pw(3, "}")
+				break
+			}
 			pw(3, "if v, err := server.DecodeParts[%s](body, r.Header.Get(\"Content-Type\"), %s); err != nil {", f.goType(sliceElem(m.Field.Value)), parts)
 			pw(4, "b.Body(err)")
 			pw(3, "} else {")
@@ -682,6 +691,83 @@ func (f *fileGen) itemValidation(r *ir.Ref) string {
 	return "func(item " + typ + ") error {\nvar errs oapi.ValidationErrors\n" + stmts + "return errs.Err()\n}"
 }
 
+// tupleDecls renders the structs of the bodies of positional parts with
+// prefixItems of o, and their Validate methods.
+func (f *fileGen) tupleDecls(o *ir.Operation) string {
+	var tuples []*ir.TupleType
+	add := func(r *ir.Ref) {
+		if r != nil && r.Kind == ir.Tuple && !slices.Contains(tuples, r.Tuple) {
+			tuples = append(tuples, r.Tuple)
+		}
+	}
+	if o.Body != nil {
+		for _, fd := range o.Body.Fields {
+			add(fd.Value)
+		}
+	}
+	for _, r := range o.Responses {
+		add(r.Body)
+	}
+	var b strings.Builder
+	for _, t := range tuples {
+		lines := []string{t.Name + " holds the parts of a multipart body by position."}
+		if t.Doc != "" {
+			lines = append(lines, "", t.Doc)
+		}
+		fmt.Fprintf(&b, "\n%s\ntype %s struct {\n", comment("", lines), t.Name)
+		for i, fd := range t.Fields {
+			fmt.Fprintf(&b, "\t%s %s `part:\"%d\"`\n", fd.Name, f.goType(fd.Type), i)
+		}
+		if t.Rest != nil {
+			b.WriteString("\t// Rest are the parts after them.\n")
+			fmt.Fprintf(&b, "\tRest %s `part:\"rest\"`\n", f.goType(t.Rest))
+		}
+		b.WriteString("}\n")
+		v := &validator{file: f, typeName: t.Name}
+		required := 0
+		for i, fd := range t.Fields {
+			v.ref("t."+fd.Name, fmt.Sprintf("oapi.Index(\"\", %d)", i), fd.Type, fd.Name, 1)
+			if fd.Type.Kind != ir.Optional {
+				required++
+			}
+		}
+		if t.Rest != nil {
+			inner := v.sub()
+			inner.ref("item", fmt.Sprintf("oapi.Index(\"\", %d+j)", len(t.Fields)), t.Rest.Elem, "Rest", 2)
+			if inner.b.Len() > 0 {
+				v.line(1, "for j, item := range t.Rest {")
+				v.b.WriteString(inner.b.String())
+				v.line(1, "}")
+			}
+		}
+		// Only bounds the positions do not already keep are checked.
+		minimum, maximum := t.MinItems, t.MaxItems
+		if minimum != nil && *minimum <= required {
+			minimum = nil
+		}
+		if maximum != nil && t.Rest == nil && *maximum >= len(t.Fields) {
+			maximum = nil
+		}
+		if minimum != nil || maximum != nil {
+			v.line(1, "n := %d", required)
+			for _, fd := range t.Fields {
+				if fd.Type.Kind == ir.Optional {
+					v.line(1, "if t.%s.Set {", fd.Name)
+					v.line(2, "n++")
+					v.line(1, "}")
+				}
+			}
+			if t.Rest != nil {
+				v.line(1, "n += len(t.Rest)")
+			}
+			v.counts(1, "n", `""`, minimum, maximum, "part")
+		}
+		f.imp(oapiImport, "oapi")
+		fmt.Fprintf(&b, "\n// Validate checks the parts against their schemas, at their indices.\nfunc (t %s) Validate() error {\n\tvar errs oapi.ValidationErrors\n%s\treturn errs.Err()\n}\n", t.Name, v.b.String())
+	}
+	return b.String()
+}
+
 // partsLiteral renders how positional parts are read and written as a
 // server.Parts.
 func (f *fileGen) partsLiteral(p *ir.Parts) string {
@@ -696,6 +782,9 @@ func (f *fileGen) partsLiteral(p *ir.Parts) string {
 		return "{" + strings.Join(fields, ", ") + "}"
 	}
 	fields := []string{fmt.Sprintf("Item: %q", p.Item)}
+	if len(p.Kinds) > 0 {
+		fields = append(fields, "Kinds: "+stringSlice(p.Kinds))
+	}
 	if len(p.Prefix) > 0 {
 		var prefix []string
 		for _, r := range p.Prefix {
@@ -1083,7 +1172,11 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		if r.Kind == "parts" && r.Parts.HasHeaders() {
 			// Reading the parts checks their headers; writing them does not.
 			parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
-			stmts += fmt.Sprintf("\t\terrs.Nested(\"\", server.CheckParts(r.Body, %s))\n", parts)
+			check := "CheckParts"
+			if r.Body.Kind == ir.Tuple {
+				check = "CheckTuple"
+			}
+			stmts += fmt.Sprintf("\t\terrs.Nested(\"\", server.%s(r.Body, %s))\n", check, parts)
 		}
 		if stmts != "" {
 			w(1, "if c.ValidateResponses {")
@@ -1143,7 +1236,11 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(1, "return c.WriteJSON(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "parts":
 		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
-		w(1, "return server.WriteParts(w, %s, %s, r.Body, %s, %s)", status, contentType, parts, header)
+		write := "WriteParts"
+		if r.Body.Kind == ir.Tuple {
+			write = "WriteTuple"
+		}
+		w(1, "return server.%s(w, %s, %s, r.Body, %s, %s)", write, status, contentType, parts, header)
 	case "xml":
 		shape := f.declareVar(lowerFirst(r.TypeName)+"XMLShape", xmlNodeLiteral(r.XML))
 		w(1, "return c.WriteXML(w, %s, %s, r.Body, %s, %s)", status, contentType, shape, header)

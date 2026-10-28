@@ -327,6 +327,7 @@ func (f *fileGen) funcs() template.FuncMap {
 		"unionDecodeStmts":   f.unionDecodeStmts,
 		"unionMarshalStmts":  f.unionMarshalStmts,
 		"unionValidateStmts": f.unionValidateStmts,
+		"tupleDecls":         f.tupleDecls,
 	}
 	for name, fn := range f.serverFuncs() {
 		funcs[name] = fn
@@ -387,6 +388,8 @@ func (f *fileGen) goType(r *ir.Ref) string {
 		return f.imp(serverImport, "server") + ".TypedEvent[" + f.goType(r.Elem) + "]"
 	case ir.Part:
 		return f.imp(oapiImport, "oapi") + ".Part[" + f.goType(r.Elem) + "]"
+	case ir.Tuple:
+		return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, r.Tuple.Name)
 	}
 	return "any"
 }

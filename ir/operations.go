@@ -1123,9 +1123,32 @@ func (b *builder) encodingRules(enc *oas.Encoding, hint string) (contentTypes []
 // multipart/mixed: how each part becomes an item (file, text or json) and
 // the encodings of the parts by position.
 type Parts struct {
-	Item   string
+	Item string
+	// Kinds are those of the positions of a tuple, as Item is; Item is
+	// then that of the parts after them.
+	Kinds  []string
 	Prefix []ParamProperty
 	Rest   ParamProperty
+}
+
+// TupleType is the struct generated for a body of positional parts with
+// prefixItems: a field per position, and Rest for the parts after them
+// when more may follow.
+type TupleType struct {
+	Name   string
+	Doc    string
+	Fields []*TupleField
+	// Rest is the type of the parts after the positions, a slice, or nil.
+	Rest *Ref
+	// MinItems and MaxItems bound the number of parts.
+	MinItems, MaxItems *int
+}
+
+// TupleField is a position of a tuple. Its Type is an Optional when the
+// part may be absent, of a Part when its encoding declares headers.
+type TupleField struct {
+	Name string
+	Type *Ref
 }
 
 // HasHeaders reports whether an encoding of the parts declares headers.
@@ -1140,13 +1163,16 @@ func (b *builder) parts(value *Ref, m *oas.MediaType, hint string) *Parts {
 	for elem.Kind == Named && (elem.Type.Kind == Defined || elem.Type.Kind == Alias) {
 		elem = elem.Type.Underlying
 	}
-	elem = stripNullable(elem.Elem)
-	p := &Parts{Item: "json"}
-	switch {
-	case isFile(elem):
-		p.Item = "file"
-	case jsonType(elem) == "string":
-		p.Item = "text"
+	p := &Parts{Item: "file"}
+	if value.Kind == Tuple {
+		for _, f := range value.Tuple.Fields {
+			p.Kinds = append(p.Kinds, partKind(f.Type))
+		}
+		if value.Tuple.Rest != nil {
+			p.Item = partKind(value.Tuple.Rest.Elem)
+		}
+	} else {
+		p.Item = partKind(stripNullable(elem.Elem))
 	}
 	for i, enc := range m.PrefixEncoding {
 		var rule ParamProperty
@@ -1164,11 +1190,69 @@ func (b *builder) parts(value *Ref, m *oas.MediaType, hint string) *Parts {
 	return p
 }
 
+// partKind returns how a part becomes an item of type r: a file, text
+// (strings) or JSON.
+func partKind(r *Ref) string {
+	for r.Kind == Optional || r.Kind == Part || r.Kind == Nullable {
+		r = r.Elem
+	}
+	switch {
+	case isFile(r):
+		return "file"
+	case jsonType(r) == "string":
+		return "text"
+	}
+	return "json"
+}
+
+// tupleBody describes the struct of a body of positional parts with
+// prefixItems, s, named hint. A position is named after the component it
+// refers to, else its title, else its index (Part1); positions from
+// minItems on are optional, all of them without it. The parts after them
+// follow items: any part (a file) without it, none with false.
+func (b *builder) tupleBody(s *oas.Schema, hint string) *Ref {
+	t := &TupleType{Name: hint, Doc: strings.TrimSpace(s.Description), MinItems: s.MinItems, MaxItems: s.MaxItems}
+	names := namespace{"Rest": true, "Validate": true}
+	for i, item := range s.PrefixItems {
+		name := b.componentName(item)
+		if name == "" && deref(item) != nil {
+			name = strings.TrimSpace(deref(item).Title)
+		}
+		if name == "" {
+			name = fmt.Sprintf("Part%d", i+1)
+		}
+		name = names.claim(GoName(name))
+		typ := b.use(item, hint+name, nil)
+		if s.MinItems != nil && i >= *s.MinItems {
+			typ = &Ref{Kind: Optional, Elem: typ}
+		}
+		t.Fields = append(t.Fields, &TupleField{Name: name, Type: typ})
+	}
+	switch {
+	case s.Items == nil:
+		t.Rest = &Ref{Kind: Slice, Elem: fileRef()}
+	case s.Items.Bool == nil || *s.Items.Bool:
+		t.Rest = &Ref{Kind: Slice, Elem: b.use(s.Items, hint+"Item", nil)}
+	}
+	return &Ref{Kind: Tuple, Tuple: t}
+}
+
 // partValues returns the type of a body of positional parts, value, a
 // slice: a slice of Parts when JSON or text items have headers to carry,
 // which files hold themselves. Media types sharing the body share the
 // slice of Parts, which holds items without headers as well.
 func partValues(value *Ref, p *Parts) *Ref {
+	if value.Kind == Tuple {
+		for i, f := range value.Tuple.Fields {
+			if i < len(p.Prefix) && len(p.Prefix[i].Headers) > 0 {
+				f.Type = partOf(f.Type)
+			}
+		}
+		if r := value.Tuple.Rest; r != nil && len(p.Rest.Headers) > 0 {
+			r.Elem = partOf(r.Elem)
+		}
+		return value
+	}
 	if p.Item == "file" || !p.HasHeaders() {
 		return value
 	}
@@ -1180,6 +1264,19 @@ func partValues(value *Ref, p *Parts) *Ref {
 		return value
 	}
 	return &Ref{Kind: Slice, Checks: slice.Checks, Elem: &Ref{Kind: Part, Elem: slice.Elem}}
+}
+
+// partOf wraps r, the type of an item of positional parts, in a Part, for
+// its headers: inside an Optional, and not a file, which holds its own.
+// A Part already is one.
+func partOf(r *Ref) *Ref {
+	switch {
+	case r.Kind == Optional:
+		return &Ref{Kind: Optional, Elem: partOf(r.Elem)}
+	case r.Kind == Part || isFile(r):
+		return r
+	}
+	return &Ref{Kind: Part, Elem: r}
 }
 
 // markFileParts records which properties of multipart request bodies hold
@@ -1231,8 +1328,14 @@ func (b *builder) markFileParts() {
 // markPartItems marks the items of a body of positional parts that hold
 // files, like the file properties of multipart/form-data.
 func (b *builder) markPartItems(s *oas.Schema) {
-	if s = deref(s); s != nil && s.Items != nil {
+	if s = deref(s); s == nil {
+		return
+	}
+	if s.Items != nil {
 		b.markFile(s.Items)
+	}
+	for _, item := range s.PrefixItems {
+		b.markFile(item)
 	}
 }
 
@@ -1302,10 +1405,14 @@ func (b *builder) bodyValue(kind string, schema *oas.Schema, hint string) *Ref {
 	case "binary":
 		return &Ref{Kind: Builtin, Name: "[]byte"}
 	case "parts":
-		// Positional parts are items of the array the schema describes;
-		// without one, or with items by position (prefixItems), they are
-		// the parts themselves.
-		if s := deref(schema); s == nil || s.Items == nil || s.PrefixItems != nil {
+		// Positional parts are items of the array the schema describes,
+		// fields of a struct with items by position (prefixItems), and
+		// without either the parts themselves.
+		s := deref(schema)
+		switch {
+		case s != nil && len(s.PrefixItems) > 0:
+			return b.tupleBody(s, strings.TrimSuffix(hint, "Body")+"Parts")
+		case s == nil || s.Items == nil:
 			return &Ref{Kind: Slice, Elem: fileRef()}
 		}
 	}

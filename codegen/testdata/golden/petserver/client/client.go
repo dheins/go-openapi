@@ -356,6 +356,25 @@ func (c *Client) UploadRecords(ctx context.Context, req *api.UploadRecordsReques
 	return api.ReadUploadRecordsResponse(c.cfg, resp)
 }
 
+// UploadReport calls POST /pets/{petId}/report. A nil req sends no
+// parameters or body.
+//
+// Parts by position, then attachments.
+func (c *Client) UploadReport(ctx context.Context, req *api.UploadReportRequest) (api.UploadReportResponse, error) {
+	if req == nil {
+		req = &api.UploadReportRequest{}
+	}
+	hreq, err := api.NewUploadReportRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadUploadReportResponse(c.cfg, resp)
+}
+
 // ImportPet calls POST /pets/import. A nil req sends no parameters or body.
 //
 // Media types with different schemas.

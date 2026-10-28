@@ -426,6 +426,63 @@ paths:
       responses:
         "204":
           description: Stored.
+  /pets/{petId}/report:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: uploadReport
+      description: Parts by position, then attachments.
+      requestBody:
+        required: true
+        content:
+          multipart/related:
+            schema:
+              type: array
+              minItems: 2
+              maxItems: 4
+              prefixItems:
+                - $ref: "#/components/schemas/Pet"
+                - type: string
+                  contentMediaType: image/png
+                - title: note
+                  type: string
+                  maxLength: 10
+              items:
+                type: string
+                contentMediaType: text/csv
+            prefixEncoding:
+              - contentType: application/json
+              - contentType: image/png
+                headers:
+                  X-Seq:
+                    required: true
+                    schema:
+                      type: integer
+                      minimum: 1
+              - contentType: text/plain
+                headers:
+                  X-Lang:
+                    schema:
+                      type: string
+            itemEncoding:
+              contentType: text/csv
+      responses:
+        "200":
+          description: The report as stored.
+          content:
+            multipart/mixed:
+              schema:
+                type: array
+                prefixItems:
+                  - $ref: "#/components/schemas/Pet"
+                  - title: summary
+                    type: string
+                items: false
   /pets/import:
     post:
       operationId: importPet
