@@ -114,6 +114,16 @@ func DecodeParts[T any](resp *http.Response, body []byte, p server.Parts) ([]T, 
 	return items, nil
 }
 
+// DecodeTuple decodes a response of positional parts with prefixItems
+// into T, a tuple as server.DecodeTuple reads it.
+func DecodeTuple[T any](resp *http.Response, body []byte, p server.Parts) (T, error) {
+	v, err := server.DecodeTuple[T](body, resp.Header.Get("Content-Type"), p, oapi.Response)
+	if err != nil {
+		return v, &InvalidResponse{StatusCode: resp.StatusCode, Err: err}
+	}
+	return v, nil
+}
+
 // Invalid reports a response that failed validation.
 func Invalid(resp *http.Response, err error) error {
 	if err == nil {

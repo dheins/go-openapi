@@ -601,6 +601,9 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 				_, sub, _ := strings.Cut(m.MediaType, "/")
 				parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
 				check = fmt.Sprintf("b.Body(server.CheckParts(%s, %s))", value, parts)
+				if m.Field.Value.Kind == ir.Tuple {
+					check = fmt.Sprintf("b.Body(server.CheckTuple(%s, %s))", value, parts)
+				}
 			default:
 				continue
 			}
@@ -700,6 +703,9 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			f.imp(serverImport, "server")
 			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
 			stmt = fmt.Sprintf("client.PartsBody(r, %s, %s, %s)", ct, value, parts)
+			if m.Field.Value.Kind == ir.Tuple {
+				stmt = fmt.Sprintf("client.TupleBody(r, %s, %s, %s)", ct, value, parts)
+			}
 		case "text":
 			stmt = fmt.Sprintf("r.TextBody(%s, string(%s))", ct, value)
 		case "binary":
@@ -805,6 +811,14 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		readBody("body")
 		f.imp(serverImport, "server")
 		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", f.partsLiteral(r.Parts))
+		if r.Body.Kind == ir.Tuple {
+			w(2, "tuple, err := client.DecodeTuple[%s](resp, body, %s)", f.goType(r.Body), parts)
+			w(2, "if err != nil {")
+			w(3, "return nil, err")
+			w(2, "}")
+			w(2, "v.Body = tuple")
+			break
+		}
 		w(2, "items, err := client.DecodeParts[%s](resp, body, %s)", f.goType(sliceElem(r.Body)), parts)
 		w(2, "if err != nil {")
 		w(3, "return nil, err")

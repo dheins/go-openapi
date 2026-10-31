@@ -52,6 +52,10 @@ type Handler interface {
 	//
 	// File parts written the OpenAPI 3.1 way, with an encoding.
 	UploadRecords(ctx context.Context, req *UploadRecordsRequest) (UploadRecordsResponse, error)
+	// UploadReport handles POST /pets/{petId}/report.
+	//
+	// Parts by position, then attachments.
+	UploadReport(ctx context.Context, req *UploadReportRequest) (UploadReportResponse, error)
 	// ImportPet handles POST /pets/import.
 	//
 	// Media types with different schemas.

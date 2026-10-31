@@ -1,6 +1,7 @@
 CreatePet: the TypeScript client cannot send application/xml bodies yet
 GetContent: the TypeScript client cannot read headers with XML content yet; header X-Prefs of response 204 is left out
 EchoPrefs: the TypeScript client cannot send parameters with XML content yet (X-Prefs); the operation is left out
+UploadReport: the TypeScript client cannot send multipart/related bodies yet; the operation is left out
 GetCard: the TypeScript client cannot read application/xml responses yet; response 200 is unexpected to it
 PutCard: the TypeScript client cannot send application/xml bodies yet; the operation is left out
 BatchPets: the TypeScript client cannot send multipart/mixed bodies yet; the operation is left out

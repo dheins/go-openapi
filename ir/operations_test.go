@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -672,9 +673,12 @@ paths:
 	if mixed.Item != "file" || fmt.Sprint(mixed.Prefix) != "[{  false [] <nil> [image/png] [Content-Id]  }]" || fmt.Sprint(mixed.Rest.ContentTypes) != "[image/*]" {
 		t.Errorf("mixed = %+v", mixed)
 	}
-	// Items by position cannot be typed: the parts are files.
-	if related.Item != "file" || o.Body.Fields[2].Value.Elem.Name != "oapi.File" {
-		t.Errorf("related = %+v, %+v", related, o.Body.Fields[2].Value)
+	// Items by position are the fields of a tuple, here a text part; any
+	// parts after it are files, as items does not say.
+	tuple := o.Body.Fields[2].Value
+	if tuple.Kind != Tuple || tuple.Tuple.Name != "BatchRelatedRequestParts" || len(tuple.Tuple.Fields) != 1 || tuple.Tuple.Fields[0].Name != "Part1" ||
+		!slices.Equal(related.Kinds, []string{"text"}) || related.Item != "file" || tuple.Tuple.Rest.Elem.Name != "oapi.File" {
+		t.Errorf("related = %+v, %+v", related, tuple.Tuple)
 	}
 	if r := o.Responses[0]; r.Kind != "parts" || r.TypeName != "Batch200MixedResponse" || r.Parts.Item != "json" {
 		t.Errorf("response = %+v", r)
@@ -787,5 +791,53 @@ paths:
 		if o := operationNamed(t, m, name); !strings.Contains(o.Unsupported, want) {
 			t.Errorf("%s: unsupported = %q", name, o.Unsupported)
 		}
+	}
+}
+
+func TestTupleBody(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /t:
+    post:
+      operationId: send
+      requestBody:
+        content:
+          multipart/mixed:
+            schema:
+              type: array
+              minItems: 2
+              prefixItems:
+                - $ref: "#/components/schemas/Meta"
+                - {title: meta, type: string}
+                - {type: string, contentMediaType: image/png}
+              items: false
+      responses:
+        "200":
+          description: ok
+          content:
+            multipart/mixed:
+              schema: {type: array, prefixItems: [{type: integer}]}
+components:
+  schemas:
+    Meta: {type: object, properties: {a: {type: string}}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Send")
+	tuple := o.Body.Fields[0].Value.Tuple
+	var fields []string
+	for _, f := range tuple.Fields {
+		fields = append(fields, fmt.Sprintf("%s:%v", f.Name, f.Type.Kind == Optional))
+	}
+	// Names come from the component, the title or the position, numbered
+	// when they clash; positions from minItems on are optional, and
+	// items: false allows no more parts.
+	if got := strings.Join(fields, " "); got != "Meta:false Meta2:false Part3:true" || tuple.Rest != nil ||
+		!slices.Equal(o.Body.Media[0].Parts.Kinds, []string{"json", "text", "file"}) {
+		t.Errorf("fields = %s, rest %+v, kinds %v", got, tuple.Rest, o.Body.Media[0].Parts.Kinds)
+	}
+	// Without items, any parts may follow, as files.
+	resp := o.Responses[0]
+	if resp.Body.Tuple.Name != "Send200ResponseParts" || resp.Body.Tuple.Rest == nil || resp.Body.Tuple.Rest.Elem.Name != "oapi.File" || resp.Parts.Item != "file" {
+		t.Errorf("response = %+v", resp.Body.Tuple)
 	}
 }

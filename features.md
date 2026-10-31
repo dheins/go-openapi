@@ -39,9 +39,8 @@ shipped in.
   types than JSON and text. — later
 - Streamed request bodies that can be sent again, for retry middleware
   (a stream is sent once today). — later
-- Typed positional parts (`prefixItems` with `prefixEncoding`; such
-  bodies are raw parts today), `multipart/byteranges` for range requests,
-  and multipart bodies streamed with `itemSchema`. — later
+- `multipart/byteranges` for range requests, and multipart bodies
+  streamed with `itemSchema`. — later
 - XML for unions, maps, recursive types and `nodeType: none` on objects
   (answered with 415 today). — later
 - Multipart part headers whose schemas are objects, or whose `content` is
@@ -111,6 +110,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Typed positional parts: bodies with `prefixItems` are structs with a
+  field per position, in servers and Go clients. (1a88e98, 9c1d5c5)
 - [x] Parameters, response headers and part headers with text, form and
   XML `content`, in servers and Go clients, and text and form in
   TypeScript clients. (e99f176, a82434e, d394670)

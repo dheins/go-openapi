@@ -216,6 +216,15 @@ func (s *store) EchoPrefs(_ context.Context, req *api.EchoPrefsRequest) (api.Ech
 	return api.EchoPrefs204Response{XPrefs: oapi.Some(req.XPrefs)}, nil
 }
 
+func (s *store) UploadReport(_ context.Context, req *api.UploadReportRequest) (api.UploadReportResponse, error) {
+	s.seen["UploadReport"] = req
+	summary := fmt.Sprintf("%d attachments", len(req.Body.Rest))
+	if note, ok := req.Body.Note.Get(); ok {
+		summary += ", " + note.Value
+	}
+	return api.UploadReport200MixedResponse{Body: api.UploadReport200ResponseParts{Pet: req.Body.Pet, Summary: summary}}, nil
+}
+
 func (s *store) BatchPets(_ context.Context, req *api.BatchPetsRequest) (api.BatchPetsResponse, error) {
 	s.seen["BatchPets"] = req
 	// Each pet is marked as stored, except one named "Unstored".
@@ -1348,5 +1357,58 @@ func TestContentParams(t *testing.T) {
 	want := []string{"header X-Note: length must be at most 20", "path code: must be at least 1", "query where /role: required property is missing"}
 	if got := problemErrors(t, r); !slices.Equal(got, want) {
 		t.Errorf("errors = %q\nwant %q", got, want)
+	}
+}
+
+func TestTupleParts(t *testing.T) {
+	s, h := newTestServer()
+	ct, body := partsBody(t, "related",
+		header("Content-Type", "application/json"), `{"name": "Rex"}`,
+		header("Content-Type", "image/png", "X-Seq", "1"), "PNG",
+		header("Content-Type", "text/plain", "X-Lang", "en"), "hi",
+		header("Content-Type", "text/csv"), "a,b",
+	)
+	r := do(t, h, "POST", "/pets/1/report", ct, body)
+	if r.status != 200 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	got := s.seen["UploadReport"].(*api.UploadReportRequest).Body
+	if got.Pet.Name != "Rex" || string(got.Part2.Data) != "PNG" || got.Note.Value.Value != "hi" || got.Note.Value.Header.Get("X-Lang") != "en" ||
+		len(got.Rest) != 1 || string(got.Rest[0].Data) != "a,b" {
+		t.Errorf("parts = %+v", got)
+	}
+	// The response is a tuple too, without parts after its positions.
+	want := []string{"multipart/mixed", `application/json {"id":0,"name":"Rex"}`, "text/plain; charset=utf-8 1 attachments, hi"}
+	if got := readParts(t, r); !slices.Equal(got, want) {
+		t.Errorf("parts = %q", got)
+	}
+
+	// Missing, extra and invalid parts are reported at their index.
+	ct, body = partsBody(t, "related", header("Content-Type", "application/json"), `{"name": "Rex"}`)
+	r = do(t, h, "POST", "/pets/1/report", ct, body)
+	if got := problemErrors(t, r); !slices.Equal(got, []string{"body /1: part is missing"}) {
+		t.Errorf("errors = %q", got)
+	}
+	ct, body = partsBody(t, "related",
+		header("Content-Type", "application/json"), `{"name": "Rex"}`,
+		header("Content-Type", "image/png"), "PNG",
+		header("Content-Type", "text/plain"), "far too long",
+		header("Content-Type", "text/csv"), "a", header("Content-Type", "text/csv"), "b",
+	)
+	r = do(t, h, "POST", "/pets/1/report", ct, body)
+	want = []string{`body /1: part header "X-Seq" is missing`}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
+	}
+	ct, body = partsBody(t, "related",
+		header("Content-Type", "application/json"), `{"name": "Rex"}`,
+		header("Content-Type", "image/png", "X-Seq", "1"), "PNG",
+		header("Content-Type", "text/plain"), "far too long",
+		header("Content-Type", "text/csv"), "a", header("Content-Type", "text/csv"), "b",
+	)
+	r = do(t, h, "POST", "/pets/1/report", ct, body)
+	want = []string{"body /2: length must be at most 10", "body: must have at most 4 parts"}
+	if got := problemErrors(t, r); !slices.Equal(got, want) {
+		t.Errorf("errors = %q", got)
 	}
 }

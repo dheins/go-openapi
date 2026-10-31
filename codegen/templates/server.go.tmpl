@@ -76,6 +76,7 @@ type SecurityHandler interface {
 {{- end}}
 
 {{define "operation"}}
+{{- tupleDecls .}}
 // {{.RequestType}} holds the decoded and validated inputs of {{.Name}}.
 type {{.RequestType}} struct {
 {{- range .Params}}
