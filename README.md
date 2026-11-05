@@ -24,6 +24,8 @@ JSON Schema 2020-12; Swagger 2.0 documents are converted as they are read.
 - `codescan`: generates a document from Go types and `//goapi:` directives
 - `flatten`: writes a document of several files as one, with its inline
   types moved into `components` and unused components dropped
+- `diff`: the changes between two versions of a document, by what they
+  break for clients
 
 ```go
 spec, err := loader.Load("openapi.yaml")
@@ -43,6 +45,7 @@ goapi validate openapi.yaml
 goapi validate -format json -quiet openapi.yaml
 goapi convert -out openapi.yaml swagger.yaml          # Swagger 2.0 to OpenAPI 3.1
 goapi flatten -hoist -out flat.yaml openapi.yaml      # one file, inline types as components
+goapi diff main.yaml openapi.yaml                     # breaking changes, for CI
 goapi scan -out openapi.yaml ./...                    # a document from annotated Go code
 goapi serve openapi.yaml                              # the document and a Swagger UI or Redoc page
 goapi generate ts-client -out web/src/api openapi.yaml # a TypeScript client using fetch

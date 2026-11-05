@@ -11,6 +11,7 @@ its tests.
 - [Validate a document](#validate-a-document)
 - [Swagger 2.0 documents](#swagger-20-documents)
 - [Flatten a document](#flatten-a-document)
+- [Compare versions of a document](#compare-versions-of-a-document)
 - [Generate models](#generate-models)
 - [Generate a server](#generate-a-server)
 - [Requests](#requests)
@@ -170,6 +171,47 @@ Errors in the document are printed; one that loads despite them is
 flattened as it is, and one that cannot be loaded writes nothing and exits
 with 1. From Go, `flatten.Document(spec, flatten.Options{Hoist: true})`
 does the same.
+
+## Compare versions of a document
+
+```sh
+goapi diff old.yaml openapi.yaml
+goapi diff -fail-on warning -format json main.yaml openapi.yaml
+```
+
+`goapi diff` reports what changed from one version of a document to
+another, judged from the side of the API's clients: an **error** breaks a
+client written against the old version, a **warning** may break one, and
+other changes are **info**. Each is printed like a `goapi validate`
+diagnostic, at its line in the new document (or the old one, for what is
+gone), errors first, then a summary. It exits with 1 when a change is an
+error, or a warning with `-fail-on warning`, so a CI job can compare a
+branch's document with the main branch's; `-format json` gives each
+change with its place in both documents.
+
+Operations are matched by method and path, whatever their path
+parameters are called; parameters by place and name (path ones by
+position); responses by status; bodies by media type. Schemas are compared
+after following references, by which way their values go: what a client
+sends may only be accepted more widely, what it receives only more
+narrowly. Parameters and headers are text, so a number becoming a string
+is not a change for them.
+
+| | error | warning | info |
+|---|---|---|---|
+| Operations | removed | deprecated | added |
+| Parameters | required added, made required, serialized another way | removed | optional added, made optional, path parameter renamed |
+| Request bodies | made required, required one added, media type removed | removed | optional one added, media type added |
+| Responses | success status removed, media type removed, required header removed or made optional | status added, optional header removed | other status removed, header or media type added |
+| What a client sends | type, enum or constraint narrowed, property made required or added as required, a property removed when others are not allowed, fewer `oneOf`/`anyOf` alternatives | property removed | loosened, added |
+| What it receives | type widened (null now allowed among them), property removed or made optional | new enum values, constraints loosened, more alternatives | narrowed, added |
+| Security | a client meeting an old requirement meets no new one, a scheme used differently | | a requirement added as an alternative |
+| Servers | | URLs changed | |
+
+Webhooks are compared too, the other way round: the client receives their
+requests and sends their responses. From Go,
+`diff.Documents(oldSpec, newSpec)` returns the changes, with their
+severities, rules and places.
 
 ## Generate models
 

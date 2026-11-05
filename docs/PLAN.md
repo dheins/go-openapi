@@ -556,6 +556,21 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   numbers, where Go maps would lose them.
 - *Not done*: see [features.md](../features.md).
 
+### M27 – Diff ✅
+- [x] `diff.Documents`: operations, parameters, bodies, responses,
+  headers, security, servers and webhooks, with schemas compared by the
+  way their values go
+- [x] `goapi diff`, with `-format` and `-fail-on`
+
+**How it went**
+- *Clients' side*: one question decides every rule, whether a client of
+  the old document still works, so a constraint is an error in a request
+  and nothing in a response, and the reverse for a widened type.
+- *Text values*: comparing a path parameter's integer with a string as
+  JSON types called it narrowed; parameters and headers are text, so
+  their top-level types are compared as text.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
