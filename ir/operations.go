@@ -203,6 +203,14 @@ type BodyMedia struct {
 	Field *BodyField
 }
 
+// Ranges says which partial responses an operation declares next to a
+// 200 binary response: 206 with its media type, for one range (Single),
+// 206 multipart/byteranges, for several (Multi), and 416, for a range
+// that cannot be satisfied (Unsatisfiable).
+type Ranges struct {
+	Single, Multi, Unsatisfiable bool
+}
+
 // EventStream describes server-sent events whose data the itemSchema of
 // their media type types: as JSON of one schema, or of one per named kind
 // of event.
@@ -249,7 +257,10 @@ type Response struct {
 	// ContentTypeField means MediaType is a range such as "image/*", so
 	// the handler sets the actual type in a ContentType field.
 	ContentTypeField bool
-	Headers          []*Header
+	// Ranges are the partial responses the operation declares, for range
+	// requests of a 200 binary response; nil if none.
+	Ranges  *Ranges
+	Headers []*Header
 	// Links are the response's links, followed from each of its
 	// variants.
 	Links []*Link
@@ -431,6 +442,7 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 		}
 		o.Responses = append(o.Responses, variants...)
 	}
+	partialResponses(o)
 	if len(o.Responses) == 0 && o.Unsupported == "" {
 		o.Unsupported = "no response can be generated"
 		b.warnOperation(o, o.Unsupported)
@@ -764,9 +776,30 @@ func stripNullable(r *Ref) *Ref {
 	return r
 }
 
+// partialResponses notes, on the 200 binary responses of o, the partial
+// responses o declares for range requests: 206 with the same media type,
+// 206 multipart/byteranges, and 416.
+func partialResponses(o *Operation) {
+	declares := func(status, kind, mediaType string) bool {
+		return slices.ContainsFunc(o.Responses, func(r *Response) bool {
+			return r.Status == status && (kind == "" || r.Kind == kind) && (mediaType == "" || r.MediaType == mediaType)
+		})
+	}
+	multi, unsatisfiable := declares("206", "byteranges", ""), declares("416", "", "")
+	for _, r := range o.Responses {
+		if r.Status != "200" || r.Kind != "binary" {
+			continue
+		}
+		if single := declares("206", "binary", r.MediaType); single || multi {
+			r.Ranges = &Ranges{Single: single, Multi: multi, Unsatisfiable: unsatisfiable}
+		}
+	}
+}
+
 // mediaKind classifies a media type for bodies: json, xml, form,
-// multipart (multipart/form-data), parts (other multipart types, whose
-// parts are positional), jsonl, sse, text or binary.
+// multipart (multipart/form-data), byteranges (multipart/byteranges, the
+// parts of a range request), parts (other multipart types, whose parts are
+// positional), jsonl, sse, text or binary.
 func mediaKind(mt string) string {
 	mt = strings.ToLower(strings.TrimSpace(mt))
 	if base, _, ok := strings.Cut(mt, ";"); ok {
@@ -781,6 +814,8 @@ func mediaKind(mt string) string {
 		return "form"
 	case mt == "multipart/form-data":
 		return "multipart"
+	case mt == "multipart/byteranges":
+		return "byteranges"
 	case strings.HasPrefix(mt, "multipart/"):
 		return "parts"
 	case mt == "application/jsonl" || mt == "application/x-ndjson":
@@ -833,6 +868,11 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			schema = streamItem(m.Deref())
 		case "partstream":
 			schema = m.Deref().ItemSchema
+		}
+		if kind == "byteranges" {
+			b.warnAt(m, nil, "multipart/byteranges is a response to a range request, not a request body; it is answered with 415")
+			rejected = append(rejected, mt)
+			continue
 		}
 		if m.Deref().Encoding.Len() > 0 && kind != "multipart" {
 			b.warnAt(m, []string{"encoding"}, "the encoding object is not applied yet")
@@ -1505,6 +1545,9 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 		case "text":
 			v.Body = b.bodyValue(kind, media.Schema, "")
 			suffix = "Text"
+		case "byteranges":
+			v.Body = &Ref{Kind: Slice, Elem: &Ref{Kind: Builtin, Name: "oapi.ByteRange", Import: oapiImport}}
+			suffix = "Byteranges"
 		case "binary":
 			v.Body = &Ref{Kind: Builtin, Name: "[]byte"}
 			v.ContentTypeField = strings.Contains(mt, "*")

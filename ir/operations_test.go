@@ -888,3 +888,57 @@ components:
 		t.Errorf("response = %s %s %+v", resp.Kind, resp.TypeName, resp.Item)
 	}
 }
+
+func TestRangeResponses(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+paths:
+  /f:
+    get:
+      operationId: get
+      responses:
+        "200":
+          description: ok
+          content:
+            image/png: {}
+            text/plain: {}
+        "206":
+          description: part
+          content:
+            image/png: {}
+            multipart/byteranges: {}
+    post:
+      operationId: post
+      requestBody:
+        content:
+          multipart/byteranges: {}
+          application/octet-stream: {}
+      responses:
+        "200":
+          description: ok
+          content:
+            image/png: {}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Get")
+	var got []string
+	for _, r := range o.Responses {
+		s := r.Status + " " + r.Kind
+		if r.Ranges != nil {
+			s += fmt.Sprintf(" %+v", *r.Ranges)
+		}
+		got = append(got, s)
+	}
+	// Only the binary 200 is answered in ranges; without a 416, a range
+	// that cannot be satisfied gets all of it.
+	want := []string{"200 binary {Single:true Multi:true Unsatisfiable:false}", "200 text", "206 binary", "206 byteranges"}
+	if !slices.Equal(got, want) || o.Responses[3].Body.Elem.Name != "oapi.ByteRange" {
+		t.Errorf("responses = %q", got)
+	}
+	// Without a 206, a 200 is not.
+	if post := operationNamed(t, m, "Post"); post.Responses[0].Ranges != nil || len(post.Body.Media) != 1 {
+		t.Errorf("post = %+v, %d media", post.Responses[0].Ranges, len(post.Body.Media))
+	}
+	if !slices.ContainsFunc(m.Warnings, func(w Warning) bool { return strings.Contains(w.Message, "multipart/byteranges is a response") }) {
+		t.Errorf("warnings = %+v", m.Warnings)
+	}
+}

@@ -48,6 +48,10 @@ type Handler interface {
 	GetPhoto(ctx context.Context, req *GetPhotoRequest) (GetPhotoResponse, error)
 	// UploadPhoto handles PUT /pets/{petId}/photo.
 	UploadPhoto(ctx context.Context, req *UploadPhotoRequest) (UploadPhotoResponse, error)
+	// DownloadPhoto handles GET /pets/{petId}/photo.png.
+	//
+	// The photo, or ranges of it.
+	DownloadPhoto(ctx context.Context, req *DownloadPhotoRequest) (DownloadPhotoResponse, error)
 	// UploadRecords handles POST /pets/{petId}/records.
 	//
 	// File parts written the OpenAPI 3.1 way, with an encoding.

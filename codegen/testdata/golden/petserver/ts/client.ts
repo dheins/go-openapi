@@ -242,6 +242,26 @@ const uploadPhotoSpec: OperationSpec = {
   responses: [{ status: "204" }],
 };
 
+/** The inputs of downloadPhoto. */
+export interface DownloadPhotoRequest {
+  petId: number;
+  range?: string;
+  ifRange?: string;
+}
+
+/** The responses of downloadPhoto. */
+export type DownloadPhotoResponse =
+  | { status: 200; body: Blob; headers: { eTag?: string } }
+  | { status: 206; body: Blob; headers: { contentRange?: string } }
+  | { status: 416 };
+
+const downloadPhotoSpec: OperationSpec = {
+  method: "GET",
+  path: "/pets/{petId}/photo.png",
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "range", name: "Range", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string" } }, { key: "ifRange", name: "If-Range", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string" } }],
+  responses: [{ status: "200", mediaType: "image/png", kind: "binary", headers: [{ key: "eTag", name: "ETag", schema: { kind: "string" } }] }, { status: "206", mediaType: "image/png", kind: "binary", headers: [{ key: "contentRange", name: "Content-Range", schema: { kind: "string" } }] }, { status: "416" }],
+};
+
 /** The inputs of uploadRecords. */
 export interface UploadRecordsRequest {
   petId: number;
@@ -794,6 +814,15 @@ export class Client {
   /** PUT /pets/{petId}/photo. */
   uploadPhoto(req: UploadPhotoRequest, call?: CallOptions): Promise<UploadPhotoResponse> {
     return send(this.#cfg, uploadPhotoSpec, req, call) as Promise<UploadPhotoResponse>;
+  }
+
+  /**
+   * GET /pets/{petId}/photo.png.
+   *
+   * The photo, or ranges of it.
+   */
+  downloadPhoto(req: DownloadPhotoRequest, call?: CallOptions): Promise<DownloadPhotoResponse> {
+    return send(this.#cfg, downloadPhotoSpec, req, call) as Promise<DownloadPhotoResponse>;
   }
 
   /**

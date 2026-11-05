@@ -212,6 +212,13 @@ func ifRangeMatches(r *http.Request, header http.Header) bool {
 	return err == nil && err2 == nil && asked.Equal(modified)
 }
 
+// WriteByteRanges sends ranges as a multipart/byteranges body, for a 206
+// response a handler builds itself: see EncodeByteRanges.
+func WriteByteRanges(w http.ResponseWriter, status int, ranges []oapi.ByteRange, header http.Header) error {
+	body, ct, err := EncodeByteRanges(ranges)
+	return writeMultipart(w, status, body, ct, header, err)
+}
+
 // EncodeByteRanges encodes ranges as a multipart/byteranges body, each
 // part with its content type and Content-Range, and returns it with its
 // content type, with a new boundary.
