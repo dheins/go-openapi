@@ -9,6 +9,7 @@
 //	goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
 //	goapi convert [-out file] [-format yaml|json] file
 //	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
+//	goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
 //	goapi version
 package main
 
@@ -49,6 +50,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runConvert(args[1:], stdout, stderr)
 	case "scan":
 		return runScan(args[1:], stdout, stderr)
+	case "serve":
+		return runServe(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
 		fmt.Fprintln(stdout, "goapi", version())
 		return exitOK
@@ -82,6 +85,7 @@ Usage:
   goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
   goapi convert [-out file] [-format yaml|json] file
   goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
+  goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
   goapi version
 
 Commands:
@@ -92,6 +96,7 @@ Commands:
   generate ts-client generate a TypeScript client for a document
   convert           write a Swagger 2.0 document as OpenAPI 3.1
   scan              write the document that goapi directives in Go code describe
+  serve             serve a document and a page rendering it, with Swagger UI or Redoc
   version           print the version of goapi
 `)
 }
