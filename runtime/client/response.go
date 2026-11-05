@@ -125,6 +125,16 @@ func DecodeTuple[T any](resp *http.Response, body []byte, p server.Parts) (T, er
 	return v, nil
 }
 
+// DecodeByteRanges decodes a multipart/byteranges response into its
+// ranges.
+func DecodeByteRanges(resp *http.Response, body []byte) ([]oapi.ByteRange, error) {
+	ranges, err := server.DecodeByteRanges(body, resp.Header.Get("Content-Type"))
+	if err != nil {
+		return nil, &InvalidResponse{StatusCode: resp.StatusCode, Err: err}
+	}
+	return ranges, nil
+}
+
 // PartStream returns the positional parts of a response as they arrive,
 // decoded as DecodeParts decodes them, each at most c.MaxResponseBytes
 // long. The body is closed when the loop ends, as with JSONLines. A part

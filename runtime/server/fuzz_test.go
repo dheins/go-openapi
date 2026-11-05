@@ -292,3 +292,59 @@ func FuzzStreamBodies(f *testing.F) {
 		}
 	})
 }
+
+// FuzzRange checks that the ranges of any Range header are within the
+// representation, and that the response written for them reads back as
+// those bytes.
+func FuzzRange(f *testing.F) {
+	f.Add("bytes=0-4", uint16(10))
+	f.Add("bytes=-3, 5-", uint16(10))
+	f.Add("bytes=0-0,2-2,4-", uint16(7))
+	f.Add("bytes=20-", uint16(3))
+	all := Ranges{Single: true, Multi: true, Unsatisfiable: true}
+	f.Fuzz(func(t *testing.T, header string, n uint16) {
+		size := int64(n)
+		ranges, err := ParseRange(header, size)
+		for _, r := range ranges {
+			if r.Start < 0 || r.End < r.Start || r.End >= size {
+				t.Fatalf("%q of %d: range %+v", header, size, r)
+			}
+		}
+		body := make([]byte, size)
+		for i := range body {
+			body[i] = byte(i)
+		}
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("Range", header)
+		rec := httptest.NewRecorder()
+		if werr := WriteBytesRanges(rec, req, 200, "application/octet-stream", body, nil, all); werr != nil {
+			t.Fatal(werr)
+		}
+		switch {
+		case err != nil:
+			if rec.Code != http.StatusRequestedRangeNotSatisfiable {
+				t.Fatalf("%q of %d: %d, want 416", header, size, rec.Code)
+			}
+		case len(ranges) == 0:
+			if rec.Code != 200 || !bytes.Equal(rec.Body.Bytes(), body) {
+				t.Fatalf("%q of %d: %d", header, size, rec.Code)
+			}
+		case len(ranges) == 1:
+			start, end, total, err := ParseContentRange(rec.Header().Get("Content-Range"))
+			if rec.Code != 206 || err != nil || start != ranges[0].Start || end != ranges[0].End || total != size ||
+				!bytes.Equal(rec.Body.Bytes(), body[start:end+1]) {
+				t.Fatalf("%q of %d: %d %s, %v", header, size, rec.Code, rec.Header().Get("Content-Range"), err)
+			}
+		default:
+			got, err := DecodeByteRanges(rec.Body.Bytes(), rec.Header().Get("Content-Type"))
+			if rec.Code != 206 || err != nil || len(got) != len(ranges) {
+				t.Fatalf("%q of %d: %d %v", header, size, rec.Code, err)
+			}
+			for i, br := range got {
+				if br.Start != ranges[i].Start || br.End != ranges[i].End || br.Size != size || !bytes.Equal(br.Data, body[br.Start:br.End+1]) {
+					t.Fatalf("%q of %d: part %d is %+v", header, size, i, br)
+				}
+			}
+		}
+	})
+}
