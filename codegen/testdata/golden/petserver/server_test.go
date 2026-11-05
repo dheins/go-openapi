@@ -527,6 +527,17 @@ func TestMiddlewareAndDocument(t *testing.T) {
 	if r := do(t, plain, "GET", "/openapi.json", "", ""); r.status != 404 {
 		t.Errorf("document served without WithDocument: %d", r.status)
 	}
+
+	// The documentation page loads the document, which it implies, below
+	// the base path.
+	docs := NewServer(s, auth{}, server.WithDocumentPage("/docs", server.Redoc), server.WithLogger(slog.New(slog.DiscardHandler)))
+	if r := do(t, docs, "GET", "/docs", "", ""); r.status != 200 || !strings.Contains(r.body, `{"url":"/v1/openapi.json"}`) ||
+		!strings.Contains(r.body, "<title>Pet server</title>") || r.header.Get("Content-Security-Policy") == "" {
+		t.Errorf("page: %d %v\n%s", r.status, r.header, r.body)
+	}
+	if r := do(t, docs, "GET", "/openapi.json", "", ""); r.status != 200 {
+		t.Errorf("document of the page: %d", r.status)
+	}
 }
 
 func TestBasePathAndUnknownRoutes(t *testing.T) {
