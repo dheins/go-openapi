@@ -79,6 +79,15 @@ func TestTypeScriptClient(t *testing.T) {
 	if got := s.seen["Upload"].(*api.UploadRequest).Body.Value; got["a"] != "b" {
 		t.Errorf("upload = %v", got)
 	}
+	// Positional parts, with their headers and the file's name.
+	report := s.seen["UploadReport"].(*api.UploadReportRequest).Body
+	if report.Pet.Name != "Rex" || report.Part2.Name != "rex.png" || report.Part2.Header.Get("X-Seq") != "1" || string(report.Part2.Data) != "PNG" ||
+		report.Note.Value.Value != "hi" || report.Note.Value.Header.Get("X-Lang") != "en" || len(report.Rest) != 1 || report.Rest[0].ContentType != "text/csv" {
+		t.Errorf("report = %+v", report)
+	}
+	if batch := s.seen["BatchPets"].(*api.BatchPetsRequest).Body; len(batch) != 2 || batch[1].Value.Name != "Tom" || !slices.Equal(batch[1].Header.Values("X-Tags"), []string{"a, b"}) {
+		t.Errorf("batch = %+v", batch)
+	}
 	lines := s.seen["PutLines"].(*api.PutLinesRequest)
 	if lines.ID != "o-1" || len(lines.Body.Lines) != 2 || lines.Body.Lines[0].Tags.Value[1] != "sweet" || string(lines.Body.Receipt.Value.Data) != "paid" {
 		t.Errorf("lines = %+v", lines)
