@@ -753,6 +753,49 @@ When a response offers several media types, pick one with
 `server.Negotiate(r, "application/jsonl", "text/csv")`, which follows the
 `Accept` header.
 
+### Range requests
+
+An operation that declares a `206` answers range requests of its `200`
+binary response itself: the handler returns the whole body, and the
+server sends the parts the `Range` header asks for, as the document
+declares them:
+
+```yaml
+responses:
+  "200":
+    headers: {ETag: {schema: {type: string}}}
+    content: {image/png: {schema: {type: string, format: binary}}}
+  "206":
+    headers: {Content-Range: {schema: {type: string}}}
+    content:
+      image/png: {schema: {type: string, format: binary}}  # one range
+      multipart/byteranges: {}                              # several
+  "416": {description: No range is in the photo.}
+```
+
+- **One range** is a 206 with the response's media type and a
+  `Content-Range` (`bytes 2-4/10`); **several** are a 206
+  `multipart/byteranges` body, each part with its own; and **none that
+  can be satisfied** is a 416 problem with `Content-Range: bytes */10`.
+  What the document does not declare gets the whole body, which a server
+  may always send instead.
+- `If-Range` is checked against the `ETag` (a strong one) or
+  `Last-Modified` the handler sets: a stale one gets the whole body.
+- The 200 says `Accept-Ranges: bytes`. Only GET is answered in ranges.
+  A header asking for more than 32 ranges, or for more bytes than the
+  whole, is ignored, so a request cannot have it sent many times over.
+- A handler can still build a partial response itself, for content it
+  does not hold in memory: `server.ParseRange(header, size)` resolves the
+  ranges, and a `...206ByterangesResponse` holds `[]oapi.ByteRange`
+  (`Start`, `End`, `Size`, `ContentType`, `Data`).
+
+Clients send `Range` as the document declares it, a header parameter,
+and read the ranges: a single range is the binary variant, with its
+`Content-Range` (`server.ParseContentRange` parses it), and several are
+`[]oapi.ByteRange`, each checked against its part's `Content-Range`.
+`multipart/byteranges` request bodies are answered with 415, with a
+warning.
+
 ## Errors
 
 A method can return an error instead of a response:
@@ -1037,7 +1080,7 @@ if (resp.status === 200) {
   - Positional multipart bodies (`multipart/mixed` and the like) are arrays of their items, or for `prefixItems` an object with a property per position and `rest`. A file is a `Blob`; an item whose encoding declares headers is a `Part<T>`, `{ header: Headers; value: T }`, files too. The runtime writes them itself, with each part's headers and length, and reads them as they arrive.
   - JSON Lines, server-sent event and streamed multipart bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
-- **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines and streamed parts are `items` and server-sent events `events`, all `AsyncIterable`s that stop the stream when you `break`. The parts of a response are checked against their encodings as they are read.
+- **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines and streamed parts are `items` and server-sent events `events`, all `AsyncIterable`s that stop the stream when you `break`. A `multipart/byteranges` body is a `ByteRange[]`, `{ start, end, size, contentType, data }`. The parts of a response are checked against their encodings as they are read.
 - **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. A value that is not there is left out, for the request's validation to report if it is required.
 - **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.

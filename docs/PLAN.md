@@ -502,6 +502,25 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   bodies, the same way for arrays, tuples and streams.
 - *Not done*: see [features.md](../features.md).
 
+### M24 – Range requests ✅
+- [x] `server.ParseRange`, `ParseContentRange`, `WriteBytesRanges` and
+  `EncodeByteRanges`/`DecodeByteRanges`, and `oapi.ByteRange`
+- [x] Operations declaring a 206 answer ranges of their 200 binary body;
+  `multipart/byteranges` responses in servers and Go and TypeScript
+  clients
+
+**How it went**
+- *Answered by the runtime*: a handler returns the whole body, as it
+  would without ranges, and the server cuts it; only the responses the
+  document declares are sent, and anything else gets the whole body,
+  which HTTP always allows.
+- *Byteranges are files*: their parts are positional parts with a
+  Content-Range, so the multipart reader and writer of M23 read and write
+  them, in Go and TypeScript.
+- *A TypeScript header bug*: the end-to-end test found that scalar
+  headers with commas were quoted, which the Go client never did.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
