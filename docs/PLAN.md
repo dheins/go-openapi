@@ -480,6 +480,28 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   a part, so content types, headers and kinds behave the same.
 - *Not done*: see [features.md](../features.md).
 
+### M23 – Streamed positional parts ✅
+- [x] `server.ScanParts`, `PartWriter`, `PartStreamBody` and
+  `WritePartStream`, and `client.PartStreamBody` and `PartStream`: parts
+  read and written one at a time
+- [x] Multipart media types with `itemSchema` generated as streams of
+  their items, in servers and Go clients
+- [x] Positional multipart in TypeScript clients: arrays, tuples and
+  streams, with part headers in `Part<T>`
+
+**How it went**
+- *A reader of its own*: `mime/multipart` ends a part at the delimiter
+  after it, which it can only tell from what follows, so a part sent as
+  it is produced arrived with the next one. Parts are written with a
+  `Content-Length`, and `ScanParts` takes a part at its length; it reads
+  other bodies as `mime/multipart` does, which `FuzzMultipart` compares.
+- *Only with itemSchema*: array schemas stay read whole, so nothing
+  generated before changes, and their counts are still checked first.
+- *TypeScript writes parts itself*: `FormData` makes only form-data and
+  cannot set part headers, so the runtime writes and parses multipart
+  bodies, the same way for arrays, tuples and streams.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

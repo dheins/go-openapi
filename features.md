@@ -39,8 +39,7 @@ shipped in.
   types than JSON and text. — later
 - Streamed request bodies that can be sent again, for retry middleware
   (a stream is sent once today). — later
-- `multipart/byteranges` for range requests, and multipart bodies
-  streamed with `itemSchema`. — later
+- `multipart/byteranges` for range requests. — later
 - XML for unions, maps, recursive types and `nodeType: none` on objects
   (answered with 415 today). — later
 - Multipart part headers whose schemas are objects, or whose `content` is
@@ -76,9 +75,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   (`client.WithMiddleware`). — not planned
 - TypeScript clients: full duplex, reading a streamed response while the
   request still streams (`duplex: "half"` sends the request first). — later
-- TypeScript clients: XML and positional multipart bodies and responses,
-  parameters and response headers with XML `content`, headers of
-  multipart parts (`FormData` cannot set them), and `int64`
+- TypeScript clients: XML bodies and responses, parameters and response
+  headers with XML `content`, headers of `multipart/form-data` parts
+  (`FormData` cannot set them), quoted-printable parts, and `int64`
   values beyond 2^53 (they are `number`s). Cookie parameters cannot be
   sent from browsers, which do not let scripts set `Cookie`. — later
 
@@ -110,6 +109,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Streamed positional parts: multipart bodies and responses with
+  `itemSchema`, read and written a part at a time, in servers and Go and
+  TypeScript clients; positional multipart in TypeScript clients.
+  (13f4bd4, e9e0725, 9bc3ee6)
 - [x] Typed positional parts: bodies with `prefixItems` are structs with a
   field per position, in servers and Go clients. (1a88e98, 9c1d5c5)
 - [x] Parameters, response headers and part headers with text, form and
