@@ -14,7 +14,7 @@ import (
 // and tsResponseKinds the response kinds it reads.
 var (
 	tsBodyKinds     = []string{"json", "form", "multipart", "parts", "partstream", "text", "binary", "jsonl", "sse"}
-	tsResponseKinds = []string{"", "json", "text", "binary", "parts", "partstream", "jsonl", "sse"}
+	tsResponseKinds = []string{"", "json", "text", "binary", "byteranges", "parts", "partstream", "jsonl", "sse"}
 )
 
 // client renders client.ts: the credentials, the request and response
@@ -116,6 +116,9 @@ export class Client {
 	}
 	if strings.Contains(body, "Part<") {
 		imports = append(imports, "type Part")
+	}
+	if strings.Contains(body, "ByteRange[]") {
+		imports = append(imports, "type ByteRange")
 	}
 	if strings.Contains(body, "$ref(") {
 		imports = append(imports, "ref as $ref")
@@ -418,6 +421,8 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 			fields = append(fields, "body: string")
 		case "binary":
 			fields = append(fields, "body: Blob")
+		case "byteranges":
+			fields = append(fields, "body: ByteRange[]")
 		case "jsonl":
 			fields = append(fields, "items: AsyncIterable<"+g.tsType(r.Item)+">")
 		case "parts":

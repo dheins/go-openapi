@@ -9,8 +9,8 @@ import { test } from "node:test";
 import { Client, InvalidRequestError, InvalidResponseError } from "./index.ts";
 
 // respond returns a client whose fetch answers with body, sent a byte at
-// a time, and records the request.
-function respond(body: string, boundary = "b"): { client: Client; sent: { init?: RequestInit | undefined } } {
+// a time, of the multipart type subtype, and records the request.
+function respond(body: string, status = 200, subtype = "mixed"): { client: Client; sent: { init?: RequestInit | undefined } } {
   const sent: { init?: RequestInit | undefined } = {};
   const fetch = async (_: RequestInfo | URL, init?: RequestInit) => {
     sent.init = init;
@@ -25,7 +25,7 @@ function respond(body: string, boundary = "b"): { client: Client; sent: { init?:
         }
       },
     });
-    return new Response(stream, { status: 200, headers: { "Content-Type": `multipart/mixed; boundary="${boundary}"` } });
+    return new Response(stream, { status, headers: { "Content-Type": `multipart/${subtype}; boundary="b"` } });
   };
   return { client: new Client({ baseUrl: "http://pets.test", fetch, validateResponses: true }), sent };
 }
@@ -84,4 +84,26 @@ test("parts are written with their headers and lengths", async () => {
   await assert.rejects(client.batchPets({ body: [{ header: new Headers({ "X-Seq": "0" }), value: { name: "Rex" } }] }), (e: unknown) =>
     e instanceof InvalidRequestError && e.issues[0]?.message === 'part header "X-Seq": must be >= 1',
   );
+});
+
+test("byte ranges are read from their Content-Range", async () => {
+  const part = (range: string, data: string) => `Content-Type: image/png\r\nContent-Range: ${range}\r\n\r\n${data}`;
+  const { client } = respond(`--b\r\n${part("bytes 0-1/*", "PN")}\r\n--b\r\n${part("BYTES 4-4/10", "G")}\r\n--b--\r\n`, 206, "byteranges");
+  const got = await client.downloadPhoto({ petId: 1, range: "bytes=0-1,4-4" });
+  if (got.status !== 206 || got.contentType !== "multipart/byteranges") {
+    throw new Error(`got ${got.status}`);
+  }
+  assert.deepEqual(
+    got.body.map((r) => `${r.start}-${r.end}/${r.size} ${r.data.size}`),
+    ["0-1/-1 2", "4-4/10 1"],
+  );
+  for (const [body, message] of [
+    [`--b\r\nContent-Type: image/png\r\n\r\nPN\r\n--b--`, /\/0: part header "Content-Range" is missing/],
+    [`--b\r\n${part("bytes 0-3/10", "PN")}\r\n--b--`, /\/0: bytes 0-3 hold 2 bytes of data/],
+    [`--b\r\n${part("bytes 0-1/1", "PN")}\r\n--b--`, /is not a range of bytes/],
+    [`--b\r\n${part("bytes 0-1/2", "PN")}`, /the body ends inside a part/],
+  ] as const) {
+    const { client } = respond(body, 206, "byteranges");
+    await assert.rejects(client.downloadPhoto({ petId: 1, range: "bytes=0-1" }), (e: unknown) => e instanceof InvalidResponseError && message.test(e.message));
+  }
 });
