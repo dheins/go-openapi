@@ -56,6 +56,10 @@ type Handler interface {
 	//
 	// Parts by position, then attachments.
 	UploadReport(ctx context.Context, req *UploadReportRequest) (UploadReportResponse, error)
+	// StreamPhotos handles POST /pets/{petId}/photos.
+	//
+	// Photos sent one by one, each acknowledged as it arrives.
+	StreamPhotos(ctx context.Context, req *StreamPhotosRequest) (StreamPhotosResponse, error)
 	// ImportPet handles POST /pets/import.
 	//
 	// Media types with different schemas.

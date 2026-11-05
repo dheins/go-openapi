@@ -4,6 +4,19 @@
 
 ### Added
 
+- Streamed positional parts: a multipart body or response of positional
+  parts with an `itemSchema` (3.2) and no `schema` is a stream of its
+  items, an `iter.Seq2` read one part at a time by handlers and Go
+  clients, and written as it is produced, each part checked against its
+  encoding. Operations streaming both ways are full duplex. Runtime:
+  `server.ScanParts`, `PartWriter`, `PartsContentType`, `PartStreamBody`,
+  `WritePartStream`, `ErrPartTooLarge`, `client.PartStreamBody` and
+  `client.PartStream`.
+- TypeScript clients send and read positional multipart bodies and
+  responses: arrays of items, tuples as objects with a property per
+  position, and streams as `Iterable`s and `AsyncIterable`s. Items whose
+  encoding declares headers, files included, are `Part<T>`s with the
+  part's `Headers`, which are checked before sending and when read.
 - Typed positional parts: a multipart body or response of positional
   parts with `prefixItems` is a generated struct (`<Op>RequestParts`)
   with a field per position, a file, text or JSON by its schema, named
@@ -360,6 +373,9 @@
 
 ### Changed
 
+- Positional parts are written with a `Content-Length` header, so that a
+  reader can take each one as soon as it has arrived; the files of parts
+  read from goapi senders have it in their `oapi.File.Header`.
 - A positional multipart body or response with `prefixItems` is a struct
   of its parts instead of a `[]oapi.File`.
 - The TypeScript runtime's parameter and header descriptors have

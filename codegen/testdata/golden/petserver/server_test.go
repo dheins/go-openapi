@@ -225,6 +225,24 @@ func (s *store) UploadReport(_ context.Context, req *api.UploadReportRequest) (a
 	return api.UploadReport200MixedResponse{Body: api.UploadReport200ResponseParts{Pet: req.Body.Pet, Summary: summary}}, nil
 }
 
+// StreamPhotos acknowledges each photo as it arrives, with its X-Seq.
+func (s *store) StreamPhotos(_ context.Context, req *api.StreamPhotosRequest) (api.StreamPhotosResponse, error) {
+	acks := func(yield func(oapi.Part[string], error) bool) {
+		for photo, err := range req.Body {
+			if err != nil {
+				yield(oapi.Part[string]{}, err)
+				return
+			}
+			seq := photo.Header.Get("X-Seq")
+			ack := oapi.Part[string]{Header: textproto.MIMEHeader{"X-Seq": {seq}}, Value: fmt.Sprintf("photo %s: %d bytes", seq, len(photo.Data))}
+			if !yield(ack, nil) {
+				return
+			}
+		}
+	}
+	return api.StreamPhotos200MixedResponse{Items: acks}, nil
+}
+
 func (s *store) BatchPets(_ context.Context, req *api.BatchPetsRequest) (api.BatchPetsResponse, error) {
 	s.seen["BatchPets"] = req
 	// Each pet is marked as stored, except one named "Unstored".

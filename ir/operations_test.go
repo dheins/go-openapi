@@ -841,3 +841,50 @@ components:
 		t.Errorf("response = %+v", resp.Body.Tuple)
 	}
 }
+
+func TestStreamedPartsBody(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /t:
+    post:
+      operationId: send
+      requestBody:
+        content:
+          multipart/mixed:
+            itemSchema: {type: string, contentMediaType: image/png}
+          multipart/related:
+            schema: {type: array, items: {type: string}}
+            itemSchema: {type: string}
+      responses:
+        "200":
+          description: ok
+          content:
+            multipart/mixed:
+              itemSchema: {$ref: "#/components/schemas/Meta"}
+              itemEncoding:
+                headers:
+                  X-Seq: {schema: {type: integer}}
+components:
+  schemas:
+    Meta: {type: object, properties: {a: {type: string}}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Send")
+	// With itemSchema alone, the parts are a stream of its items.
+	media := o.Body.Media[0]
+	if media.Kind != "partstream" || media.Field.Value.Kind != Stream || media.Field.Value.Elem.Name != "oapi.File" || media.Parts.Item != "file" {
+		t.Errorf("request = %s %+v %+v", media.Kind, media.Field.Value, media.Parts)
+	}
+	// Next to a schema, the itemSchema is not applied.
+	if media := o.Body.Media[1]; media.Kind != "parts" {
+		t.Errorf("with a schema: %s", media.Kind)
+	}
+	if !slices.ContainsFunc(m.Warnings, func(w Warning) bool { return strings.Contains(w.Message, "itemSchema is not applied") }) {
+		t.Errorf("warnings = %+v", m.Warnings)
+	}
+	// Items with headers are oapi.Parts.
+	resp := o.Responses[0]
+	if resp.Kind != "partstream" || resp.TypeName != "Send200MixedResponse" || resp.Item.Kind != Part || resp.Item.Elem.Type.Name != "Meta" || resp.Parts.Item != "json" {
+		t.Errorf("response = %s %s %+v", resp.Kind, resp.TypeName, resp.Item)
+	}
+}

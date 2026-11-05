@@ -423,13 +423,45 @@ export type Content = "json" | "text" | "form";
 
 export interface BodyMediaSpec {
   readonly mediaType: string;
-  readonly kind: "json" | "form" | "multipart" | "text" | "binary" | "jsonl" | "sse";
+  readonly kind: "json" | "form" | "multipart" | "parts" | "partstream" | "text" | "binary" | "jsonl" | "sse";
   /** The request property holding a body of this media type. */
   readonly key: string;
   /** The schema of the body, or of each item of a stream. */
   readonly schema: Schema;
   /** How the data of server-sent events is typed, if it is. */
   readonly events?: EventsSpec;
+  /** The parts of positional parts (parts, and partstream streams). */
+  readonly parts?: PartsSpec;
+}
+
+/** How an item of positional parts is a part: a file (a Blob), its text,
+ * or its body as JSON, of schema; a Part with the part's headers if part
+ * is set. */
+export interface PartItemSpec {
+  readonly kind: "file" | "text" | "json";
+  readonly schema: Schema;
+  readonly part?: boolean;
+}
+
+/** The encoding of a part: the content types it may have, the first of
+ * which it is written with unless it is a range, and the headers it
+ * carries. */
+export interface PartEncoding {
+  readonly contentTypes?: readonly string[];
+  readonly headers?: readonly Omit<HeaderSpec, "key">[];
+}
+
+/** A body of positional parts (multipart/mixed and the like): the
+ * positions of a tuple, by key, and the items of the parts after them,
+ * or of all of them; none may follow without item. Encodings apply to
+ * the first parts by position, encoding to the others. */
+export interface PartsSpec {
+  readonly prefix?: readonly (PartItemSpec & { readonly key: string; readonly optional?: boolean })[];
+  readonly item?: PartItemSpec;
+  readonly minItems?: number;
+  readonly maxItems?: number;
+  readonly encodings?: readonly PartEncoding[];
+  readonly encoding?: PartEncoding;
 }
 
 /** The data of typed server-sent events: of one schema, or of one per
@@ -452,8 +484,10 @@ export interface ResponseSpec {
   /** "200", a range such as "4XX", or "default". */
   readonly status: string;
   readonly mediaType?: string;
-  readonly kind?: "json" | "text" | "binary" | "jsonl" | "sse";
+  readonly kind?: "json" | "text" | "binary" | "parts" | "partstream" | "jsonl" | "sse";
   readonly schema?: Schema;
+  /** The parts of positional parts. */
+  readonly parts?: PartsSpec;
   /** The schema of each item, for JSON Lines. */
   readonly item?: Schema;
   /** How the data of server-sent events is typed, if it is. */
@@ -628,6 +662,13 @@ export interface ServerEvent<T = string> {
   data: T;
   id?: string;
   retry?: number;
+}
+
+/** An item of positional parts whose encoding declares headers: its
+ * value and the headers of its part. */
+export interface Part<T> {
+  header: Headers;
+  value: T;
 }
 
 /** An event of a stream of named kinds: its name E says what its data is. */
@@ -922,6 +963,43 @@ function buildBody(op: OperationSpec, req: Values, b: Built, checkItems: boolean
       b.headers.set("Content-Type", v instanceof Blob && v.type !== "" && media.mediaType.includes("*") ? v.type : media.mediaType);
       b.body = v as BodyInit;
       break;
+    case "parts": {
+      const spec = media.parts!;
+      const boundary = newBoundary();
+      const items = partItems(spec, v);
+      const chunks = items.flatMap((item, i) => partChunks(spec, item, i, boundary));
+      b.headers.set("Content-Type", `${media.mediaType}; boundary=${boundary}`);
+      b.body = new Blob([...chunks, partsEnd(items.length, boundary)]);
+      break;
+    }
+    case "partstream": {
+      const spec = media.parts!;
+      const boundary = newBoundary();
+      b.headers.set("Content-Type", `${media.mediaType}; boundary=${boundary}`);
+      const item = (x: unknown, i: number): PartItem => {
+        const it = { spec: spec.item!, value: x };
+        if (checkItems) {
+          const issues = partIssues(spec, it, i).map((x) => ({ ...x, in: "body" }));
+          if (issues.length > 0) {
+            throw new InvalidRequestError(issues);
+          }
+        }
+        return it;
+      };
+      if (typeof v === "object" && v !== null && Symbol.asyncIterator in v) {
+        b.body = itemStream(v as AsyncIterable<unknown>, (x, i) => joinChunks(partChunks(spec, item(x, i), i, boundary)), b, (n) => partsEnd(n, boundary));
+        b.streamed = true;
+      } else {
+        const chunks: BlobPart[] = [];
+        let i = 0;
+        for (const x of v as Iterable<unknown>) {
+          chunks.push(...partChunks(spec, item(x, i), i, boundary));
+          i++;
+        }
+        b.body = new Blob([...chunks, partsEnd(i, boundary)]);
+      }
+      break;
+    }
     case "jsonl":
     case "sse": {
       b.headers.set("Content-Type", media.mediaType);
@@ -1010,10 +1088,15 @@ function eventText(ev: ServerEvent): string {
   return out + "\n";
 }
 
-// itemStream is a body that writes the items as fetch reads it. An item
-// that cannot be written, or an error of the iterator, fails the request
-// with that error, recorded in b.
-function itemStream(items: AsyncIterable<unknown>, line: (item: unknown, i: number) => string, b: Built): ReadableStream<Uint8Array> {
+// itemStream is a body that writes the items as fetch reads it, and then
+// end, given how many there were. An item that cannot be written, or an
+// error of the iterator, fails the request with that error, recorded in b.
+function itemStream(
+  items: AsyncIterable<unknown>,
+  line: (item: unknown, i: number) => string | Promise<Uint8Array>,
+  b: Built,
+  end?: (n: number) => string,
+): ReadableStream<Uint8Array> {
   const it = items[Symbol.asyncIterator]();
   const encoder = new TextEncoder();
   let i = 0;
@@ -1022,10 +1105,14 @@ function itemStream(items: AsyncIterable<unknown>, line: (item: unknown, i: numb
       try {
         const next = await it.next();
         if (next.done === true) {
+          if (end !== undefined) {
+            controller.enqueue(encoder.encode(end(i)));
+          }
           controller.close();
           return;
         }
-        controller.enqueue(encoder.encode(line(next.value, i++)));
+        const chunk = await line(next.value, i++);
+        controller.enqueue(typeof chunk === "string" ? encoder.encode(chunk) : chunk);
       } catch (e) {
         b.failure = e;
         controller.error(e);
@@ -1035,6 +1122,172 @@ function itemStream(items: AsyncIterable<unknown>, line: (item: unknown, i: numb
       await it.return?.();
     },
   });
+}
+
+// newBoundary returns a boundary for a multipart body, random as
+// mime/multipart makes them.
+function newBoundary(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(30)), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** An item of positional parts, and how it is a part. */
+interface PartItem {
+  readonly spec: PartItemSpec;
+  readonly value: unknown;
+}
+
+// encodingAt returns the encoding of the part at index i.
+function encodingAt(spec: PartsSpec, i: number): PartEncoding {
+  return spec.encodings !== undefined && i < spec.encodings.length ? spec.encodings[i]! : (spec.encoding ?? {});
+}
+
+// partItems returns the parts of v, a body of positional parts, in order:
+// the items of an array, or the set positions of a tuple and its rest. A
+// position set after one that is not cannot be sent.
+function partItems(spec: PartsSpec, v: unknown): PartItem[] {
+  if (spec.prefix === undefined) {
+    return (v as unknown[]).map((value) => ({ spec: spec.item!, value }));
+  }
+  const tuple = v as Values;
+  const items: PartItem[] = [];
+  let gap: number | undefined;
+  spec.prefix.forEach((p, n) => {
+    if (tuple[p.key] === undefined) {
+      gap ??= n;
+    } else if (gap !== undefined) {
+      throw new InvalidRequestError([{ in: "body", pointer: `/${n}`, message: `part ${n} is set, but part ${gap} before it is not` }]);
+    } else {
+      items.push({ spec: p, value: tuple[p.key] });
+    }
+  });
+  const rest = (tuple["rest"] as unknown[] | undefined) ?? [];
+  if (spec.item !== undefined && rest.length > 0) {
+    if (gap !== undefined) {
+      throw new InvalidRequestError([{ in: "body", pointer: `/${spec.prefix.length}`, message: `parts after ${spec.prefix.length - 1} are set, but part ${gap} is not` }]);
+    }
+    items.push(...rest.map((value) => ({ spec: spec.item!, value })));
+  }
+  return items;
+}
+
+// partIssues checks item, the part at index i, against its schema and the
+// headers its encoding declares.
+function partIssues(spec: PartsSpec, item: PartItem, i: number): Issue[] {
+  const part = item.spec.part ? (item.value as Part<unknown>) : undefined;
+  const issues = validate(item.spec.schema, part !== undefined ? part.value : item.value, "request", `/${i}`);
+  return [...issues, ...headerIssues(encodingAt(spec, i), part?.header, `/${i}`, "request")];
+}
+
+// partsIssues checks a body of positional parts: its count, each part,
+// and the positions of a tuple that are required.
+function partsIssues(spec: PartsSpec, v: unknown): Issue[] {
+  const missing: Issue[] = [];
+  spec.prefix?.forEach((p, n) => {
+    if (!p.optional && (v as Values)[p.key] === undefined) {
+      missing.push({ pointer: `/${n}`, message: "part is missing" });
+    }
+  });
+  let items: PartItem[];
+  try {
+    items = partItems(spec, v);
+  } catch (e) {
+    // A missing part says more than the gap it leaves.
+    return missing.length > 0 ? missing : e instanceof InvalidRequestError ? [...e.issues] : [{ pointer: "", message: String(e) }];
+  }
+  const issues = [...validate(countSchema(spec), items, "request"), ...missing];
+  items.forEach((item, i) => issues.push(...partIssues(spec, item, i)));
+  return issues;
+}
+
+// countSchema is a schema of an array of as many items as the parts may
+// be.
+function countSchema(spec: PartsSpec): Schema {
+  const schema: { -readonly [K in keyof ArraySchema]: ArraySchema[K] } = { kind: "array", items: { kind: "any" } };
+  if (spec.minItems !== undefined) {
+    schema.minItems = spec.minItems;
+  }
+  if (spec.maxItems !== undefined) {
+    schema.maxItems = spec.maxItems;
+  }
+  return schema;
+}
+
+// headerIssues checks the headers of a part, at the given pointer,
+// against those enc declares.
+function headerIssues(enc: PartEncoding, header: Headers | undefined, at: string, dir: Direction): Issue[] {
+  const issues: Issue[] = [];
+  for (const h of enc.headers ?? []) {
+    const raw = header?.get(h.name) ?? null;
+    if (raw === null) {
+      if (h.required) {
+        issues.push({ pointer: at, message: `part header ${JSON.stringify(h.name)} is missing` });
+      }
+      continue;
+    }
+    let value: unknown;
+    try {
+      value = headerValue({ key: "", ...h }, raw);
+    } catch (e) {
+      issues.push({ pointer: at, message: `part header ${JSON.stringify(h.name)}: ${String(e)}` });
+      continue;
+    }
+    for (const x of validate(h.schema, value, dir)) {
+      issues.push({ pointer: at, message: `part header ${JSON.stringify(h.name)}: ${x.message}` });
+    }
+  }
+  return issues;
+}
+
+// partChunks returns the delimiter, headers and data of item, the part at
+// index i of a body with boundary. A part has the first content type its
+// encoding names, else the file's own, text/plain or application/json,
+// and its length, so that a reader can take it before the next one.
+function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string): BlobPart[] {
+  const part = item.spec.part ? (item.value as Part<unknown>) : undefined;
+  const value = part !== undefined ? part.value : item.value;
+  const header = new Headers(part?.header);
+  const encoder = new TextEncoder();
+  let data: Blob | Uint8Array<ArrayBuffer>;
+  let type: string;
+  switch (item.spec.kind) {
+    case "file": {
+      data = value as Blob;
+      type = data.type !== "" ? data.type : "application/octet-stream";
+      const name = fileName(data);
+      if (name !== undefined && !header.has("Content-Disposition")) {
+        header.set("Content-Disposition", `attachment; filename="${name.replace(/[\\"]/g, "\\$&")}"`);
+      }
+      break;
+    }
+    case "text":
+      data = encoder.encode(text(value));
+      type = "text/plain; charset=utf-8";
+      break;
+    default:
+      data = encoder.encode(JSON.stringify(encode(item.spec.schema, value, "request")));
+      type = "application/json";
+  }
+  const declared = encodingAt(spec, i).contentTypes?.[0];
+  if (declared !== undefined && !declared.includes("*")) {
+    type = declared;
+  }
+  header.set("Content-Type", type);
+  header.set("Content-Length", String(data instanceof Blob ? data.size : data.byteLength));
+  let head = (i === 0 ? "" : "\r\n") + `--${boundary}\r\n`;
+  for (const [k, v] of header) {
+    head += `${k}: ${v}\r\n`;
+  }
+  return [head + "\r\n", data];
+}
+
+// partsEnd is the end of a body of n parts with boundary.
+function partsEnd(n: number, boundary: string): string {
+  return (n === 0 ? "" : "\r\n") + `--${boundary}--\r\n`;
+}
+
+// joinChunks returns the bytes of chunks, for a stream.
+async function joinChunks(chunks: BlobPart[]): Promise<Uint8Array> {
+  return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }
 
 // check validates the parameters and body of a request, as the server
@@ -1059,8 +1312,9 @@ function checkRequest(op: OperationSpec, req: Values): void {
       issues.push({ in: "body", pointer: "", message: "the request body is missing" });
     }
     // The items of a stream are checked as they are written.
-    for (const m of given.filter((m, i, all) => all.findIndex((n) => n.key === m.key) === i && m.kind !== "jsonl" && m.kind !== "sse")) {
-      for (const i of validate(m.schema, req[m.key], "request")) {
+    for (const m of given.filter((m, i, all) => all.findIndex((n) => n.key === m.key) === i && m.kind !== "jsonl" && m.kind !== "sse" && m.kind !== "partstream")) {
+      const found = m.kind === "parts" ? partsIssues(m.parts!, req[m.key]) : validate(m.schema, req[m.key], "request");
+      for (const i of found) {
         issues.push({ ...i, in: "body" });
       }
     }
@@ -1363,6 +1617,12 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
         out["contentType"] = resp.headers.get("Content-Type") ?? "";
       }
       break;
+    case "parts":
+      out["body"] = await readParts(cfg, spec.parts!, resp);
+      break;
+    case "partstream":
+      out["items"] = partStream(cfg, spec.parts!, resp);
+      break;
     case "jsonl":
       out["items"] = jsonLines(resp);
       break;
@@ -1497,5 +1757,350 @@ async function* typedEvents(cfg: Config, spec: EventsSpec, resp: Response): Asyn
     }
     yield { ...ev, data };
     i++;
+  }
+}
+
+/** A multipart body that is not valid. */
+class MultipartError extends Error {}
+
+// boundaryOf returns the boundary of a multipart content type.
+function boundaryOf(contentType: string): string | undefined {
+  const m = /;\s*boundary\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\s]+))/i.exec(contentType);
+  return m === null ? undefined : (m[1]?.replace(/\\(.)/g, "$1") ?? m[2]);
+}
+
+/** The bytes of a body, read as they are asked for. */
+class ByteReader {
+  readonly #reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  #chunks: Uint8Array[] = [];
+  #size = 0;
+
+  constructor(body: ReadableStream<Uint8Array> | null) {
+    this.#reader = body?.getReader();
+  }
+
+  async #more(): Promise<boolean> {
+    if (this.#reader === undefined) {
+      return false;
+    }
+    const { value, done } = await this.#reader.read();
+    if (done) {
+      return false;
+    }
+    this.#chunks.push(value);
+    this.#size += value.length;
+    return true;
+  }
+
+  // line returns the next line, with its LF, or what is left of the body.
+  async line(): Promise<Uint8Array<ArrayBuffer>> {
+    let scanned = 0;
+    for (;;) {
+      let offset = 0;
+      for (const c of this.#chunks) {
+        if (offset + c.length > scanned) {
+          const i = c.indexOf(10, Math.max(0, scanned - offset));
+          if (i >= 0) {
+            return this.#take(offset + i + 1);
+          }
+        }
+        offset += c.length;
+      }
+      scanned = offset;
+      if (!(await this.#more())) {
+        return this.#take(this.#size);
+      }
+    }
+  }
+
+  // take returns the next n bytes, or undefined if the body ends first.
+  async take(n: number): Promise<Uint8Array<ArrayBuffer> | undefined> {
+    while (this.#size < n) {
+      if (!(await this.#more())) {
+        return undefined;
+      }
+    }
+    return this.#take(n);
+  }
+
+  #take(n: number): Uint8Array<ArrayBuffer> {
+    const out = new Uint8Array(n);
+    let filled = 0;
+    while (filled < n) {
+      const c = this.#chunks[0]!;
+      const k = Math.min(c.length, n - filled);
+      out.set(c.subarray(0, k), filled);
+      filled += k;
+      if (k === c.length) {
+        this.#chunks.shift();
+      } else {
+        this.#chunks[0] = c.subarray(k);
+      }
+    }
+    this.#size -= n;
+    return out;
+  }
+
+  async cancel(): Promise<void> {
+    await this.#reader?.cancel().catch(() => {});
+  }
+}
+
+interface RawPart {
+  readonly header: Headers;
+  readonly data: Uint8Array<ArrayBuffer>;
+}
+
+// rawParts yields the parts of a multipart body as they arrive. A part
+// with a Content-Length is complete once its data has arrived, others
+// once the delimiter after them has. As in Go's mime/multipart, a
+// preamble may come before the first delimiter, line ends are LF if that
+// delimiter's is, and a body that ends in the headers of a part ends
+// there. A body that is not valid throws a MultipartError.
+async function* rawParts(body: ReadableStream<Uint8Array> | null, contentType: string): AsyncGenerator<RawPart> {
+  const boundary = boundaryOf(contentType);
+  if (boundary === undefined || boundary === "") {
+    throw new MultipartError("multipart body without a boundary");
+  }
+  const r = new ByteReader(body);
+  const ascii = new TextDecoder("latin1");
+  const utf8 = new TextDecoder();
+  const dash = "--" + boundary;
+  let nl = "\r\n";
+  // delimiter says whether line is a delimiter, and whether the last.
+  const delimiter = (line: Uint8Array): "next" | "final" | undefined => {
+    if (line[0] !== 45 || line[1] !== 45) {
+      return undefined;
+    }
+    const s = ascii.decode(line);
+    if (!s.startsWith(dash)) {
+      return undefined;
+    }
+    const rest = s.slice(dash.length);
+    if (rest.startsWith("--")) {
+      const after = rest.slice(2).replace(/^[ \t]+/, "");
+      if (after === "" || after === nl) {
+        return "final";
+      }
+    }
+    return rest.replace(/^[ \t]+/, "") === nl ? "next" : undefined;
+  };
+  const endsLine = (line: Uint8Array) => line[line.length - 1] === 10;
+  try {
+    for (;;) {
+      const line = await r.line();
+      if (ascii.decode(line).slice(dash.length).replace(/^[ \t]+/, "") === "\n" && ascii.decode(line).startsWith(dash)) {
+        nl = "\n";
+      }
+      const d = delimiter(line);
+      if (d === "final") {
+        return;
+      }
+      if (d === "next") {
+        break;
+      }
+      if (!endsLine(line)) {
+        throw new MultipartError("the body ends before its first boundary");
+      }
+    }
+    for (;;) {
+      const header = new Headers();
+      let name = "";
+      for (;;) {
+        const line = await r.line();
+        if (!endsLine(line)) {
+          return;
+        }
+        const s = utf8.decode(line).replace(/\r?\n$/, "");
+        if (s === "") {
+          break;
+        }
+        if ((s[0] === " " || s[0] === "\t") && name !== "") {
+          // A continuation of the header before.
+          const values = header.get(name) ?? "";
+          header.set(name, values + " " + s.trim());
+          continue;
+        }
+        const colon = s.indexOf(":");
+        if (colon <= 0) {
+          throw new MultipartError(`invalid part header line ${JSON.stringify(s)}`);
+        }
+        name = s.slice(0, colon).trim();
+        try {
+          header.append(name, s.slice(colon + 1).trim());
+        } catch (e) {
+          throw new MultipartError(`invalid part header ${JSON.stringify(name)}: ${String(e)}`);
+        }
+      }
+      const length = header.get("Content-Length");
+      if (length !== null) {
+        if (!/^\d+$/.test(length)) {
+          throw new MultipartError(`invalid Content-Length ${JSON.stringify(length)}`);
+        }
+        const data = await r.take(Number(length));
+        if (data === undefined) {
+          throw new MultipartError("the body ends inside a part");
+        }
+        yield { header, data };
+        const end = ascii.decode(await r.line()) === nl ? delimiter(await r.line()) : undefined;
+        if (end === undefined) {
+          throw new MultipartError("a part does not end at its Content-Length");
+        }
+        if (end === "final") {
+          return;
+        }
+        continue;
+      }
+      const lines: Uint8Array<ArrayBuffer>[] = [];
+      for (;;) {
+        const line = await r.line();
+        const last = lines[lines.length - 1];
+        const d = delimiter(line);
+        if (d !== undefined && (last === undefined || ascii.decode(last).endsWith(nl))) {
+          // The line end before the delimiter belongs to it.
+          if (last !== undefined) {
+            lines[lines.length - 1] = last.subarray(0, last.length - nl.length);
+          }
+          yield { header, data: new Uint8Array(await new Blob(lines).arrayBuffer()) };
+          if (d === "final") {
+            return;
+          }
+          break;
+        }
+        if (!endsLine(line)) {
+          throw new MultipartError("the body ends inside a part");
+        }
+        lines.push(line);
+      }
+    }
+  } finally {
+    // Stopping early cancels the rest of the body.
+    await r.cancel();
+  }
+}
+
+// readIssues checks a part read at index i against its encoding: the
+// content types it may have, and its headers.
+function readIssues(spec: PartsSpec, raw: RawPart, i: number): Issue[] {
+  const enc = encodingAt(spec, i);
+  const ct = raw.header.get("Content-Type");
+  const issues: Issue[] = [];
+  if (ct !== null && enc.contentTypes !== undefined && enc.contentTypes.length > 0) {
+    const mt = ct.split(";")[0]!.trim().toLowerCase();
+    if (!enc.contentTypes.some((d) => mediaMatches(d, mt))) {
+      issues.push({ pointer: `/${i}`, message: `content type ${JSON.stringify(ct)} is not allowed; expected ${enc.contentTypes.join(", ")}` });
+    }
+  }
+  return [...issues, ...headerIssues(enc, raw.header, `/${i}`, "response")];
+}
+
+// partValue returns the item a part is: a Blob (a File, if the part names
+// one), its text, or its body as JSON, in a Part if spec says.
+function partValue(spec: PartItemSpec, raw: RawPart): unknown {
+  let value: unknown;
+  const utf8 = new TextDecoder();
+  switch (spec.kind) {
+    case "file": {
+      const type = raw.header.get("Content-Type") ?? "";
+      const name = /filename\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\s]+))/i.exec(raw.header.get("Content-Disposition") ?? "");
+      value =
+        name !== null && typeof File !== "undefined"
+          ? new File([raw.data], (name[1]?.replace(/\\(.)/g, "$1") ?? name[2])!, { type })
+          : new Blob([raw.data], { type });
+      break;
+    }
+    case "text":
+      value = utf8.decode(raw.data);
+      break;
+    default:
+      value = JSON.parse(utf8.decode(raw.data));
+  }
+  return spec.part ? ({ header: raw.header, value } satisfies Part<unknown>) : value;
+}
+
+// decodePart returns the item of raw, the part at index i, of item, after
+// checking it against its encoding and, with validateResponses, its
+// schema. A problem throws an InvalidResponseError.
+function decodePart(cfg: Config, spec: PartsSpec, item: PartItemSpec, raw: RawPart, i: number, status: number): unknown {
+  const fail = (issues: Issue[]) => new InvalidResponseError(status, issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+  const encoding = readIssues(spec, raw, i);
+  if (encoding.length > 0) {
+    throw fail(encoding);
+  }
+  let value: unknown;
+  try {
+    value = partValue(item, raw);
+  } catch (e) {
+    throw fail([{ pointer: `/${i}`, message: String(e) }]);
+  }
+  if (cfg.validateResponses) {
+    const issues = validate(item.schema, item.part ? (value as Part<unknown>).value : value, "response", `/${i}`);
+    if (issues.length > 0) {
+      throw fail(issues);
+    }
+  }
+  return value;
+}
+
+// multipartFailure turns an invalid body into an InvalidResponseError.
+function multipartFailure(e: unknown, status: number): unknown {
+  return e instanceof MultipartError ? new InvalidResponseError(status, `invalid multipart body: ${e.message}`) : e;
+}
+
+/** A response of positional parts: an array of its items, or an object
+ * with the positions of a tuple and rest for the parts after them. */
+async function readParts(cfg: Config, spec: PartsSpec, resp: Response): Promise<unknown> {
+  const items: unknown[] = [];
+  const tuple: Values = {};
+  const fail = (message: string, pointer: string) => new InvalidResponseError(resp.status, `${pointer}: ${message}`, [{ pointer, message }]);
+  let i = 0;
+  try {
+    for await (const raw of rawParts(resp.body, resp.headers.get("Content-Type") ?? "")) {
+      const position = spec.prefix?.[i];
+      const item = position ?? spec.item;
+      if (item === undefined) {
+        throw fail(`unexpected part: the body has at most ${spec.prefix?.length ?? 0}`, `/${i}`);
+      }
+      const value = decodePart(cfg, spec, item, raw, i, resp.status);
+      if (position !== undefined) {
+        tuple[position.key] = value;
+      } else {
+        items.push(value);
+      }
+      i++;
+    }
+  } catch (e) {
+    throw multipartFailure(e, resp.status);
+  }
+  const missing = spec.prefix?.findIndex((p, n) => n >= i && !p.optional) ?? -1;
+  if (missing >= 0) {
+    throw fail("part is missing", `/${missing}`);
+  }
+  if (cfg.validateResponses) {
+    const issues = validate(countSchema(spec), new Array(i), "response");
+    if (issues.length > 0) {
+      throw new InvalidResponseError(resp.status, issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+    }
+  }
+  if (spec.prefix === undefined) {
+    return items;
+  }
+  if (spec.item !== undefined) {
+    tuple["rest"] = items;
+  }
+  return tuple;
+}
+
+/** The items of a response of streamed positional parts, as they arrive.
+ * A part that is not valid ends the stream with an InvalidResponseError. */
+async function* partStream(cfg: Config, spec: PartsSpec, resp: Response): AsyncGenerator<unknown> {
+  let i = 0;
+  try {
+    for await (const raw of rawParts(resp.body, resp.headers.get("Content-Type") ?? "")) {
+      yield decodePart(cfg, spec, spec.item!, raw, i, resp.status);
+      i++;
+    }
+  } catch (e) {
+    throw multipartFailure(e, resp.status);
   }
 }

@@ -712,6 +712,10 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("r.BytesBody(%s, %s)", ct, value)
 		case "jsonl":
 			stmt = fmt.Sprintf("client.JSONLinesBody(c, r, %s, %s, %s)", ct, value, f.itemValidation(m.Field.Value.Elem))
+		case "partstream":
+			f.imp(serverImport, "server")
+			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+			stmt = fmt.Sprintf("client.PartStreamBody(c, r, %s, %s, %s, %s)", ct, value, parts, f.itemValidation(m.Field.Value.Elem))
 		case "sse":
 			stmt = fmt.Sprintf("r.EventsBody(%s)", value)
 			if m.Events != nil {
@@ -827,6 +831,10 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		w(2, "v.Body = %s(items)", f.goType(r.Body))
 	case "jsonl":
 		w(2, "v.Items = client.JSONLines[%s](resp)", f.goType(r.Item))
+	case "partstream":
+		f.imp(serverImport, "server")
+		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", f.partsLiteral(r.Parts))
+		w(2, "v.Items = client.PartStream[%s](c, resp, %s)", f.goType(r.Item), parts)
 	case "sse":
 		if r.Events != nil {
 			w(2, "v.Events = client.TypedEvents(c, resp, %s)", f.eventDecoder(r.Events, "Response"))

@@ -500,7 +500,9 @@ JSON Lines (`application/jsonl`, `application/x-ndjson`) and server-sent
 event (`text/event-stream`) bodies are not read before your method is
 called: the field is an `iter.Seq2` that reads an item each time the loop
 asks for one. Items are those of the media type's `itemSchema` (3.2), or
-of an array `schema`; events are `server.Event`s.
+of an array `schema`; events are `server.Event`s. Positional multipart
+bodies with an `itemSchema` are streams too, of parts: see
+[Streamed parts](#streamed-parts).
 
 ```go
 func (s *store) ImportLines(ctx context.Context, req *api.ImportLinesRequest) (api.ImportLinesResponse, error) {
@@ -663,6 +665,56 @@ follow, as files, and with `items: false` none. A missing part is
 reported at its index (`body /1: part is missing`), as are extra ones and
 the problems of each part; `minItems` and `maxItems` count them all.
 
+#### Streamed parts
+
+With an `itemSchema` (3.2) and no `schema`, the parts are a stream: the
+field is an `iter.Seq2` of the items, read one part at a time as the
+loop asks for it, like JSON Lines. Items are typed by the `itemSchema`
+as by `items` above (a file, text or JSON, or an `oapi.Part` with headers
+from `itemEncoding`), and a response with one (`...MixedResponse`) has
+`Items` instead of `Body`:
+
+```yaml
+multipart/mixed:
+  itemSchema: {type: string, contentMediaType: image/png}
+  itemEncoding:
+    headers:
+      X-Seq: {required: true, schema: {type: integer, minimum: 1}}
+```
+
+```go
+func (s *store) StreamPhotos(ctx context.Context, req *api.StreamPhotosRequest) (api.StreamPhotosResponse, error) {
+	acks := func(yield func(oapi.Part[string], error) bool) {
+		for photo, err := range req.Body { // an iter.Seq2[oapi.File, error]
+			if err != nil {
+				yield(oapi.Part[string]{}, err) // a *server.BindError
+				return
+			}
+			seq := photo.Header.Get("X-Seq")
+			if !yield(oapi.Part[string]{Header: textproto.MIMEHeader{"X-Seq": {seq}}, Value: "got " + seq}, nil) {
+				return
+			}
+		}
+	}
+	return api.StreamPhotos200MixedResponse{Items: acks}, nil
+}
+```
+
+- **Problems:** each part is checked against its encoding and decoded as
+  it is read. An invalid one ends the loop with a `*server.BindError`
+  pointing into it from its index, as for JSON Lines; a part longer than
+  `WithMaxBodyBytes` is a 413. The stream itself has no limit.
+- **Writing:** each part is sent and flushed as it is produced. With
+  `WithResponseValidation`, its headers are checked first. Once the
+  status is sent, a problem is logged and ends the body without its
+  closing boundary, which tells the client it was cut short.
+- **Without delay:** parts are written with a `Content-Length`, so a
+  reader takes each one as soon as it has arrived. A part without one, as
+  other senders may write it, ends at the delimiter after it, so it is
+  only read once the next part starts, or the body ends.
+- Next to a `schema`, the `itemSchema` is not applied: the body is read
+  whole, as above, with a warning.
+
 ## Responses
 
 Each declared response is a type; return the one you mean:
@@ -693,7 +745,9 @@ return api.Watch200EventsResponse{Events: func(yield func(server.Event, error) b
 ```
 
 Events whose data the `itemSchema` types are `server.TypedEvent`s; see
-[Typed server-sent events](#typed-server-sent-events).
+[Typed server-sent events](#typed-server-sent-events). Positional parts
+with an `itemSchema` are written as their `Items` are produced; see
+[Streamed parts](#streamed-parts).
 
 When a response offers several media types, pick one with
 `server.Negotiate(r, "application/jsonl", "text/csv")`, which follows the
@@ -871,17 +925,18 @@ Errors are typed:
 
 Other errors come from the `Doer`, wrapped with the method and URL.
 
-JSON Lines and server-sent event responses are read as they arrive:
-`Items` and `Events` are `iter.Seq2`s that close the body when the loop
-ends. A response whose stream is not ranged over keeps its connection, so
+JSON Lines, server-sent event and streamed multipart responses are read
+as they arrive: `Items` and `Events` are `iter.Seq2`s that close the body
+when the loop ends. A response whose stream is not ranged over keeps its connection, so
 range over it (and break to stop early). Every other response body is read
 and closed by the method.
 
 A streamed request body is the same `iter.Seq2` as on the server, written
 as the transport reads it, so items can be produced while the request is
 being sent. Each item is checked as it is written (unless request
-validation is off): an invalid one ends the request with a
-`*client.InvalidRequest` pointing into it from its index, and an error
+validation is off), parts against their encodings too: an invalid one
+ends the request with a `*client.InvalidRequest` pointing into it from
+its index, and an error
 the iterator yields ends it with that error. A stream cannot be sent
 twice, so retry middleware must not retry these requests.
 
@@ -979,9 +1034,10 @@ if (resp.status === 200) {
 - **Requests:**
   - Request properties are named after the parameters, in camel case (`petId`, `xRequestID`), plus `body` (or one property per body type) and `contentType`.
   - The runtime writes every parameter style the Go client does, and JSON, form, multipart (`FormData`, with `Blob`s or `File`s as files) and text or binary bodies.
-  - JSON Lines and server-sent event bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
+  - Positional multipart bodies (`multipart/mixed` and the like) are arrays of their items, or for `prefixItems` an object with a property per position and `rest`. A file is a `Blob`; an item whose encoding declares headers is a `Part<T>`, `{ header: Headers; value: T }`, files too. The runtime writes them itself, with each part's headers and length, and reads them as they arrive.
+  - JSON Lines, server-sent event and streamed multipart bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
-- **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines are `items` and server-sent events `events`, both `AsyncIterable`s that stop the stream when you `break`.
+- **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines and streamed parts are `items` and server-sent events `events`, all `AsyncIterable`s that stop the stream when you `break`. The parts of a response are checked against their encodings as they are read.
 - **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. A value that is not there is left out, for the request's validation to report if it is required.
 - **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
@@ -989,10 +1045,9 @@ if (resp.status === 200) {
 
 Not supported by the TypeScript client yet; `generate ts-client` warns
 about each one it leaves out:
-- XML and positional multipart bodies and responses, parameters with XML
-  `content` (the operation is left out) and response headers with it (the
-  header is).
-- Headers of multipart parts, which `FormData` cannot set.
+- XML bodies and responses, parameters with XML `content` (the operation
+  is left out) and response headers with it (the header is).
+- Headers of `multipart/form-data` parts, which `FormData` cannot set.
 - Webhooks and callbacks, which a server sends.
 - Cookie parameters in browsers, which do not let scripts set `Cookie`. Elsewhere they are sent, and in browsers the browser's own cookies are.
 

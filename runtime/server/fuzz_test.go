@@ -88,7 +88,57 @@ func FuzzMultipart(f *testing.F) {
 		_, _ = DecodeParts[string](bytes.Clone(body), ct, rules)
 		_, _ = DecodeParts[oapi.Part[string]](bytes.Clone(body), ct, rules)
 		rules.Item = "file"
-		_, _ = DecodeParts[oapi.File](bytes.Clone(body), ct, rules)
+		files, err := DecodeParts[oapi.File](bytes.Clone(body), ct, rules)
+		// Read as a stream, the parts are the same, unless they end at
+		// their Content-Length, which mime/multipart ignores.
+		streamed := []oapi.File{}
+		var streamErr error
+		for f, err := range ScanParts[oapi.File](bytes.NewReader(body), ct, rules, oapi.Request, int64(len(body))) {
+			if err != nil {
+				streamErr = err
+				break
+			}
+			streamed = append(streamed, f)
+		}
+		lengths := bytes.Contains(bytes.ToLower(body), []byte("content-length"))
+		if err == nil && !lengths && (streamErr != nil || !reflect.DeepEqual(streamed, files)) {
+			t.Fatalf("streamed %+v, %v; want %+v", streamed, streamErr, files)
+		}
+		if err == nil && len(files) > 0 {
+			var buf bytes.Buffer
+			mt, boundary, err := PartsContentType(ct)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pw := NewPartWriter(&buf, boundary, rules, oapi.Request)
+			for i := range files {
+				if err := pw.Write(&files[i]); err != nil {
+					t.Fatalf("writing %+v: %v", files[i], err)
+				}
+			}
+			if err := pw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			back, err := DecodeParts[oapi.File](buf.Bytes(), mt, rules)
+			if err != nil || len(back) != len(files) {
+				t.Fatalf("written %q, read back %+v, %v", buf.Bytes(), back, err)
+			}
+			var rescanned []oapi.File
+			for f, err := range ScanParts[oapi.File](bytes.NewReader(buf.Bytes()), mt, rules, oapi.Request, int64(buf.Len())) {
+				if err != nil {
+					t.Fatalf("written %q, scanned: %v", buf.Bytes(), err)
+				}
+				rescanned = append(rescanned, f)
+			}
+			if !reflect.DeepEqual(rescanned, back) {
+				t.Fatalf("written %q, scanned %+v, want %+v", buf.Bytes(), rescanned, back)
+			}
+			for i := range back {
+				if !bytes.Equal(back[i].Data, files[i].Data) {
+					t.Fatalf("part %d: %q, want %q", i, back[i].Data, files[i].Data)
+				}
+			}
+		}
 		// As a tuple: JSON, text and a file by position, then files.
 		type tuple struct {
 			Meta upload                       `part:"0"`

@@ -13,8 +13,8 @@ import (
 // tsBodyKinds are the request body kinds the TypeScript runtime sends,
 // and tsResponseKinds the response kinds it reads.
 var (
-	tsBodyKinds     = []string{"json", "form", "multipart", "text", "binary", "jsonl", "sse"}
-	tsResponseKinds = []string{"", "json", "text", "binary", "jsonl", "sse"}
+	tsBodyKinds     = []string{"json", "form", "multipart", "parts", "partstream", "text", "binary", "jsonl", "sse"}
+	tsResponseKinds = []string{"", "json", "text", "binary", "parts", "partstream", "jsonl", "sse"}
 )
 
 // client renders client.ts: the credentials, the request and response
@@ -114,6 +114,9 @@ export class Client {
 			imports = append(imports, "type "+name)
 		}
 	}
+	if strings.Contains(body, "Part<") {
+		imports = append(imports, "type Part")
+	}
 	if strings.Contains(body, "$ref(") {
 		imports = append(imports, "ref as $ref")
 	}
@@ -203,11 +206,155 @@ func (g *tsGen) bodyType(m *ir.BodyMedia) string {
 	case "jsonl":
 		item := g.tsType(m.Field.Value.Elem)
 		return "Iterable<" + item + "> | AsyncIterable<" + item + ">"
+	case "parts":
+		return g.partsType(m.Field.Value, m.Parts)
+	case "partstream":
+		item := g.partItemType(m.Field.Value.Elem, m.Parts.HasHeaders())
+		return "Iterable<" + item + "> | AsyncIterable<" + item + ">"
 	case "sse":
 		ev := g.eventType(m.Events)
 		return "Iterable<" + ev + "> | AsyncIterable<" + ev + ">"
 	}
 	return g.tsType(m.Field.Value)
+}
+
+// partsType renders the type of a body of positional parts of type
+// value: an array of its items, or an object with a property per position
+// of a tuple and rest for the parts after them.
+func (g *tsGen) partsType(value *ir.Ref, p *ir.Parts) string {
+	if value.Kind != ir.Tuple {
+		item := g.partItemType(sliceElem(value), p.HasHeaders())
+		if strings.ContainsAny(item, "|&") {
+			item = "(" + item + ")"
+		}
+		return item + "[]"
+	}
+	var fields []string
+	for i, f := range value.Tuple.Fields {
+		q := ""
+		if f.Type.Kind == ir.Optional {
+			q = "?"
+		}
+		fields = append(fields, fmt.Sprintf("%s%s: %s", tsKey(tsCamel(f.Name)), q, g.partItemType(f.Type, len(partEncoding(p, i).Headers) > 0)))
+	}
+	if r := value.Tuple.Rest; r != nil {
+		fields = append(fields, fmt.Sprintf("rest?: %s[]", g.partItemType(r.Elem, len(p.Rest.Headers) > 0)))
+	}
+	return "{ " + strings.Join(fields, "; ") + " }"
+}
+
+// partItemType renders the type of an item of positional parts: a
+// Part<T> when its encoding declares headers, for files too, since a Blob
+// cannot carry them.
+func (g *tsGen) partItemType(r *ir.Ref, headers bool) string {
+	t := g.tsType(r)
+	if headers {
+		return "Part<" + t + ">"
+	}
+	return t
+}
+
+// partEncoding returns the encoding of the part at index i.
+func partEncoding(p *ir.Parts, i int) ir.ParamProperty {
+	if i < len(p.Prefix) {
+		return p.Prefix[i]
+	}
+	return p.Rest
+}
+
+// partsSpec renders the PartsSpec of a body of positional parts of type
+// value, a slice, tuple or stream.
+func (g *tsGen) partsSpec(value *ir.Ref, p *ir.Parts) string {
+	item := func(kind string, r *ir.Ref, part bool) string {
+		s := fmt.Sprintf("kind: %q, schema: %s", kind, g.schema(r))
+		if part {
+			s += ", part: true"
+		}
+		return s
+	}
+	encoding := func(e ir.ParamProperty) string {
+		var fields []string
+		if len(e.ContentTypes) > 0 {
+			var cts []string
+			for _, ct := range e.ContentTypes {
+				cts = append(cts, jsString(ct))
+			}
+			fields = append(fields, "contentTypes: ["+strings.Join(cts, ", ")+"]")
+		}
+		if len(e.Headers) > 0 {
+			var hs []string
+			for _, h := range e.Headers {
+				hdr := "{ name: " + jsString(h.Name)
+				if h.Required {
+					hdr += ", required: true"
+				}
+				if h.Array {
+					hdr += ", array: true"
+				}
+				schema := g.schema(h.Type)
+				switch h.ContentKind {
+				case "":
+				case "xml":
+					// Not parsed: only its presence is checked.
+					schema = `{ kind: "any" }`
+				default:
+					hdr += fmt.Sprintf(", content: %q", h.ContentKind)
+				}
+				hs = append(hs, hdr+", schema: "+schema+" }")
+			}
+			fields = append(fields, "headers: ["+strings.Join(hs, ", ")+"]")
+		}
+		if len(fields) == 0 {
+			return "{}"
+		}
+		return "{ " + strings.Join(fields, ", ") + " }"
+	}
+	var fields []string
+	var checks *ir.Checks
+	switch value.Kind {
+	case ir.Tuple:
+		var prefix []string
+		for i, f := range value.Tuple.Fields {
+			s := "{ key: " + jsString(tsCamel(f.Name)) + ", " + item(p.Kinds[i], f.Type, len(partEncoding(p, i).Headers) > 0)
+			if f.Type.Kind == ir.Optional {
+				s += ", optional: true"
+			}
+			prefix = append(prefix, s+" }")
+		}
+		fields = append(fields, "prefix: ["+strings.Join(prefix, ", ")+"]")
+		if r := value.Tuple.Rest; r != nil {
+			fields = append(fields, "item: { "+item(p.Item, r.Elem, len(p.Rest.Headers) > 0)+" }")
+		}
+		checks = &ir.Checks{MinItems: value.Tuple.MinItems, MaxItems: value.Tuple.MaxItems}
+	case ir.Stream:
+		fields = append(fields, "item: { "+item(p.Item, value.Elem, p.HasHeaders())+" }")
+	default:
+		fields = append(fields, "item: { "+item(p.Item, sliceElem(value), p.HasHeaders())+" }")
+		// The counts are the slice's, or those of the named type it is.
+		for r := value; r != nil && checks == nil; r = r.Type.Underlying {
+			checks = r.Checks
+			if r.Kind != ir.Named || r.Type.Kind != ir.Defined && r.Type.Kind != ir.Alias {
+				break
+			}
+		}
+	}
+	if checks != nil && checks.MinItems != nil {
+		fields = append(fields, fmt.Sprintf("minItems: %d", *checks.MinItems))
+	}
+	if checks != nil && checks.MaxItems != nil {
+		fields = append(fields, fmt.Sprintf("maxItems: %d", *checks.MaxItems))
+	}
+	if len(p.Prefix) > 0 {
+		var encs []string
+		for _, e := range p.Prefix {
+			encs = append(encs, encoding(e))
+		}
+		fields = append(fields, "encodings: ["+strings.Join(encs, ", ")+"]")
+	}
+	if rest := encoding(p.Rest); rest != "{}" {
+		fields = append(fields, "encoding: "+rest)
+	}
+	return "{ " + strings.Join(fields, ", ") + " }"
 }
 
 // eventType renders the type of the events es types, or ServerEvent for
@@ -273,6 +420,10 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 			fields = append(fields, "body: Blob")
 		case "jsonl":
 			fields = append(fields, "items: AsyncIterable<"+g.tsType(r.Item)+">")
+		case "parts":
+			fields = append(fields, "body: "+g.partsType(r.Body, r.Parts))
+		case "partstream":
+			fields = append(fields, "items: AsyncIterable<"+g.partItemType(r.Item, r.Parts.HasHeaders())+">")
 		case "sse":
 			ev := g.eventType(r.Events)
 			if r.Events != nil && len(r.Events.Kinds) > 0 {
@@ -366,11 +517,16 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 				// The runtime checks and encodes each item.
 				schema = schema.Elem
 			}
-			ev := ""
+			extra := ""
 			if m.Events != nil {
-				ev = ", events: " + g.eventsSpec(m.Events)
+				extra = ", events: " + g.eventsSpec(m.Events)
 			}
-			ms = append(ms, fmt.Sprintf("{ mediaType: %s, kind: %q, key: %s, schema: %s%s }", jsString(m.MediaType), m.Kind, jsString(tsCamel(m.Field.Name)), g.schema(schema), ev))
+			s := g.schema(schema)
+			if m.Parts != nil {
+				// The parts' own schemas check them.
+				s, extra = `{ kind: "any" }`, ", parts: "+g.partsSpec(m.Field.Value, m.Parts)
+			}
+			ms = append(ms, fmt.Sprintf("{ mediaType: %s, kind: %q, key: %s, schema: %s%s }", jsString(m.MediaType), m.Kind, jsString(tsCamel(m.Field.Name)), s, extra))
 		}
 		spec += fmt.Sprintf("  body: { required: %t, media: [%s] },\n", o.Body.Required, strings.Join(ms, ", "))
 	}
@@ -392,6 +548,10 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 			s += ", schema: " + g.schema(r.Body)
 		case "jsonl":
 			s += ", item: " + g.schema(r.Item)
+		case "parts":
+			s += ", parts: " + g.partsSpec(r.Body, r.Parts)
+		case "partstream":
+			s += ", parts: " + g.partsSpec(&ir.Ref{Kind: ir.Stream, Elem: r.Item}, r.Parts)
 		case "sse":
 			if r.Events != nil {
 				s += ", events: " + g.eventsSpec(r.Events)

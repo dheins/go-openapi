@@ -308,3 +308,55 @@ test("parameters and headers with content", { skip }, async () => {
   assert.deepEqual(got.headers, { xCode: 12, xWhere: where });
   await rejects(client().getContent({ code: 0 }), InvalidRequestError);
 });
+
+test("positional parts", { skip }, async () => {
+  const c = client({ validateResponses: true });
+  // Items with headers are Parts, which carry them both ways.
+  const batch = await c.batchPets({
+    body: [
+      { header: new Headers({ "X-Seq": "1" }), value: { name: "Rex" } },
+      { header: new Headers({ "X-Tags": "a, b" }), value: { name: "Tom" } },
+    ],
+  });
+  assert.equal(batch.status, 200);
+  assert.deepEqual(batch.body.map((p) => `${p.value.name} ${p.header.get("X-Stored")}`), ["Rex true", "Tom true"]);
+  const unsigned = await rejects(c.batchPets({ body: [{ header: new Headers(), value: { name: "Rex" } }] }), InvalidRequestError);
+  assert.deepEqual(unsigned.issues.map((i) => `${i.pointer}: ${i.message}`), ['/0: part header "X-Seq" is missing']);
+
+  // A tuple: a property per position, and the rest.
+  const report = {
+    pet: { name: "Rex" },
+    part2: { header: new Headers({ "X-Seq": "1" }), value: new File(["PNG"], "rex.png", { type: "image/png" }) },
+    note: { header: new Headers({ "X-Lang": "en" }), value: "hi" },
+    rest: [new Blob(["a,b"], { type: "text/csv" })],
+  };
+  assert.deepEqual(await c.uploadReport({ petId: 1, body: report }), { status: 200, body: { pet: { id: 0, name: "Rex" }, summary: "1 attachments, hi" } });
+  const { part2: _, ...short } = report;
+  const missing = await rejects(c.uploadReport({ petId: 1, body: short as typeof report }), InvalidRequestError);
+  assert.ok(missing.issues.some((i) => i.pointer === "/1" && i.message === "part is missing"), JSON.stringify(missing.issues));
+  const { note: __, ...gap } = report;
+  await rejects(c.uploadReport({ petId: 1, body: gap }), InvalidRequestError);
+
+  // Streamed both ways: each photo is acknowledged as it arrives.
+  const photo = (seq: string) => ({ header: new Headers({ "X-Seq": seq }), value: new Blob(["PNG" + seq], { type: "image/png" }) });
+  async function* photos() {
+    yield photo("1");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    yield photo("2");
+  }
+  for (const body of [[photo("1"), photo("2")], photos()]) {
+    const acks = await c.streamPhotos({ petId: 1, body });
+    assert.equal(acks.status, 200);
+    const got: string[] = [];
+    for await (const ack of acks.items) {
+      got.push(`${ack.header.get("X-Seq")} ${ack.value}`);
+    }
+    assert.deepEqual(got, ["1 photo 1: 4 bytes", "2 photo 2: 4 bytes"]);
+  }
+  async function* invalid() {
+    yield photo("1");
+    yield photo("0");
+  }
+  const streamed = await rejects(c.streamPhotos({ petId: 1, body: invalid() }), InvalidRequestError);
+  assert.deepEqual(streamed.issues.map((i) => i.pointer), ["/1"]);
+});
