@@ -64,11 +64,6 @@ shipped in.
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
-- A documentation page next to `server.WithDocument`: an HTML page
-  rendering the served document with Swagger UI or Redoc, like go-swagger's
-  `swagger serve` and its docs middleware. The page's scripts should come
-  from a CDN or a URL the application gives, so the module embeds no
-  third-party assets. — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -130,6 +125,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Documentation pages: `server.WithDocumentPage` renders the served
+  document with Swagger UI or Redoc, its scripts from a pinned CDN with
+  integrity hashes or the application's own copies, and `goapi serve`
+  serves a document and its page locally. (9655e7f, d5a0801)
 - [x] Range requests: operations declaring a 206 answer `Range` from the
   whole 200 binary body, with one range, several as
   `multipart/byteranges`, or 416, and Go and TypeScript clients read

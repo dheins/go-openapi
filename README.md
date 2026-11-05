@@ -41,6 +41,7 @@ goapi validate openapi.yaml
 goapi validate -format json -quiet openapi.yaml
 goapi convert -out openapi.yaml swagger.yaml          # Swagger 2.0 to OpenAPI 3.1
 goapi scan -out openapi.yaml ./...                    # a document from annotated Go code
+goapi serve openapi.yaml                              # the document and a Swagger UI or Redoc page
 goapi generate ts-client -out web/src/api openapi.yaml # a TypeScript client using fetch
 goapi generate model -out internal/models openapi.yaml
 goapi generate server -out internal/gen openapi.yaml   # server in gen, operations in gen/api, schemas in gen/model

@@ -521,6 +521,23 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   headers with commas were quoted, which the Go client never did.
 - *Not done*: see [features.md](../features.md).
 
+### M25 – Documentation pages ✅
+- [x] `server.WithDocumentPage` (Swagger UI or Redoc) and
+  `WithDocumentAssets`, with pinned, hashed CDN scripts and a
+  Content-Security-Policy
+- [x] `goapi serve`: a document and its page, served locally
+
+**How it went**
+- *No embedded assets*: the scripts are megabytes and change often, so
+  the module pins versions and their hashes instead; an opt-in test
+  (`GOAPI_NET_TESTS=1`) checks the hashes against the CDN.
+- *A strict policy, checked in a browser*: the pages were loaded with it
+  to find what each renderer needs (inline styles, a worker for Redoc's
+  search) and nothing more.
+- *Redoc 3*: its bundle is an ES module, which the page imports `init`
+  from, and it sends telemetry to Redocly, which the page turns off.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
