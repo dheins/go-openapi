@@ -1,8 +1,10 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -251,6 +253,41 @@ func TestBodiesRoundTrip(t *testing.T) {
 	if err != nil || len(items) != 2 || items[1].Name != "B" {
 		t.Errorf("parts = %+v, %v", items, err)
 	}
+
+	// Streamed parts, validated as they are sent.
+	c, _ := NewConfig(WithBaseURL("https://x"))
+	named := func(o owner) error {
+		if o.Name == "" {
+			return &oapi.ValidationError{Path: "/name", Message: "must not be empty"}
+		}
+		return nil
+	}
+	send := func(c *Config, owners ...owner) ([]byte, string, error) {
+		r := NewRequest("POST")
+		seq := func(yield func(owner, error) bool) {
+			for _, o := range owners {
+				if !yield(o, nil) {
+					return
+				}
+			}
+		}
+		PartStreamBody(c, r, "multipart/mixed", seq, parts, named)
+		var buf bytes.Buffer
+		err := r.stream(&buf)
+		return buf.Bytes(), r.contentType, err
+	}
+	body, ct, err := send(c, owner{"A", 1}, owner{"B", 2})
+	if items, derr := server.DecodeParts[owner](body, ct, parts); err != nil || derr != nil || len(items) != 2 || items[1].Name != "B" {
+		t.Errorf("streamed parts = %+v, %v, %v", items, err, derr)
+	}
+	var invalid *InvalidRequest
+	if _, _, err := send(c, owner{"A", 1}, owner{}); !errors.As(err, &invalid) || invalid.Problem.Errors[0].Pointer != "/1/name" {
+		t.Errorf("invalid streamed part: %v", err)
+	}
+	unchecked, _ := NewConfig(WithBaseURL("https://x"), WithoutRequestValidation())
+	if _, _, err := send(unchecked, owner{}); err != nil {
+		t.Errorf("unchecked: %v", err)
+	}
 }
 
 func TestResponses(t *testing.T) {
@@ -298,6 +335,34 @@ func TestResponses(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"A", "B"}) {
 		t.Errorf("lines = %q", names)
+	}
+
+	// Streamed parts read back as they arrive; one over the limit is
+	// invalid.
+	rec = httptest.NewRecorder()
+	parts := server.Parts{Item: "json"}
+	if err := server.WritePartStream(cfg, rec, req, 200, "multipart/mixed", lines, parts, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw := rec.Body.Bytes()
+	pc, _ := NewConfig(WithBaseURL("https://x"))
+	names = nil
+	for o, err := range PartStream[owner](pc, rec.Result(), parts) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, o.Name)
+	}
+	if !slices.Equal(names, []string{"A", "B"}) {
+		t.Errorf("parts = %q", names)
+	}
+	pc.MaxResponseBytes = 5
+	tooLong := &http.Response{StatusCode: 200, Header: rec.Header(), Body: io.NopCloser(bytes.NewReader(raw))}
+	for _, err := range PartStream[owner](pc, tooLong, parts) {
+		var invalid *InvalidResponse
+		if !errors.As(err, &invalid) || !errors.Is(err, server.ErrPartTooLarge) {
+			t.Errorf("too long: %v", err)
+		}
 	}
 
 	// An undeclared response carries its problem details.

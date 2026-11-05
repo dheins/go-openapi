@@ -214,6 +214,49 @@ func PartsBody[T any](r *Request, contentType string, items []T, p server.Parts)
 	r.body, r.contentType = data, ct
 }
 
+// PartStreamBody sets the body to items as a multipart body of
+// positional parts, as p describes, each part sent as it is produced, as
+// JSONLinesBody sends lines. If c validates requests, each item is
+// checked with validate, and its headers against its encoding, before it
+// is sent. An invalid item, or an error items yields, ends the request
+// with that error: a *InvalidRequest, with pointers into the item from
+// its index ("/2/name"), for an invalid one. A stream cannot be sent
+// again, so middleware cannot retry it.
+func PartStreamBody[T any](c *Config, r *Request, contentType string, items iter.Seq2[T, error], p server.Parts, validate func(T) error) {
+	ct, boundary, err := server.PartsContentType(contentType)
+	if err != nil {
+		r.fail(fmt.Errorf("body: %w", err))
+		return
+	}
+	r.contentType = ct
+	r.stream = func(w io.Writer) error {
+		pw := server.NewPartWriter(w, boundary, p, oapi.Request)
+		i := 0
+		for item, err := range items {
+			if err != nil {
+				return err
+			}
+			if c.ValidateRequests {
+				var errs oapi.ValidationErrors
+				if validate != nil {
+					errs.Nested(oapi.Index("", i), validate(item))
+				}
+				errs.Nested("", pw.Check(&item))
+				if err := errs.Err(); err != nil {
+					var b server.Binder
+					b.Body(err)
+					return &InvalidRequest{Problem: b.Problem()}
+				}
+			}
+			if err := pw.Write(&item); err != nil {
+				return fmt.Errorf("body: %w", err)
+			}
+			i++
+		}
+		return pw.Close()
+	}
+}
+
 // TupleBody sets the body to v, a tuple of parts (prefixItems) as
 // server.DecodeTuple reads it, as a multipart body of positional parts.
 func TupleBody(r *Request, contentType string, v any, p server.Parts) {

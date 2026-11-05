@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -298,5 +299,120 @@ func TestTuple(t *testing.T) {
 	// A file position needs an oapi.File field.
 	if _, err := DecodeTuple[pair](body, ct, Parts{Kinds: []string{"file", "file"}}, oapi.Request); err == nil || errors.As(err, &errs) {
 		t.Errorf("wrong field type: %v", err)
+	}
+}
+
+func TestPartStream(t *testing.T) {
+	seq := []PartHeader{{Name: "X-Seq", Required: true}}
+	p := Parts{Item: "json", Prefix: []Property{{Headers: seq}}, Rest: Property{ContentTypes: []string{"application/json"}}}
+	type item = oapi.Part[streamPet]
+	nonEmpty := func(it item) error {
+		if it.Value.Name == "" {
+			return &oapi.ValidationError{Path: "/name", Message: "must not be empty"}
+		}
+		return nil
+	}
+	write := func(c *Config, items ...item) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		seqItems := func(yield func(item, error) bool) {
+			for _, it := range items {
+				if !yield(it, nil) {
+					return
+				}
+			}
+		}
+		if err := WritePartStream(c, rec, httptest.NewRequest("GET", "/", nil), 200, "multipart/mixed", seqItems, p, nil); err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+	read := func(c *Config, rec *httptest.ResponseRecorder) ([]string, error) {
+		r := httptest.NewRequest("POST", "/", rec.Body)
+		r.Header.Set("Content-Type", rec.Header().Get("Content-Type"))
+		var names []string
+		for it, err := range PartStreamBody(c, r, p, nonEmpty) {
+			if err != nil {
+				return names, err
+			}
+			names = append(names, it.Value.Name)
+		}
+		return names, nil
+	}
+	first := item{Header: textproto.MIMEHeader{"X-Seq": {"1"}}, Value: streamPet{Name: "a"}}
+	c := NewConfig(WithResponseValidation(), WithLogger(slog.New(slog.DiscardHandler)))
+	rec := write(c, first, item{Value: streamPet{Name: "b"}})
+	if names, err := read(c, rec); err != nil || !slices.Equal(names, []string{"a", "b"}) {
+		t.Errorf("names %q, %v", names, err)
+	}
+	// An invalid part ends the loop with a 400 at its index.
+	var prob *problem.Problem
+	names, err := read(c, write(c, first, item{}))
+	if !slices.Equal(names, []string{"a"}) || !errors.As(err, &prob) || prob.Status != http.StatusBadRequest ||
+		len(prob.Errors) != 1 || prob.Errors[0].Pointer != "/1/name" {
+		t.Errorf("invalid: %q, %v", names, err)
+	}
+	// So does a part over the limit, with a 413.
+	small := NewConfig(WithMaxBodyBytes(5))
+	if _, err := read(small, write(c, first)); !errors.As(err, &prob) || prob.Status != http.StatusRequestEntityTooLarge {
+		t.Errorf("too large: %v", err)
+	}
+	// A part with invalid headers is not sent, and ends the body without
+	// its closing boundary, so the reader sees it cut short.
+	rec = write(c, item{Value: streamPet{Name: "c"}})
+	if strings.Contains(rec.Body.String(), `"c"`) {
+		t.Errorf("an invalid part was sent: %q", rec.Body)
+	}
+	if names, err := read(c, rec); len(names) != 0 || !errors.As(err, &prob) || prob.Status != http.StatusBadRequest {
+		t.Errorf("cut short: %q, %v", names, err)
+	}
+	// As does an error of the items, after the parts before it.
+	rec = httptest.NewRecorder()
+	failing := func(yield func(item, error) bool) { _ = yield(first, nil) && yield(item{}, errors.New("gone")) }
+	if err := WritePartStream(c, rec, httptest.NewRequest("GET", "/", nil), 200, "multipart/mixed", failing, p, nil); err != nil {
+		t.Fatal(err)
+	}
+	if names, err := read(c, rec); !slices.Equal(names, []string{"a"}) || !errors.As(err, &prob) || prob.Status != http.StatusBadRequest {
+		t.Errorf("failed: %q, %v", names, err)
+	}
+	// A part is read as soon as it is written, before the next one starts.
+	pr, pwr := io.Pipe()
+	ct, boundary, err := PartsContentType("multipart/mixed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string)
+	go func() {
+		w := NewPartWriter(pwr, boundary, p, oapi.Request)
+		for _, name := range []string{"a", "b"} {
+			it := item{Header: first.Header, Value: streamPet{Name: name}}
+			if err := w.Write(&it); err != nil {
+				pwr.CloseWithError(err)
+				return
+			}
+			if <-got != name {
+				pwr.CloseWithError(errors.New("out of order"))
+				return
+			}
+		}
+		pwr.CloseWithError(w.Close())
+	}()
+	names = nil
+	for it, err := range ScanParts[item](pr, ct, p, oapi.Request, 1<<10) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, it.Value.Name)
+		got <- it.Value.Name
+	}
+	if !slices.Equal(names, []string{"a", "b"}) {
+		t.Errorf("piped: %q", names)
+	}
+	// Without response validation it is sent, and the reader finds it out.
+	rec = write(NewConfig(), item{Value: streamPet{Name: "c"}})
+	if !strings.Contains(rec.Body.String(), `"c"`) {
+		t.Errorf("unchecked: %q", rec.Body)
+	}
+	if _, err := read(c, rec); !errors.As(err, &prob) || len(prob.Errors) != 1 || prob.Errors[0].Pointer != "/0" {
+		t.Errorf("unchecked: %v", err)
 	}
 }

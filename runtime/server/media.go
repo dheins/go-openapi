@@ -174,21 +174,27 @@ func CheckTuple(v any, p Parts) error {
 func checkItems(items []partItem, p Parts) error {
 	var errs oapi.ValidationErrors
 	for i, item := range items {
-		var header textproto.MIMEHeader
-		switch v := item.ptr.(type) {
-		case *oapi.File:
-			header = v.Header
-		case oapi.MIMEPart:
-			h, _ := v.MIMEPart()
-			header = *h
-		default:
-			continue
-		}
-		if msg := checkPart(header, Property{Headers: p.encoding(i).Headers}); msg != "" {
+		if msg := checkItem(item, p.encoding(i)); msg != "" {
 			errs.Add(oapi.Index("", i), msg)
 		}
 	}
 	return errs.Err()
+}
+
+// checkItem checks the headers of an item, a file's or an oapi.Part's,
+// against those of enc, its encoding.
+func checkItem(item partItem, enc Property) string {
+	var header textproto.MIMEHeader
+	switch v := item.ptr.(type) {
+	case *oapi.File:
+		header = v.Header
+	case oapi.MIMEPart:
+		h, _ := v.MIMEPart()
+		header = *h
+	default:
+		return ""
+	}
+	return checkPart(header, Property{Headers: enc.Headers})
 }
 
 // heldFiles returns the files a field holds: one, several, or, inside an

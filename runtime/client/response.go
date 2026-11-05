@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -122,6 +123,29 @@ func DecodeTuple[T any](resp *http.Response, body []byte, p server.Parts) (T, er
 		return v, &InvalidResponse{StatusCode: resp.StatusCode, Err: err}
 	}
 	return v, nil
+}
+
+// PartStream returns the positional parts of a response as they arrive,
+// decoded as DecodeParts decodes them, each at most c.MaxResponseBytes
+// long. The body is closed when the loop ends, as with JSONLines. A part
+// that is invalid or too long ends the loop with a *InvalidResponse.
+func PartStream[T any](c *Config, resp *http.Response, p server.Parts) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		defer resp.Body.Close()
+		for item, err := range server.ScanParts[T](resp.Body, resp.Header.Get("Content-Type"), p, oapi.Response, c.MaxResponseBytes) {
+			if err != nil {
+				if errors.Is(err, server.ErrPartTooLarge) || errors.As(err, new(oapi.ValidationErrors)) {
+					err = &InvalidResponse{StatusCode: resp.StatusCode, Err: err}
+				}
+				var zero T
+				yield(zero, err)
+				return
+			}
+			if !yield(item, nil) {
+				return
+			}
+		}
+	}
 }
 
 // Invalid reports a response that failed validation.
