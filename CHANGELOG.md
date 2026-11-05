@@ -4,6 +4,14 @@
 
 ### Added
 
+- Documentation pages: `server.WithDocumentPage(path, server.SwaggerUI)`
+  (or `server.Redoc`) serves a page rendering the document, which it
+  serves at `/openapi.json` unless `WithDocument` says where. Its scripts
+  come from jsDelivr at pinned versions (Swagger UI 5.34.0, Redoc 3.0.1)
+  with Subresource Integrity hashes, or from the application's copies with
+  `server.WithDocumentAssets`; a Content-Security-Policy with a nonce per
+  response allows only them. Redoc's telemetry is turned off. `goapi serve`
+  serves a document (bundled, Swagger 2.0 converted) and its page locally.
 - Range requests: an operation that declares a `206` response answers
   `Range` from the whole body its handler returns for the `200` binary
   response, as the document declares: one range with a `Content-Range`,
@@ -349,6 +357,11 @@
 
 ### Fixed
 
+- A streamed request of a Go client that failed (an invalid item, or an
+  error of its iterator) after a full duplex server had answered was lost:
+  the call succeeded, and its response only looked cut short. Reading the
+  response now returns the request's error, such as its
+  `*client.InvalidRequest`.
 - TypeScript clients quoted scalar header parameters that hold a comma
   (sending `"bytes=0-1,5-"` for a `Range`); only the items of arrays and
   objects are quoted, as in Go clients.

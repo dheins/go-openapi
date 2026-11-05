@@ -17,6 +17,7 @@ its tests.
 - [Errors](#errors)
 - [Security](#security)
 - [Server options](#server-options)
+- [Documentation pages](#documentation-pages)
 - [Generate a client](#generate-a-client)
 - [Generate a TypeScript client](#generate-a-typescript-client)
 - [Webhooks and callbacks](#webhooks-and-callbacks)
@@ -866,6 +867,49 @@ credentials that are present and wrong are still rejected.
 | `server.WithAccessLog(level)` | log every request: operation, route, status, duration, error |
 | `server.WithObserver(o...)` | be told when each request starts and ends, with its status, error and panic |
 | `server.WithMux(m)` | route with something other than a new `http.ServeMux` |
+| `server.WithDocumentPage("/docs", server.SwaggerUI)` | serve a page rendering the document with Swagger UI or `server.Redoc`; see [Documentation pages](#documentation-pages) |
+| `server.WithDocumentAssets(url)` | load the page's scripts from the application's own copies instead of jsDelivr |
+
+## Documentation pages
+
+```go
+h := gen.NewServer(store, server.WithDocumentPage("/docs", server.SwaggerUI))
+```
+
+A server can serve a page that renders its document: Swagger UI, which
+can also try the operations out against the server, or Redoc, as
+reference documentation. The page loads the document from
+`server.WithDocument`'s path, which the option turns on at `/openapi.json`
+if it is not set; both are below the base path.
+
+- **Scripts:** the module embeds none. They come from jsDelivr at a pinned
+  version (Swagger UI 5, Redoc 3), with Subresource Integrity hashes, so a
+  changed file is not run. Behind a firewall or offline, serve the npm
+  packages' files yourself and point `server.WithDocumentAssets` at them
+  (`swagger-ui.css` and `swagger-ui-bundle.js` of `swagger-ui-dist`, or
+  `bundles/redoc.standalone.js` of `redoc`, an ES module); they are then
+  loaded without hashes.
+- **Content-Security-Policy:** the page allows only those scripts and
+  stylesheets, and its own script by a nonce new on every response.
+  Requests may go to the page's origin and to those of the document's
+  absolute `servers`, for Swagger UI's try-it-out; a server URL with
+  variables is not allowed, so try-it-out against it fails. The page
+  cannot be framed.
+- **Redoc's telemetry** to Redocly is turned off, and the policy would
+  block it.
+
+To read a document without writing a server, serve it with the CLI:
+
+```sh
+goapi serve openapi.yaml                       # Swagger UI at http://localhost:8080/
+goapi serve -ui redoc -addr :9000 openapi.yaml # Redoc, on every interface
+```
+
+It serves the document as one file (a Swagger 2.0 document converted to
+3.1) at `/openapi.json` and the page at `/`, on localhost unless `-addr`
+says otherwise, until Ctrl+C. Errors in the document are printed, and a
+document that loads despite them is still served; one that cannot be
+loaded makes it exit with 1. `-assets` is `WithDocumentAssets`.
 
 ## Generate a client
 

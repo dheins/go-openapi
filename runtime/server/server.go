@@ -49,6 +49,12 @@ type Config struct {
 	// DocumentPath, if set, serves the OpenAPI document there, below the
 	// base path.
 	DocumentPath string
+	// DocumentPage, if set, serves a page rendering the document there,
+	// below the base path, with DocumentUI, loading its assets from
+	// DocumentAssets if set; see WithDocumentPage.
+	DocumentPage   string
+	DocumentUI     UI
+	DocumentAssets string
 }
 
 // Operation identifies the operation a handler serves, for middleware.
@@ -213,16 +219,24 @@ func (w *trackingWriter) Flush() {
 func (w *trackingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // ServeDocument serves doc, the document as JSON, at DocumentPath if it
-// is set.
+// is set, and the documentation page at DocumentPage if that is, with the
+// document at /openapi.json if DocumentPath is not set.
 func (c *Config) ServeDocument(doc []byte) {
-	if c.DocumentPath == "" {
+	docPath := c.DocumentPath
+	if docPath == "" && c.DocumentPage != "" {
+		docPath = "/openapi.json"
+	}
+	if docPath == "" {
 		return
 	}
-	c.Mux.Handle("GET "+c.BasePath+c.DocumentPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c.Mux.Handle("GET "+c.BasePath+docPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// The status line is sent; a failed write means the client is gone.
 		_, _ = w.Write(doc)
 	}))
+	if c.DocumentPage != "" {
+		c.Mux.Handle("GET "+c.BasePath+c.DocumentPage, c.documentPage(doc, c.BasePath+docPath))
+	}
 }
 
 // Handler returns the server's http.Handler. With an *http.ServeMux,

@@ -425,6 +425,51 @@ func TestAuthorize(t *testing.T) {
 	}
 }
 
+// TestStreamFailsAfterResponse checks that a request stream that fails
+// after the server has answered, as a full duplex server may, is reported
+// by reading the response.
+func TestStreamFailsAfterResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = http.NewResponseController(w).EnableFullDuplex()
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		_, _ = io.Copy(w, r.Body)
+	}))
+	defer srv.Close()
+	c, err := NewConfig(WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	answered := make(chan struct{})
+	items := func(yield func(owner, error) bool) {
+		// The invalid item comes only once the response has.
+		<-answered
+		yield(owner{}, nil)
+	}
+	named := func(o owner) error {
+		if o.Name == "" {
+			return &oapi.ValidationError{Path: "/name", Message: "must not be empty"}
+		}
+		return nil
+	}
+	r := NewRequest("POST")
+	JSONLinesBody(c, r, "application/jsonl", items, named)
+	req, err := c.Build(context.Background(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	close(answered)
+	var invalid *InvalidRequest
+	if _, err := io.ReadAll(resp.Body); !errors.As(err, &invalid) || invalid.Problem.Errors[0].Pointer != "/0/name" {
+		t.Errorf("reading the response: %v", err)
+	}
+}
+
 func TestMiddlewareOrder(t *testing.T) {
 	var order []string
 	mw := func(name string) func(Doer) Doer {
