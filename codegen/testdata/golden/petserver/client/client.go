@@ -375,6 +375,25 @@ func (c *Client) UploadReport(ctx context.Context, req *api.UploadReportRequest)
 	return api.ReadUploadReportResponse(c.cfg, resp)
 }
 
+// StreamPhotos calls POST /pets/{petId}/photos. A nil req sends no
+// parameters or body.
+//
+// Photos sent one by one, each acknowledged as it arrives.
+func (c *Client) StreamPhotos(ctx context.Context, req *api.StreamPhotosRequest) (api.StreamPhotosResponse, error) {
+	if req == nil {
+		req = &api.StreamPhotosRequest{}
+	}
+	hreq, err := api.NewStreamPhotosRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadStreamPhotosResponse(c.cfg, resp)
+}
+
 // ImportPet calls POST /pets/import. A nil req sends no parameters or body.
 //
 // Media types with different schemas.

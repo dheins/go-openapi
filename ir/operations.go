@@ -183,8 +183,9 @@ type BodyField struct {
 type BodyMedia struct {
 	MediaType string
 	// Kind is json, xml, form, multipart, parts, text, binary, jsonl
-	// (JSON Lines, read as a stream of items) or sse (a stream of
-	// server-sent events).
+	// (JSON Lines, read as a stream of items), partstream (positional
+	// parts, read as a stream of items) or sse (a stream of server-sent
+	// events).
 	Kind string
 	// Properties are the object properties, for form and multipart, and
 	// Additional the type of any others; Shape names the object's shape
@@ -192,7 +193,8 @@ type BodyMedia struct {
 	Properties []ParamProperty
 	Additional *ParamProperty
 	Shape      string
-	// XML describes the document, for xml, and Parts the parts, for parts.
+	// XML describes the document, for xml, and Parts the parts, for parts
+	// and partstream.
 	XML   *XMLNode
 	Parts *Parts
 	// Events types the events of an sse body, if its itemSchema does.
@@ -231,7 +233,8 @@ type Response struct {
 	TypeName string
 	Doc      string
 	// MediaType is the media type of the body, or "" for none, and Kind
-	// how it is written: json, xml, text, binary, jsonl (JSON Lines, a
+	// how it is written: json, xml, text, binary, parts, jsonl (JSON
+	// Lines, a stream of Item values), partstream (positional parts, a
 	// stream of Item values) or sse (a stream of server-sent events,
 	// typed by Events if Item is set).
 	MediaType string
@@ -239,7 +242,8 @@ type Response struct {
 	Body      *Ref
 	Item      *Ref
 	Events    *EventStream
-	// XML describes the document, for xml, and Parts the parts, for parts.
+	// XML describes the document, for xml, and Parts the parts, for parts
+	// and partstream.
 	XML   *XMLNode
 	Parts *Parts
 	// ContentTypeField means MediaType is a range such as "image/*", so
@@ -821,11 +825,14 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 	var rejected []string
 	for mt, m := range rb.Content.All() {
 		schema := m.Deref().Schema
-		kind := bodyKind(mt, schema)
+		kind := b.partsKind(bodyKind(mt, schema), m)
 		var events *EventStream
-		if kind == "jsonl" {
+		switch kind {
+		case "jsonl":
 			// The schema of the items, which the field is a stream of.
 			schema = streamItem(m.Deref())
+		case "partstream":
+			schema = m.Deref().ItemSchema
 		}
 		if m.Deref().Encoding.Len() > 0 && kind != "multipart" {
 			b.warnAt(m, []string{"encoding"}, "the encoding object is not applied yet")
@@ -835,7 +842,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			g = "structured"
 		}
 		i := slices.IndexFunc(groups, func(gr *group) bool {
-			return gr.kind == g && (g != "structured" && g != "parts" && g != "jsonl" || sameSchema(gr.schema, deref(schema)))
+			return gr.kind == g && (g != "structured" && g != "parts" && g != "jsonl" && g != "partstream" || sameSchema(gr.schema, deref(schema)))
 		})
 		var field *BodyField
 		switch {
@@ -862,7 +869,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			}
 		}
 		media := &BodyMedia{MediaType: mt, Kind: kind, Field: field, Events: events}
-		if kind == "parts" {
+		if kind == "parts" || kind == "partstream" {
 			media.Parts = b.parts(field.Value, m.Deref(), o.Name+"Part")
 			field.Value = partValues(field.Value, media.Parts)
 		}
@@ -1029,6 +1036,22 @@ func eventName(s *oas.Schema) (string, bool) {
 	return name, true
 }
 
+// partsKind returns the kind of a body of the given kind and media type:
+// partstream for positional parts whose itemSchema (3.2) describes them,
+// which are read and written one at a time, else kind. Next to a schema,
+// the itemSchema is not applied.
+func (b *builder) partsKind(kind string, m *oas.MediaType) string {
+	media := m.Deref()
+	switch {
+	case kind != "parts" || media.ItemSchema == nil:
+		return kind
+	case media.Schema != nil:
+		b.warnAt(m, []string{"itemSchema"}, "itemSchema is not applied next to schema; the parts are read whole")
+		return kind
+	}
+	return "partstream"
+}
+
 // streamItem returns the schema of the items of a JSON Lines body: its
 // itemSchema (3.2), or the items of an array schema.
 func streamItem(media *oas.MediaType) *oas.Schema {
@@ -1062,7 +1085,7 @@ func sameSchema(a, b *oas.Schema) bool {
 // another field has that name. The caller claims it once the field is used.
 func bodyFieldName(fields namespace, kind, mediaType string) string {
 	name := map[string]string{"json": "JSON", "xml": "XML", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary", "jsonl": "JSONLines", "sse": "Events"}[kind] + "Body"
-	if kind == "parts" {
+	if kind == "parts" || kind == "partstream" {
 		// MixedBody, RelatedBody, ...
 		mt, _, _ := strings.Cut(mediaType, ";")
 		_, sub, _ := strings.Cut(mt, "/")
@@ -1256,6 +1279,9 @@ func partValues(value *Ref, p *Parts) *Ref {
 	if p.Item == "file" || !p.HasHeaders() {
 		return value
 	}
+	if value.Kind == Stream {
+		return &Ref{Kind: Stream, Elem: &Ref{Kind: Part, Elem: value.Elem}}
+	}
 	slice := value
 	for slice.Kind == Named && (slice.Type.Kind == Defined || slice.Type.Kind == Alias) {
 		slice = slice.Type.Underlying
@@ -1301,6 +1327,7 @@ func (b *builder) markFileParts() {
 					b.markFileProperties(deref(m.Deref().Schema), map[*oas.Schema]bool{})
 				case "parts":
 					b.markPartItems(m.Deref().Schema)
+					b.markFile(m.Deref().ItemSchema)
 				}
 			}
 		}
@@ -1318,6 +1345,7 @@ func (b *builder) markFileParts() {
 				for mt, m := range resp.Deref().Content.All() {
 					if mediaKind(mt) == "parts" {
 						b.markPartItems(m.Deref().Schema)
+						b.markFile(m.Deref().ItemSchema)
 					}
 				}
 			}
@@ -1393,7 +1421,7 @@ func isFilePart(s *oas.Schema) bool {
 // type for structured bodies, a string for text and bytes for binary.
 func (b *builder) bodyValue(kind string, schema *oas.Schema, hint string) *Ref {
 	switch kind {
-	case "jsonl":
+	case "jsonl", "partstream":
 		return &Ref{Kind: Stream, Elem: b.use(schema, strings.TrimSuffix(hint, "Body")+"Item", nil)}
 	case "sse":
 		return &Ref{Kind: Stream, Elem: &Ref{Kind: Builtin, Name: "server.Event", Import: serverImport}}
@@ -1443,7 +1471,7 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 	seen := map[string]bool{}
 	for mt, m := range r.Content.All() {
 		media := m.Deref()
-		kind := bodyKind(mt, media.Schema)
+		kind := b.partsKind(bodyKind(mt, media.Schema), m)
 		v := &Response{Status: status, Code: code, Doc: doc, Headers: headers, MediaType: mt, Kind: kind}
 		var suffix string
 		switch kind {
@@ -1466,6 +1494,12 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			v.Body = b.bodyValue(kind, media.Schema, o.Name+statusName+"ResponseBody")
 			v.Parts = b.parts(v.Body, media, o.Name+statusName+"Part")
 			v.Body = partValues(v.Body, v.Parts)
+			_, sub, _ := strings.Cut(mt, "/")
+			suffix = GoName(sub)
+		case "partstream":
+			stream := b.bodyValue(kind, media.ItemSchema, o.Name+statusName+"Body")
+			v.Parts = b.parts(stream, media, o.Name+statusName+"Part")
+			v.Item = partValues(stream, v.Parts).Elem
 			_, sub, _ := strings.Cut(mt, "/")
 			suffix = GoName(sub)
 		case "text":

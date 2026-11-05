@@ -483,6 +483,46 @@ paths:
                   - title: summary
                     type: string
                 items: false
+  /pets/{petId}/photos:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: streamPhotos
+      description: Photos sent one by one, each acknowledged as it arrives.
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            itemSchema:
+              type: string
+              contentMediaType: image/png
+            itemEncoding:
+              contentType: image/png
+              headers:
+                X-Seq:
+                  required: true
+                  schema:
+                    type: integer
+                    minimum: 1
+      responses:
+        "200":
+          description: An acknowledgement per photo, with its X-Seq.
+          content:
+            multipart/mixed:
+              itemSchema:
+                title: ack
+                type: string
+              itemEncoding:
+                headers:
+                  X-Seq:
+                    required: true
+                    schema:
+                      type: integer
   /pets/import:
     post:
       operationId: importPet

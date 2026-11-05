@@ -123,6 +123,11 @@ type {{.TypeName}} struct {
 	// An error ends the stream; it cannot change the status any more.
 	Items {{imp "iter" "iter"}}.Seq2[{{goType .Item}}, error]
 {{- end}}
+{{- if eq .Kind "partstream"}}
+	// Items are sent as parts, one each, as they are produced. An error
+	// ends the stream; it cannot change the status any more.
+	Items {{imp "iter" "iter"}}.Seq2[{{goType .Item}}, error]
+{{- end}}
 {{- if eq .Kind "sse"}}
 	// Events are sent as server-sent events as they are produced. An
 	// error ends the stream; it cannot change the status any more.

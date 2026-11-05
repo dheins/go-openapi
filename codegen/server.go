@@ -506,6 +506,10 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			switch {
 			case m.Kind == "jsonl":
 				w(3, "req.%s = server.JSONLinesBody(%s, r, %s)", m.Field.Name, cfg, f.itemValidation(m.Field.Value.Elem))
+			case m.Kind == "partstream":
+				_, sub, _ := strings.Cut(m.MediaType, "/")
+				parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+				w(3, "req.%s = server.PartStreamBody(%s, r, %s, %s)", m.Field.Name, cfg, parts, f.itemValidation(m.Field.Value.Elem))
 			case m.Events != nil:
 				w(3, "req.%s = server.TypedEventsBody(%s, r, %s)", m.Field.Name, cfg, f.eventDecoder(m.Events, "Request"))
 			default:
@@ -678,7 +682,7 @@ func (f *fileGen) eventEncoder(es *ir.EventStream, dir string) string {
 }
 
 // isStream reports whether a body kind is read or written item by item.
-func isStream(kind string) bool { return kind == "jsonl" || kind == "sse" }
+func isStream(kind string) bool { return kind == "jsonl" || kind == "partstream" || kind == "sse" }
 
 // itemValidation returns a function checking an item of a stream of
 // type r, or a nil one of its type if items have nothing to check.
@@ -1250,6 +1254,9 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(1, "return server.WriteBytes(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "jsonl":
 		w(1, "return server.WriteJSONLines(c, w, req, %s, %s, r.Items, %s)", status, contentType, header)
+	case "partstream":
+		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+		w(1, "return server.WritePartStream(c, w, req, %s, %s, r.Items, %s, %s)", status, contentType, parts, header)
 	case "sse":
 		if r.Events != nil {
 			w(1, "return server.WriteTypedEvents(c, w, req, %s, r.Events, %s, %s)", status, header, f.eventEncoder(r.Events, "Response"))

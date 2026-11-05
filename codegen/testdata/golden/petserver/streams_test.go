@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"slices"
 	"strconv"
 	"strings"
@@ -143,6 +144,29 @@ func TestStreamedFullDuplex(t *testing.T) {
 	}
 }
 
+func TestStreamedParts(t *testing.T) {
+	_, h := newTestServer()
+	ct, body := partsBody(t, "mixed",
+		header("Content-Type", "image/png", "X-Seq", "1"), "PNG",
+		header("Content-Type", "image/png", "X-Seq", "2"), "PNG2",
+	)
+	r := do(t, h, "POST", "/pets/1/photos", ct, body)
+	want := []string{"multipart/mixed", "text/plain; charset=utf-8 photo 1: 3 bytes", "text/plain; charset=utf-8 photo 2: 4 bytes"}
+	if got := readParts(t, r); r.status != 200 || !slices.Equal(got, want) {
+		t.Errorf("%d %q", r.status, got)
+	}
+	// An invalid photo ends the stream of acknowledgements, cut short
+	// after the ones before it.
+	ct, body = partsBody(t, "mixed",
+		header("Content-Type", "image/png", "X-Seq", "1"), "PNG",
+		header("Content-Type", "image/png", "X-Seq", "0"), "PNG",
+	)
+	r = do(t, h, "POST", "/pets/1/photos", ct, body)
+	if r.status != 200 || !strings.Contains(r.body, "photo 1: 3 bytes") || strings.Contains(r.body, "photo 0") || strings.HasSuffix(r.body, "--\r\n") {
+		t.Errorf("%d %q", r.status, r.body)
+	}
+}
+
 // pets yields a pet per name, then err if not nil.
 func pets(err error, names ...string) iter.Seq2[model.Pet, error] {
 	return func(yield func(model.Pet, error) bool) {
@@ -229,6 +253,48 @@ func TestClientFullDuplex(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{"Ann", "Bo"}) {
 		t.Errorf("echoed %q", got)
+	}
+}
+
+func TestClientPartStreams(t *testing.T) {
+	_, c := newTestClient(t, petclient.Credentials{})
+	// Each photo is sent once the one before it is acknowledged: every
+	// part is read as soon as it arrives, both ways.
+	acked := make(chan string)
+	photos := func(seqs ...string) iter.Seq2[oapi.File, error] {
+		return func(yield func(oapi.File, error) bool) {
+			for _, seq := range seqs {
+				photo := oapi.File{ContentType: "image/png", Header: textproto.MIMEHeader{"X-Seq": {seq}}, Data: []byte("PNG" + seq)}
+				if !yield(photo, nil) {
+					return
+				}
+				select {
+				case <-acked:
+				case <-time.After(10 * time.Second):
+					yield(oapi.File{}, errors.New("no acknowledgement"))
+					return
+				}
+			}
+		}
+	}
+	r := as[api.StreamPhotos200MixedResponse](t)(c.StreamPhotos(context.Background(), &api.StreamPhotosRequest{PetID: 1, Body: photos("1", "2")}))
+	var got []string
+	for ack, err := range r.Items {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, ack.Header.Get("X-Seq")+" "+ack.Value)
+		acked <- ack.Value
+	}
+	if !slices.Equal(got, []string{"1 photo 1: 4 bytes", "2 photo 2: 4 bytes"}) {
+		t.Errorf("acknowledged %q", got)
+	}
+
+	// A photo with an invalid header is not sent.
+	var invalid *client.InvalidRequest
+	if _, err := c.StreamPhotos(context.Background(), &api.StreamPhotosRequest{PetID: 1, Body: photos("0")}); !errors.As(err, &invalid) ||
+		len(invalid.Problem.Errors) != 1 || invalid.Problem.Errors[0].Pointer != "/0" {
+		t.Errorf("invalid photo: %v", err)
 	}
 }
 
