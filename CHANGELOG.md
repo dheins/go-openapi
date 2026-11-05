@@ -4,6 +4,12 @@
 
 ### Added
 
+- `goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused]`
+  and the `flatten` package (`flatten.Document`): a document split over
+  several files written as one. `-hoist` moves the inline schemas that
+  become Go types into `components.schemas`, named as those types, so
+  generated code is unchanged; `-remove-unused` drops the components
+  nothing refers to.
 - Documentation pages: `server.WithDocumentPage(path, server.SwaggerUI)`
   (or `server.Redoc`) serves a page rendering the document, which it
   serves at `/openapi.json` unless `WithDocument` says where. Its scripts

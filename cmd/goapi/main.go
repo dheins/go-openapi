@@ -8,6 +8,7 @@
 //	goapi generate client [-out dir] [-package name] [-types import] file
 //	goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
 //	goapi convert [-out file] [-format yaml|json] file
+//	goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused] file
 //	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
 //	goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
 //	goapi version
@@ -48,6 +49,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runGenerate(args[1:], stdout, stderr)
 	case "convert":
 		return runConvert(args[1:], stdout, stderr)
+	case "flatten":
+		return runFlatten(args[1:], stdout, stderr)
 	case "scan":
 		return runScan(args[1:], stdout, stderr)
 	case "serve":
@@ -84,6 +87,7 @@ Usage:
   goapi generate client [-out dir] [-package name] [-types import] file
   goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
   goapi convert [-out file] [-format yaml|json] file
+  goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused] file
   goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
   goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
   goapi version
@@ -95,6 +99,7 @@ Commands:
   generate client   generate the types and an HTTP client for a document
   generate ts-client generate a TypeScript client for a document
   convert           write a Swagger 2.0 document as OpenAPI 3.1
+  flatten           write a document split over several files as one
   scan              write the document that goapi directives in Go code describe
   serve             serve a document and a page rendering it, with Swagger UI or Redoc
   version           print the version of goapi

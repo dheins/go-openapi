@@ -37,17 +37,7 @@ func runConvert(args []string, stdout, stderr io.Writer) int {
 		return fail("expected one document")
 	}
 	file := fs.Arg(0)
-	if *format == "" {
-		*format = "yaml"
-		ext := filepath.Ext(file)
-		if *out != "" {
-			ext = filepath.Ext(*out)
-		}
-		if strings.EqualFold(ext, ".json") {
-			*format = "json"
-		}
-	}
-	if *format != "yaml" && *format != "json" {
+	if *format = outputFormat(*format, file, *out); *format != "yaml" && *format != "json" {
 		return fail("unknown format %q", *format)
 	}
 
@@ -74,23 +64,45 @@ func runConvert(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	if *format == "yaml" {
+	if err := writeDocument(data, *format, *out, stdout); err != nil {
+		return fail("%v", err)
+	}
+	return exitOK
+}
+
+// outputFormat returns the format a document is written in: format if it
+// is set, else json for an -out file (or, without one, an input file)
+// ending in .json, and yaml otherwise.
+func outputFormat(format, file, out string) string {
+	if format != "" {
+		return format
+	}
+	ext := filepath.Ext(file)
+	if out != "" {
+		ext = filepath.Ext(out)
+	}
+	if strings.EqualFold(ext, ".json") {
+		return "json"
+	}
+	return "yaml"
+}
+
+// writeDocument writes data, a JSON document, in format to the file out,
+// or to stdout if out is empty.
+func writeDocument(data []byte, format, out string, stdout io.Writer) error {
+	if format == "yaml" {
+		var err error
 		if data, err = jsonToYAML(data); err != nil {
-			return fail("%v", err)
+			return err
 		}
 	} else {
 		data = append(data, '\n')
 	}
-	if *out == "" {
-		if _, err := stdout.Write(data); err != nil {
-			return fail("%v", err)
-		}
-		return exitOK
+	if out == "" {
+		_, err := stdout.Write(data)
+		return err
 	}
-	if err := os.WriteFile(*out, data, 0o644); err != nil {
-		return fail("%v", err)
-	}
-	return exitOK
+	return os.WriteFile(out, data, 0o644)
 }
 
 // jsonToYAML writes the JSON document data as YAML, in the same order.
