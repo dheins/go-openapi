@@ -107,10 +107,6 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   document, with the ones that break clients or servers (removed
   operations, parameters made required, narrowed types, removed response
   properties) reported as errors, like `swagger diff`. — later
-- `goapi flatten`: a document split over several files written as one,
-  from `loader.Spec.Bundle` (the objects of other files under
-  `components`), and an option to move inline schemas under
-  `components.schemas` too, like `swagger flatten`. — later
 
 ## Logging and telemetry
 
@@ -125,6 +121,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi flatten` and the `flatten` package: a document of several
+  files written as one, with `-hoist` (inline types moved into
+  `components.schemas` under their Go names) and `-remove-unused`.
+  (afd2dc9, 6e2b0f5)
 - [x] Documentation pages: `server.WithDocumentPage` renders the served
   document with Swagger UI or Redoc, its scripts from a pinned CDN with
   integrity hashes or the application's own copies, and `goapi serve`

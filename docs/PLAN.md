@@ -538,6 +538,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   from, and it sends telemetry to Redocly, which the page turns off.
 - *Not done*: see [features.md](../features.md).
 
+### M26 – Flatten ✅
+- [x] `flatten.Document`: bundling, hoisting inline types into
+  `components.schemas` under their Go names, and dropping unused
+  components
+- [x] `goapi flatten`, with `convert`'s output options
+
+**How it went**
+- *Names from the generator*: ir already names every inline type and
+  knows where it is, so hoisting moves those schemas under those names,
+  and a test checks that each golden document flattened gives the same
+  Go types.
+- *What stays*: the data of typed events is a union ir builds from the
+  events, not the item schema's own type, so it stays inline; types ir
+  derives from a component itself are where they were.
+- *Its own JSON*: an ordered JSON tree keeps the bundle's order and
+  numbers, where Go maps would lose them.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

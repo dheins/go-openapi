@@ -10,6 +10,7 @@ its tests.
 - [Install](#install)
 - [Validate a document](#validate-a-document)
 - [Swagger 2.0 documents](#swagger-20-documents)
+- [Flatten a document](#flatten-a-document)
 - [Generate models](#generate-models)
 - [Generate a server](#generate-a-server)
 - [Requests](#requests)
@@ -133,6 +134,42 @@ operation with both a body and form fields keeps the body.
 
 A server generated from a 2.0 document serves the converted 3.1 document
 at `server.WithDocument`.
+
+## Flatten a document
+
+```sh
+goapi flatten -out openapi.bundled.yaml openapi.yaml
+goapi flatten -hoist -remove-unused -out flat.json openapi.yaml
+```
+
+`goapi flatten` writes a document split over several files as one, for
+tools that do not follow references across files: the objects the
+document refers to in other files are copied under `components`, named
+after their last pointer token or their file, and the references are
+rewritten to them (`loader.Spec.Bundle`, which servers use for
+`server.WithDocument`). A 3.0 or 3.1 document keeps its version; a Swagger
+2.0 one is written as OpenAPI 3.1. The output format follows `-format`,
+else `-out`'s extension, else the input's, as for `goapi convert`.
+
+- **`-hoist`** moves the inline schemas that become Go types (objects,
+  enums and unions, inside paths, webhooks, callbacks or other schemas)
+  into `components.schemas`, with a `$ref` in their place. They are named
+  as their Go types are (`ListPets200ResponseBody`, `PetOwner`), so
+  generating code from the flattened document gives the same types with
+  the same names. Nested ones become references inside their parent, and
+  references into a moved schema follow it. The data of typed server-sent
+  events stays where it is: its Go type is the union of the events' data,
+  not the schema itself.
+- **`-remove-unused`** drops the components nothing refers to, from outside
+  `components` or through components that are used: references,
+  discriminator mappings (by reference or by name) and the security
+  schemes requirements name count. A schema that refers only to itself is
+  dropped.
+
+Errors in the document are printed; one that loads despite them is
+flattened as it is, and one that cannot be loaded writes nothing and exits
+with 1. From Go, `flatten.Document(spec, flatten.Options{Hoist: true})`
+does the same.
 
 ## Generate models
 
