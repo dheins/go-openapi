@@ -39,7 +39,6 @@ shipped in.
   types than JSON and text. — later
 - Streamed request bodies that can be sent again, for retry middleware
   (a stream is sent once today). — later
-- `multipart/byteranges` for range requests. — later
 - XML for unions, maps, recursive types and `nodeType: none` on objects
   (answered with 415 today). — later
 - Multipart part headers whose schemas are objects, or whose `content` is
@@ -65,6 +64,11 @@ shipped in.
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
+- A documentation page next to `server.WithDocument`: an HTML page
+  rendering the served document with Swagger UI or Redoc, like go-swagger's
+  `swagger serve` and its docs middleware. The page's scripts should come
+  from a CDN or a URL the application gives, so the module embeds no
+  third-party assets. — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -96,6 +100,23 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   embedding (both are dropped) are approximated: the first is kept.
   — later
 
+## Tooling
+
+- Custom templates for `goapi generate` (models, server, client and
+  TypeScript client): a `-templates` directory whose files override the
+  built-in ones by name, with the data each template is given documented,
+  as go-swagger's `--template-dir` and generator config allow. Only the
+  `x-go-*` extensions and the command-line flags adjust the generated code
+  today. — later
+- `goapi diff old.yaml new.yaml`: the changes between two versions of a
+  document, with the ones that break clients or servers (removed
+  operations, parameters made required, narrowed types, removed response
+  properties) reported as errors, like `swagger diff`. — later
+- `goapi flatten`: a document split over several files written as one,
+  from `loader.Spec.Bundle` (the objects of other files under
+  `components`), and an option to move inline schemas under
+  `components.schemas` too, like `swagger flatten`. — later
+
 ## Logging and telemetry
 
 - Integrations with zap, OpenTelemetry or other vendors are not planned in
@@ -109,6 +130,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Range requests: operations declaring a 206 answer `Range` from the
+  whole 200 binary body, with one range, several as
+  `multipart/byteranges`, or 416, and Go and TypeScript clients read
+  them. (aae967d, 33addd6, e3bdbf4)
 - [x] Streamed positional parts: multipart bodies and responses with
   `itemSchema`, read and written a part at a time, in servers and Go and
   TypeScript clients; positional multipart in TypeScript clients.

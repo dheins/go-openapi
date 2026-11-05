@@ -524,6 +524,29 @@ func TestClientContentParams(t *testing.T) {
 	}
 }
 
+func TestClientRanges(t *testing.T) {
+	ctx := context.Background()
+	_, c := newTestClient(t, petclient.Credentials{})
+	one := as[api.DownloadPhoto206PNGResponse](t)(c.DownloadPhoto(ctx, &api.DownloadPhotoRequest{PetID: 1, Range: oapi.Some("bytes=-3")}))
+	if string(one.Body) != "789" || one.ContentRange.Value != "bytes 7-9/10" {
+		t.Errorf("one range = %+v", one)
+	}
+	start, end, size, err := server.ParseContentRange(one.ContentRange.Value)
+	if err != nil || start != 7 || end != 9 || size != 10 {
+		t.Errorf("Content-Range: %d %d %d %v", start, end, size, err)
+	}
+	several := as[api.DownloadPhoto206ByterangesResponse](t)(c.DownloadPhoto(ctx, &api.DownloadPhotoRequest{PetID: 1, Range: oapi.Some("bytes=0-1,5-6")}))
+	if len(several.Body) != 2 || string(several.Body[0].Data) != "01" || several.Body[1].Start != 5 || several.Body[1].Size != 10 {
+		t.Errorf("several ranges = %+v", several)
+	}
+	// With a stale validator, the whole photo comes back.
+	whole := as[api.DownloadPhoto200PNGResponse](t)(c.DownloadPhoto(ctx, &api.DownloadPhotoRequest{PetID: 1, Range: oapi.Some("bytes=0-1"), IfRange: oapi.Some(`"old"`)}))
+	if string(whole.Body) != "0123456789" || whole.ETag.Value != `"v1"` {
+		t.Errorf("whole = %+v", whole)
+	}
+	as[api.DownloadPhoto416Response](t)(c.DownloadPhoto(ctx, &api.DownloadPhotoRequest{PetID: 1, Range: oapi.Some("bytes=50-")}))
+}
+
 func TestClientTupleParts(t *testing.T) {
 	ctx := context.Background()
 	s, c := newTestClient(t, petclient.Credentials{})

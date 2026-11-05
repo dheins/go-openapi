@@ -31,6 +31,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "echoPrefs", Name: "EchoPrefs", Method: "GET", Path: "/prefs"}, "/prefs", api.HandleEchoPrefs(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getPhoto", Name: "GetPhoto", Method: "GET", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleGetPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadPhoto", Name: "UploadPhoto", Method: "PUT", Path: "/pets/{petId}/photo"}, "/pets/{p0}/photo", api.HandleUploadPhoto(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "downloadPhoto", Name: "DownloadPhoto", Method: "GET", Path: "/pets/{petId}/photo.png"}, "/pets/{p0}/photo.png", api.HandleDownloadPhoto(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadRecords", Name: "UploadRecords", Method: "POST", Path: "/pets/{petId}/records"}, "/pets/{p0}/records", api.HandleUploadRecords(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadReport", Name: "UploadReport", Method: "POST", Path: "/pets/{petId}/report"}, "/pets/{p0}/report", api.HandleUploadReport(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "streamPhotos", Name: "StreamPhotos", Method: "POST", Path: "/pets/{petId}/photos"}, "/pets/{p0}/photos", api.HandleStreamPhotos(cfg, h, sec))

@@ -484,7 +484,7 @@ export interface ResponseSpec {
   /** "200", a range such as "4XX", or "default". */
   readonly status: string;
   readonly mediaType?: string;
-  readonly kind?: "json" | "text" | "binary" | "parts" | "partstream" | "jsonl" | "sse";
+  readonly kind?: "json" | "text" | "binary" | "byteranges" | "parts" | "partstream" | "jsonl" | "sse";
   readonly schema?: Schema;
   /** The parts of positional parts. */
   readonly parts?: PartsSpec;
@@ -669,6 +669,17 @@ export interface ServerEvent<T = string> {
 export interface Part<T> {
   header: Headers;
   value: T;
+}
+
+/** A part of a multipart/byteranges response: the bytes start to end,
+ * inclusive, of a representation of size bytes (-1 if unknown), whose
+ * media type is contentType. */
+export interface ByteRange {
+  start: number;
+  end: number;
+  size: number;
+  contentType: string;
+  data: Blob;
 }
 
 /** An event of a stream of named kinds: its name E says what its data is. */
@@ -874,7 +885,9 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
         }
         break;
       case "header":
-        b.headers.set(p.name, p.content !== undefined ? contentText(p.content, v) : simple(p, v, quoteItem));
+        // Only the items of a list are quoted: a scalar, such as a Range
+        // of several ranges, is sent as it is, as the Go client does.
+        b.headers.set(p.name, p.content !== undefined ? contentText(p.content, v) : p.shape === "scalar" ? text(v) : simple(p, v, quoteItem));
         break;
       case "cookie":
         if (p.content !== undefined) {
@@ -1617,6 +1630,9 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
         out["contentType"] = resp.headers.get("Content-Type") ?? "";
       }
       break;
+    case "byteranges":
+      out["body"] = await readByteRanges(resp);
+      break;
     case "parts":
       out["body"] = await readParts(cfg, spec.parts!, resp);
       break;
@@ -2103,4 +2119,40 @@ async function* partStream(cfg: Config, spec: PartsSpec, resp: Response): AsyncG
   } catch (e) {
     throw multipartFailure(e, resp.status);
   }
+}
+
+// contentRange parses a Content-Range, "bytes first-last/size", with a
+// size of "*" for an unknown one, -1.
+function contentRange(s: string): { start: number; end: number; size: number } | undefined {
+  const m = /^\s*bytes\s+(\d+)-(\d+)\/(\d+|\*)\s*$/i.exec(s);
+  if (m === null) {
+    return undefined;
+  }
+  const [start, end, size] = [Number(m[1]), Number(m[2]), m[3] === "*" ? -1 : Number(m[3])];
+  return start > end || (size >= 0 && end >= size) ? undefined : { start, end, size };
+}
+
+/** The ranges of a multipart/byteranges response, each read from its
+ * part's Content-Range and checked against its data. */
+async function readByteRanges(resp: Response): Promise<ByteRange[]> {
+  const ranges: ByteRange[] = [];
+  try {
+    for await (const raw of rawParts(resp.body, resp.headers.get("Content-Type") ?? "")) {
+      const i = ranges.length;
+      const cr = raw.header.get("Content-Range");
+      const r = cr === null ? undefined : contentRange(cr);
+      const fail = (message: string) => new InvalidResponseError(resp.status, `/${i}: ${message}`, [{ pointer: `/${i}`, message }]);
+      if (r === undefined) {
+        throw fail(cr === null ? 'part header "Content-Range" is missing' : `Content-Range ${JSON.stringify(cr)} is not a range of bytes`);
+      }
+      if (raw.data.length !== r.end - r.start + 1) {
+        throw fail(`bytes ${r.start}-${r.end} hold ${raw.data.length} bytes of data`);
+      }
+      const contentType = raw.header.get("Content-Type") ?? "";
+      ranges.push({ ...r, contentType, data: new Blob([raw.data], { type: contentType }) });
+    }
+  } catch (e) {
+    throw multipartFailure(e, resp.status);
+  }
+  return ranges;
 }

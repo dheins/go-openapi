@@ -379,6 +379,52 @@ paths:
           description: The photo.
           content:
             image/*: {}
+  /pets/{petId}/photo.png:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: downloadPhoto
+      description: The photo, or ranges of it.
+      parameters:
+        - name: Range
+          in: header
+          schema:
+            type: string
+        - name: If-Range
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The whole photo.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: The range asked for, or several.
+          headers:
+            Content-Range:
+              schema:
+                type: string
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            multipart/byteranges: {}
+        "416":
+          description: No range asked for is in the photo.
   /pets/{petId}/records:
     parameters:
       - name: petId

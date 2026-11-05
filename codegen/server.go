@@ -1251,7 +1251,15 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "text":
 		w(1, "return server.WriteText(w, %s, %s, string(r.Body), %s)", status, contentType, header)
 	case "binary":
+		if rs := r.Ranges; rs != nil {
+			// The server answers range requests from the whole body.
+			w(1, "return server.WriteBytesRanges(w, req, %s, %s, r.Body, %s, server.Ranges{Single: %t, Multi: %t, Unsatisfiable: %t})",
+				status, contentType, header, rs.Single, rs.Multi, rs.Unsatisfiable)
+			break
+		}
 		w(1, "return server.WriteBytes(w, %s, %s, r.Body, %s)", status, contentType, header)
+	case "byteranges":
+		w(1, "return server.WriteByteRanges(w, %s, r.Body, %s)", status, header)
 	case "jsonl":
 		w(1, "return server.WriteJSONLines(c, w, req, %s, %s, r.Items, %s)", status, contentType, header)
 	case "partstream":

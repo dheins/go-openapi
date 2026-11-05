@@ -4,6 +4,16 @@
 
 ### Added
 
+- Range requests: an operation that declares a `206` response answers
+  `Range` from the whole body its handler returns for the `200` binary
+  response, as the document declares: one range with a `Content-Range`,
+  several as `multipart/byteranges`, or a 416 problem, checking
+  `If-Range` against the `ETag` or `Last-Modified`. `multipart/byteranges`
+  responses are `[]oapi.ByteRange` in servers and Go clients and
+  `ByteRange[]` in TypeScript clients. Runtime: `server.ParseRange`,
+  `ParseContentRange`, `Ranges`, `WriteBytesRanges`, `WriteByteRanges`,
+  `EncodeByteRanges`, `DecodeByteRanges`, `ErrRangeNotSatisfiable` and
+  `client.DecodeByteRanges`.
 - Streamed positional parts: a multipart body or response of positional
   parts with an `itemSchema` (3.2) and no `schema` is a stream of its
   items, an `iter.Seq2` read one part at a time by handlers and Go
@@ -339,6 +349,9 @@
 
 ### Fixed
 
+- TypeScript clients quoted scalar header parameters that hold a comma
+  (sending `"bytes=0-1,5-"` for a `Range`); only the items of arrays and
+  objects are quoted, as in Go clients.
 - Cookie parameters with JSON `content` lost their quotes: Go's
   `http.Cookie` drops the bytes a cookie value cannot hold, so
   `{"name":"Ann"}` arrived as `{name:Ann}`. Generated Go clients

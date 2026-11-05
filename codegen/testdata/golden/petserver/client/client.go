@@ -337,6 +337,25 @@ func (c *Client) UploadPhoto(ctx context.Context, req *api.UploadPhotoRequest) (
 	return api.ReadUploadPhotoResponse(c.cfg, resp)
 }
 
+// DownloadPhoto calls GET /pets/{petId}/photo.png. A nil req sends no
+// parameters or body.
+//
+// The photo, or ranges of it.
+func (c *Client) DownloadPhoto(ctx context.Context, req *api.DownloadPhotoRequest) (api.DownloadPhotoResponse, error) {
+	if req == nil {
+		req = &api.DownloadPhotoRequest{}
+	}
+	hreq, err := api.NewDownloadPhotoRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadDownloadPhotoResponse(c.cfg, resp)
+}
+
 // UploadRecords calls POST /pets/{petId}/records. A nil req sends no
 // parameters or body.
 //

@@ -175,6 +175,13 @@ func (s *store) UploadPhoto(_ context.Context, req *api.UploadPhotoRequest) (api
 	return api.UploadPhoto204Response{}, nil
 }
 
+// DownloadPhoto returns the whole photo: the server answers range
+// requests from it.
+func (s *store) DownloadPhoto(_ context.Context, req *api.DownloadPhotoRequest) (api.DownloadPhotoResponse, error) {
+	s.seen["DownloadPhoto"] = req
+	return api.DownloadPhoto200PNGResponse{Body: []byte("0123456789"), ETag: oapi.Some(`"v1"`)}, nil
+}
+
 func (s *store) UploadRecords(_ context.Context, req *api.UploadRecordsRequest) (api.UploadRecordsResponse, error) {
 	s.seen["UploadRecords"] = req
 	return api.UploadRecords204Response{}, nil
@@ -1375,6 +1382,34 @@ func TestContentParams(t *testing.T) {
 	want := []string{"header X-Note: length must be at most 20", "path code: must be at least 1", "query where /role: required property is missing"}
 	if got := problemErrors(t, r); !slices.Equal(got, want) {
 		t.Errorf("errors = %q\nwant %q", got, want)
+	}
+}
+
+func TestRanges(t *testing.T) {
+	_, h := newTestServer()
+	for _, tc := range []struct {
+		headers []string
+		want    string
+	}{
+		{nil, `200  image/png "0123456789"`},
+		{[]string{"Range", "bytes=2-4"}, `206 bytes 2-4/10 image/png "234"`},
+		{[]string{"Range", "bytes=2-4", "If-Range", `"v2"`}, `200  image/png "0123456789"`},
+		{[]string{"Range", "bytes=20-"}, `416 bytes */10 application/problem+json`},
+	} {
+		r := do(t, h, "GET", "/pets/1/photo.png", "", "", tc.headers...)
+		got := fmt.Sprintf("%d %s %s", r.status, r.header.Get("Content-Range"), r.header.Get("Content-Type"))
+		if r.status != 416 {
+			got += fmt.Sprintf(" %q", r.body)
+		}
+		if got != tc.want || r.header.Get("Accept-Ranges") != "bytes" {
+			t.Errorf("%v: %s, want %s", tc.headers, got, tc.want)
+		}
+	}
+	// Several ranges are a multipart/byteranges body.
+	r := do(t, h, "GET", "/pets/1/photo.png", "", "", "Range", "bytes=0-0,-1")
+	ranges, err := server.DecodeByteRanges([]byte(r.body), r.header.Get("Content-Type"))
+	if r.status != 206 || err != nil || len(ranges) != 2 || string(ranges[1].Data) != "9" || ranges[1].ContentType != "image/png" {
+		t.Errorf("%d %+v, %v", r.status, ranges, err)
 	}
 }
 

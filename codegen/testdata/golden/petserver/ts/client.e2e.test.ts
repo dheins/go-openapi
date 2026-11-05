@@ -360,3 +360,25 @@ test("positional parts", { skip }, async () => {
   const streamed = await rejects(c.streamPhotos({ petId: 1, body: invalid() }), InvalidRequestError);
   assert.deepEqual(streamed.issues.map((i) => i.pointer), ["/1"]);
 });
+
+test("range requests", { skip }, async () => {
+  const c = client();
+  const one = await c.downloadPhoto({ petId: 1, range: "bytes=2-4" });
+  assert.ok(one.status === 206 && one.contentType === "image/png");
+  assert.equal(await one.body.text(), "234");
+  assert.equal(one.headers.contentRange, "bytes 2-4/10");
+
+  // Several ranges are parts of one body, each with its place.
+  const several = await c.downloadPhoto({ petId: 1, range: "bytes=0-1,-2" });
+  assert.ok(several.status === 206 && several.contentType === "multipart/byteranges", JSON.stringify(several));
+  assert.deepEqual(
+    await Promise.all(several.body.map(async (r) => `${r.start}-${r.end}/${r.size} ${r.contentType} ${await r.data.text()}`)),
+    ["0-1/10 image/png 01", "8-9/10 image/png 89"],
+  );
+
+  // A stale validator gets the whole photo, and a range outside it a 416.
+  const whole = await c.downloadPhoto({ petId: 1, range: "bytes=0-1", ifRange: '"old"' });
+  assert.ok(whole.status === 200 && whole.headers.eTag === '"v1"');
+  assert.equal(await whole.body.text(), "0123456789");
+  assert.equal((await c.downloadPhoto({ petId: 1, range: "bytes=50-" })).status, 416);
+});

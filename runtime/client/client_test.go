@@ -365,6 +365,20 @@ func TestResponses(t *testing.T) {
 		}
 	}
 
+	// Byte ranges, and a part that is not one.
+	body, ct, err := server.EncodeByteRanges([]oapi.ByteRange{{Start: 0, End: 1, Size: 4, ContentType: "text/plain", Data: []byte("ab")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranged := &http.Response{StatusCode: 206, Header: http.Header{"Content-Type": {ct}}}
+	if got, err := DecodeByteRanges(ranged, body); err != nil || len(got) != 1 || string(got[0].Data) != "ab" || got[0].Size != 4 {
+		t.Errorf("ranges = %+v, %v", got, err)
+	}
+	var invalidRanges *InvalidResponse
+	if _, err := DecodeByteRanges(ranged, []byte("x")); !errors.As(err, &invalidRanges) || invalidRanges.StatusCode != 206 {
+		t.Errorf("invalid ranges = %v", err)
+	}
+
 	// An undeclared response carries its problem details.
 	resp := &http.Response{StatusCode: 409, Header: http.Header{"Content-Type": {"application/problem+json"}},
 		Body: http.NoBody}

@@ -805,6 +805,13 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 	case "text":
 		readBody("body")
 		w(2, "v.Body = %s(body)", f.goType(r.Body))
+	case "byteranges":
+		readBody("body")
+		w(2, "ranges, err := client.DecodeByteRanges(resp, body)")
+		w(2, "if err != nil {")
+		w(3, "return nil, err")
+		w(2, "}")
+		w(2, "v.Body = ranges")
 	case "binary":
 		readBody("body")
 		w(2, "v.Body = body")

@@ -94,6 +94,7 @@ jobs:
           runtime/server FuzzObjectJSON
           runtime/server FuzzXMLToJSON
           runtime/server FuzzStreamBodies
+          runtime/server FuzzRange
           ir FuzzCallbackURL
           codescan FuzzParseTag
           codescan FuzzDirectives
