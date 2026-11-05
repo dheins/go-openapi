@@ -150,6 +150,9 @@ func (c *Config) Do(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", req.Method, req.URL.Redacted(), err)
 	}
+	if s, ok := req.Body.(*streamBody); ok {
+		resp.Body = &failedBody{ReadCloser: resp.Body, stream: s}
+	}
 	return resp, nil
 }
 

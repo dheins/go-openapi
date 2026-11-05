@@ -357,6 +357,11 @@
 
 ### Fixed
 
+- A streamed request of a Go client that failed (an invalid item, or an
+  error of its iterator) after a full duplex server had answered was lost:
+  the call succeeded, and its response only looked cut short. Reading the
+  response now returns the request's error, such as its
+  `*client.InvalidRequest`.
 - TypeScript clients quoted scalar header parameters that hold a comma
   (sending `"bytes=0-1,5-"` for a `Range`); only the items of arrays and
   objects are quoted, as in Go clients.

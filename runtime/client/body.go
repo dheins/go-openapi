@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/server"
@@ -178,6 +179,10 @@ type streamBody struct {
 	write  func(io.Writer) error
 	once   sync.Once
 	reader *io.PipeReader
+	// failed is the error the writer stopped with, if it did: a server
+	// may answer before it reads the body, so the response can arrive
+	// before the request fails, and reading it reports this instead.
+	failed atomic.Pointer[error]
 }
 
 func (s *streamBody) Read(p []byte) (int, error) {
@@ -200,7 +205,32 @@ func (s *streamBody) Close() error {
 func (s *streamBody) start() {
 	pr, pw := io.Pipe()
 	s.reader = pr
-	go func() { pw.CloseWithError(s.write(pw)) }()
+	go func() {
+		err := s.write(pw)
+		if err != nil {
+			s.failed.Store(&err)
+		}
+		pw.CloseWithError(err)
+	}()
+}
+
+// failedBody is the body of a response to a streamed request: once it
+// ends, or fails, after the request's stream did, reading it returns the
+// error the stream stopped with, which says why the response was cut
+// short.
+type failedBody struct {
+	io.ReadCloser
+	stream *streamBody
+}
+
+func (b *failedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		if failed := b.stream.failed.Load(); failed != nil {
+			return n, *failed
+		}
+	}
+	return n, err
 }
 
 // PartsBody sets the body to items as a multipart body of positional

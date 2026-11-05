@@ -290,10 +290,19 @@ func TestClientPartStreams(t *testing.T) {
 		t.Errorf("acknowledged %q", got)
 	}
 
-	// A photo with an invalid header is not sent.
+	// A photo with an invalid header is not sent. The server may answer
+	// before it reads the request, so the call may succeed: its response
+	// then ends with the error.
 	var invalid *client.InvalidRequest
-	if _, err := c.StreamPhotos(context.Background(), &api.StreamPhotosRequest{PetID: 1, Body: photos("0")}); !errors.As(err, &invalid) ||
-		len(invalid.Problem.Errors) != 1 || invalid.Problem.Errors[0].Pointer != "/0" {
+	resp, err := c.StreamPhotos(context.Background(), &api.StreamPhotosRequest{PetID: 1, Body: photos("0")})
+	if err == nil {
+		for _, err = range resp.(api.StreamPhotos200MixedResponse).Items {
+			if err != nil {
+				break
+			}
+		}
+	}
+	if !errors.As(err, &invalid) || len(invalid.Problem.Errors) != 1 || invalid.Problem.Errors[0].Pointer != "/0" {
 		t.Errorf("invalid photo: %v", err)
 	}
 }
