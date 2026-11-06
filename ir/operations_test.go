@@ -1088,3 +1088,53 @@ paths:
 		}
 	}
 }
+
+func TestCodecKinds(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+paths:
+  /a:
+    put:
+      operationId: a
+      requestBody:
+        content:
+          application/json: {schema: {$ref: "#/components/schemas/Pet"}}
+          application/msgpack:
+            x-goapi-codec: true
+            schema: {$ref: "#/components/schemas/Pet"}
+          application/cbor; v=1: {schema: {$ref: "#/components/schemas/Pet"}}
+          application/x-other: {schema: {type: string}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/cbor: {schema: {$ref: "#/components/schemas/Pet"}}
+            application/*: {x-goapi-codec: true, schema: {$ref: "#/components/schemas/Pet"}}
+components:
+  schemas:
+    Pet: {type: object, properties: {name: {type: string}}}
+`, Options{Operations: true, Codecs: []string{"Application/CBOR"}})
+	o := operationNamed(t, m, "A")
+	var kinds []string
+	for _, media := range o.Body.Media {
+		kinds = append(kinds, media.MediaType+"="+media.Kind+":"+media.Field.Name)
+	}
+	// Bodies of codecs share the field of their schema, as JSON does.
+	if got := strings.Join(kinds, " "); got != "application/json=json:Body application/msgpack=codec:Body application/cbor; v=1=codec:Body application/x-other=binary:BinaryBody" {
+		t.Errorf("bodies = %s", got)
+	}
+	var responses []string
+	for _, r := range o.Responses {
+		responses = append(responses, r.MediaType+"="+r.Kind+":"+r.TypeName)
+	}
+	if got := strings.Join(responses, " "); got != "application/cbor=codec:A200CborResponse application/*=binary:A200ApplicationResponse" {
+		t.Errorf("responses = %s", got)
+	}
+	all := ""
+	for _, w := range m.Warnings {
+		all += w.Message + "\n"
+	}
+	if want := "application/* is a wildcard and cannot have a codec, which is registered for one media type"; !strings.Contains(all, want) {
+		t.Errorf("no warning %q in:\n%s", want, all)
+	}
+}

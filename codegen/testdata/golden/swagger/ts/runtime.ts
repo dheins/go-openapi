@@ -1227,6 +1227,23 @@ export interface ClientOptions {
   validateRequests?: boolean;
   /** Check response bodies and required headers (false by default). */
   validateResponses?: boolean;
+  /** The codecs of media types the runtime does not know, by media type
+   * (such as "application/msgpack"); the client needs one for each it
+   * declares. */
+  codecs?: Readonly<Record<string, Codec>>;
+}
+
+/** Encodes and decodes bodies of a media type the runtime does not know,
+ * as a Go server's server.Codec does. */
+export interface Codec {
+  encode(value: unknown): Uint8Array<ArrayBuffer> | string;
+  decode(body: Uint8Array<ArrayBuffer>): unknown;
+}
+
+// codecKey returns a media type as codecs are registered: its type and
+// subtype in lower case, without parameters.
+function codecKey(mediaType: string): string {
+  return (mediaType.split(";")[0] ?? "").trim().toLowerCase();
 }
 
 /** Options of one call. */
@@ -1266,7 +1283,7 @@ export type Content = "json" | "text" | "form" | "xml";
 
 export interface BodyMediaSpec {
   readonly mediaType: string;
-  readonly kind: "json" | "xml" | "form" | "multipart" | "parts" | "partstream" | "text" | "binary" | "jsonl" | "sse";
+  readonly kind: "json" | "xml" | "codec" | "form" | "multipart" | "parts" | "partstream" | "text" | "binary" | "jsonl" | "sse";
   /** The request property holding a body of this media type. */
   readonly key: string;
   /** How an XML body is written. */
@@ -1334,7 +1351,7 @@ export interface ResponseSpec {
   /** "200", a range such as "4XX", or "default". */
   readonly status: string;
   readonly mediaType?: string;
-  readonly kind?: "json" | "xml" | "text" | "binary" | "byteranges" | "parts" | "partstream" | "jsonl" | "sse";
+  readonly kind?: "json" | "xml" | "codec" | "text" | "binary" | "byteranges" | "parts" | "partstream" | "jsonl" | "sse";
   readonly schema?: Schema;
   /** How an XML body is read. */
   readonly xml?: XMLNode;
@@ -1769,7 +1786,7 @@ function fileName(v: Blob): string | undefined {
 
 // buildBody sets the body of b; checkItems says to validate the items of a
 // stream, which checkRequest leaves to it.
-function buildBody(op: OperationSpec, req: Values, b: Built, checkItems: boolean): void {
+function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkItems: boolean): void {
   const body = op.body;
   if (body === undefined) {
     return;
@@ -1842,6 +1859,11 @@ function buildBody(op: OperationSpec, req: Values, b: Built, checkItems: boolean
     case "binary":
       b.headers.set("Content-Type", v instanceof Blob && v.type !== "" && media.mediaType.includes("*") ? v.type : media.mediaType);
       b.body = v as BodyInit;
+      break;
+    case "codec":
+      // config checked that there is one.
+      b.headers.set("Content-Type", media.mediaType);
+      b.body = cfg.codecs.get(codecKey(media.mediaType))!.encode(encode(media.schema, v, "request"));
       break;
     case "parts": {
       const spec = media.parts!;
@@ -2259,15 +2281,22 @@ export interface Config {
   readonly validateRequests: boolean;
   readonly validateResponses: boolean;
   readonly credentials: Values;
+  readonly codecs: ReadonlyMap<string, Codec>;
 }
 
 /** Makes the configuration of a client from its options. */
-export function config(options: ClientOptions, defaultBaseUrl: string, credentials: object | undefined): Config {
+export function config(options: ClientOptions, defaultBaseUrl: string, credentials: object | undefined, codecTypes: readonly string[] = []): Config {
   const baseUrl = options.baseUrl ?? defaultBaseUrl;
   if (baseUrl === "") {
     throw new Error("the document has no absolute server URL: give baseUrl");
   }
+  const codecs = new Map(Object.entries(options.codecs ?? {}).map(([mt, c]) => [codecKey(mt), c]));
+  const missing = codecTypes.filter((mt) => !codecs.has(codecKey(mt)));
+  if (missing.length > 0) {
+    throw new Error(`no codec for ${missing.join(", ")}: give one in the codecs option`);
+  }
   return {
+    codecs,
     baseUrl: baseUrl.replace(/\/+$/, ""),
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     headers: options.headers ?? {},
@@ -2286,7 +2315,7 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
   }
   const b: Built = { path: "", query: new URLSearchParams(), headers: new Headers(), cookies: [] };
   buildParams(op, values, b);
-  buildBody(op, values, b, cfg.validateRequests);
+  buildBody(cfg, op, values, b, cfg.validateRequests);
   await authorize(op, cfg.credentials, b);
   const accept = [...new Set(op.responses.flatMap((r) => (r.mediaType ? [r.mediaType] : [])))];
   if (accept.length > 0) {
@@ -2645,6 +2674,22 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
     case "text":
       out["body"] = await resp.text();
       break;
+    case "codec": {
+      let body: unknown;
+      try {
+        body = cfg.codecs.get(codecKey(spec.mediaType!))!.decode(new Uint8Array(await resp.arrayBuffer()));
+      } catch (e) {
+        throw new InvalidResponseError(resp.status, `invalid ${codecKey(spec.mediaType!)}: ${String(e)}`);
+      }
+      if (cfg.validateResponses && spec.schema !== undefined) {
+        const issues = validate(spec.schema, body, "response");
+        if (issues.length > 0) {
+          throw new InvalidResponseError(resp.status, issues.map((i) => `${i.pointer}: ${i.message}`).join("; "), issues);
+        }
+      }
+      out["body"] = body;
+      break;
+    }
     case "binary":
       out["body"] = await resp.blob();
       if (spec.mediaType?.includes("*")) {

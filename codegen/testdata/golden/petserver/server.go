@@ -15,9 +15,12 @@ import (
 const BasePath = "/v1"
 
 // NewServer returns an http.Handler that serves the operations of the
-// document with h, checking credentials with sec.
+// document with h, checking credentials with sec. It panics
+// unless opts register the codecs of "application/x-tc", "application/x-tc2"
+// (server.WithCodec).
 func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) http.Handler {
 	cfg := server.NewConfig(append([]server.Option{server.WithBasePath(BasePath)}, opts...)...)
+	cfg.RequireCodecs("application/x-tc", "application/x-tc2")
 	cfg.Handle(server.Operation{ID: "listPets", Name: "ListPets", Method: "GET", Path: "/pets"}, "/pets", api.HandleListPets(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "createPet", Name: "CreatePet", Method: "POST", Path: "/pets"}, "/pets", api.HandleCreatePet(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getPet", Name: "GetPet", Method: "GET", Path: "/pets/{petId}"}, "/pets/{p0}", api.HandleGetPet(cfg, h, sec))
@@ -29,6 +32,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "lookup", Name: "Lookup", Method: "GET", Path: "/lookup"}, "/lookup", api.HandleLookup(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getContent", Name: "GetContent", Method: "GET", Path: "/content/{code}"}, "/content/{p0}", api.HandleGetContent(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "echoPrefs", Name: "EchoPrefs", Method: "GET", Path: "/prefs"}, "/prefs", api.HandleEchoPrefs(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "putSize", Name: "PutSize", Method: "PUT", Path: "/sizes"}, "/sizes", api.HandlePutSize(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putTag", Name: "PutTag", Method: "PUT", Path: "/tags/{code}"}, "/tags/{p0}", api.HandlePutTag(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getSettings", Name: "GetSettings", Method: "GET", Path: "/pets/{petId}/settings"}, "/pets/{p0}/settings", api.HandleGetSettings(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putSettings", Name: "PutSettings", Method: "PUT", Path: "/pets/{petId}/settings"}, "/pets/{p0}/settings", api.HandlePutSettings(cfg, h, sec))

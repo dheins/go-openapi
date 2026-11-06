@@ -6,12 +6,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { Client, InvalidResponseError } from "./index.ts";
+import { codecs } from "./codecs.test.ts";
 
 // answering returns a client whose fetch answers every request with the
 // JSON body.
 function answering(body: string, validateResponses = false): Client {
   const fetch = async () => new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
-  return new Client({ baseUrl: "http://pets.test", fetch, validateResponses });
+  return new Client({ baseUrl: "http://pets.test", fetch, validateResponses, codecs });
 }
 
 test("absent properties get their defaults", async () => {

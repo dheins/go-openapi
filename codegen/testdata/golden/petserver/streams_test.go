@@ -94,7 +94,7 @@ func TestTypedEvents(t *testing.T) {
 
 func TestStreamedLineLimit(t *testing.T) {
 	// MaxBodyBytes limits each line, not the stream.
-	h := NewServer(newStore(), auth{}, server.WithLogger(slog.New(slog.DiscardHandler)), server.WithMaxBodyBytes(32))
+	h := newServer(newStore(), server.WithLogger(slog.New(slog.DiscardHandler)), server.WithMaxBodyBytes(32))
 	short := strings.Repeat("{\"name\":\"Ann\"}\n", 10)
 	if r := do(t, h, "POST", "/pets/lines", "application/jsonl", short); r.status != 200 || r.body != "10" {
 		t.Errorf("short lines: %d %s", r.status, r.body)

@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"mime"
 	"os"
 	"path"
 	"path/filepath"
@@ -44,6 +45,10 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	pkg := fs.String("package", "", "package name (default: the base name of -out)")
 	optional := fs.String("optional", "wrapper", "optional properties as oapi.Optional (wrapper) or pointers (pointer)")
 	templates := fs.String("templates", "", "directory of *.tmpl files whose blocks replace the built-in ones (experimental)")
+	var codecs codecFlag
+	if operations {
+		fs.Var(&codecs, "codec", "a media type whose bodies are encoded and decoded with a codec registered at run time, such as application/msgpack (repeatable)")
+	}
 	formats := formatFlag{}
 	fs.Var(formats, "format-type", "`format=type`: the Go type of a format's values, a predeclared type or an import path and type name, such as uuid=github.com/google/uuid.UUID (repeatable)")
 	var opsPkg, models, importPath, types *string
@@ -131,7 +136,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	irOpts := ir.Options{OptionalPointers: *optional == "pointer", Operations: operations, Formats: formats}
+	irOpts := ir.Options{OptionalPointers: *optional == "pointer", Operations: operations, Formats: formats, Codecs: codecs}
 	if paths != nil {
 		sel := &ir.Selection{Paths: splitList(*paths), Tags: splitList(*tags), ExcludePaths: splitList(*excludePaths), ExcludeTags: splitList(*excludeTags)}
 		if len(sel.Paths)+len(sel.Tags)+len(sel.ExcludePaths)+len(sel.ExcludeTags) > 0 {
@@ -272,5 +277,18 @@ func (f formatFlag) Set(v string) error {
 		return errors.New(why)
 	}
 	f[format] = typ
+	return nil
+}
+
+// codecFlag collects -codec flags: media types with codecs.
+type codecFlag []string
+
+func (f *codecFlag) String() string { return strings.Join(*f, ",") }
+
+func (f *codecFlag) Set(v string) error {
+	if _, _, err := mime.ParseMediaType(v); err != nil || strings.Contains(v, "*") {
+		return fmt.Errorf("%q is not a media type", v)
+	}
+	*f = append(*f, v)
 	return nil
 }

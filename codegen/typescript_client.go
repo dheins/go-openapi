@@ -14,8 +14,8 @@ import (
 // tsBodyKinds are the request body kinds the TypeScript runtime sends,
 // and tsResponseKinds the response kinds it reads.
 var (
-	tsBodyKinds     = []string{"json", "xml", "form", "multipart", "parts", "partstream", "text", "binary", "jsonl", "sse"}
-	tsResponseKinds = []string{"", "json", "xml", "text", "binary", "byteranges", "parts", "partstream", "jsonl", "sse"}
+	tsBodyKinds     = []string{"json", "xml", "codec", "form", "multipart", "parts", "partstream", "text", "binary", "jsonl", "sse"}
+	tsResponseKinds = []string{"", "json", "xml", "codec", "text", "binary", "byteranges", "parts", "partstream", "jsonl", "sse"}
 )
 
 // tsScheme is a security scheme, as the Credentials of client.ts hold it:
@@ -114,11 +114,20 @@ func (g *tsGen) client() (string, error) {
 		}
 		ops = append(ops, op)
 	}
+	var generated []*ir.Operation
+	for _, op := range ops {
+		generated = append(generated, op.Operation)
+	}
+	var codecTypes []string
+	for _, mt := range codecMediaTypes(generated) {
+		codecTypes = append(codecTypes, jsString(mt))
+	}
 	body, err := g.render("client", struct {
 		ServerURL string
 		Schemes   []tsScheme
 		Ops       []*tsOperation
-	}{g.m.ServerURL, schemes, ops})
+		Codecs    string
+	}{g.m.ServerURL, schemes, ops, strings.Join(codecTypes, ", ")})
 	if err != nil {
 		return "", err
 	}
@@ -439,7 +448,7 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 			fields = append(fields, "contentType: "+jsString(r.MediaType))
 		}
 		switch r.Kind {
-		case "json", "xml":
+		case "json", "xml", "codec":
 			fields = append(fields, "body: "+g.tsType(r.Body))
 		case "text":
 			fields = append(fields, "body: string")
@@ -570,6 +579,8 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 			s += ", schema: " + g.schema(r.Body)
 		case "xml":
 			s += ", schema: " + g.schema(r.Body) + ", xml: " + tsXMLNode(r.XML)
+		case "codec":
+			s += ", schema: " + g.schema(r.Body)
 		case "jsonl":
 			s += ", item: " + g.schema(r.Item)
 		case "parts":

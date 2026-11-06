@@ -65,11 +65,10 @@ shipped in.
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
-- Bodies of media types goapi does not know (msgpack, protobuf, CBOR and
-  other formats): a codec the application registers for a media type,
-  used by servers and Go clients, as go-swagger's consumers and producers
-  are. An operation with only such bodies is not generated today, with a
-  warning. — later
+- Codecs of parameters, headers and positional parts, of wildcard media
+  types, and of streams; and decoding codec bodies with the JSON
+  decoder's rules (required properties, read-only and write-only ones,
+  defaults, pointers). — later
 - Validating requests against a document without generated code: a
   middleware in front of handlers written by hand, as go-swagger's
   `middleware` and `untyped` packages offer. — later
@@ -145,6 +144,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Codecs of media types goapi does not know (msgpack, CBOR, ...):
+  declared by `goapi generate -codec` or `x-goapi-codec`, registered
+  with `server.WithCodec`, `client.WithCodec` and a TypeScript client's
+  `codecs` option, as go-swagger's consumers and producers are.
+  (92cd1bc, 4de1b19, dd0da36)
 - [x] go-swagger's model extensions `x-go-custom-tag` (struct tags after
   the json tag), `x-omitempty: false` (an optional property written even
   when unset) and `x-nullable`/`x-isnullable` (null allowed, in every

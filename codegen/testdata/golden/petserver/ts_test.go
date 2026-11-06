@@ -28,7 +28,7 @@ func TestTypeScriptClient(t *testing.T) {
 		t.Skip("node is not installed")
 	}
 	s := newStore()
-	srv := httptest.NewServer(NewServer(s, auth{}, server.WithLogger(slog.New(slog.DiscardHandler))))
+	srv := httptest.NewServer(newServer(s, server.WithLogger(slog.New(slog.DiscardHandler))))
 	defer srv.Close()
 
 	cmd := exec.Command(node, "--test", "ts/client.e2e.test.ts")

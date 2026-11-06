@@ -18,10 +18,11 @@ import {
   type Order,
   type Tree,
 } from "./index.ts";
+import { codecs } from "./codecs.test.ts";
 
 const baseUrl = process.env["PETSERVER_URL"] ?? "";
 const skip = baseUrl === "" ? "PETSERVER_URL is not set" : false;
-const client = (options: ConstructorParameters<typeof Client>[0] = {}) => new Client({ baseUrl, ...options });
+const client = (options: ConstructorParameters<typeof Client>[0] = {}) => new Client({ baseUrl, codecs, ...options });
 
 async function rejects<T>(p: Promise<unknown>, type: new (...args: never[]) => T): Promise<T> {
   try {
@@ -448,4 +449,18 @@ test("formats", { skip }, async () => {
   });
   const bad = await rejects(client({ validateRequests: false }).putTag({ code: "abc", body: { code: "x" } }), UnexpectedResponseError);
   assert.equal(bad.status, 400);
+});
+
+test("codecs", { skip }, async () => {
+  // Encoded by the client's codec, decoded by the server's, and back.
+  assert.deepEqual(await client({ validateResponses: true }).putSize({ body: { w: 2, h: 3 } }, { headers: { Accept: "application/x-tc2" } }), {
+    status: 200,
+    contentType: "application/x-tc2",
+    body: { w: 2, h: 3 },
+  });
+  assert.deepEqual(await client().putSize({ body: { w: 4 } }, { headers: { Accept: "application/json" } }), {
+    status: 200,
+    contentType: "application/json",
+    body: { w: 4 },
+  });
 });

@@ -592,7 +592,7 @@ Supported request bodies: JSON (`application/json`, `*+json`), XML
 (`application/xml`, `text/xml`, `*+xml`),
 `application/x-www-form-urlencoded`, `multipart/form-data`, other
 multipart types (see below), JSON Lines and server-sent events (streams,
-see below), `text/*` (a string) and anything else as bytes. In a multipart body, a part is a file,
+see below), media types with codecs (see below), `text/*` (a string) and anything else as bytes. In a multipart body, a part is a file,
 an `oapi.File` with the part's name, content type, headers and data, when
 its schema is `format: binary` (3.0) or, the 3.1 way, a string with a
 `contentMediaType` or a schema without a type; a part need not have a file
@@ -765,6 +765,50 @@ in responses, with a warning. Documents are read with `encoding/xml`,
 which does not process DTDs or external entities; nesting is limited.
 TypeScript clients write and read XML the same way, with a reader of
 their own.
+
+### Codecs
+
+A media type goapi does not know, such as `application/msgpack` or
+`application/cbor`, is bytes unless it has a codec: declare it with
+`goapi generate -codec application/msgpack` (repeatable, for `server`,
+`client` and `ts-client`) or `x-goapi-codec: true` on its media type
+object ([extensions](extensions.md#x-goapi-codec)). Its body is then the
+schema's type, like JSON's, and its responses are `...<Subtype>Response`
+variants (`...MsgpackResponse`).
+
+Register the codec at run time: a `server.Codec`, whose `Marshal` and
+`Unmarshal` a library for the format has as they are.
+
+```go
+type msgpackCodec struct{}
+
+func (msgpackCodec) Marshal(v any) ([]byte, error)      { return msgpack.Marshal(v) }
+func (msgpackCodec) Unmarshal(data []byte, v any) error { return msgpack.Unmarshal(data, v) }
+
+h := NewServer(handler, server.WithCodec("application/msgpack", msgpackCodec{}))
+c, err := petclient.New(client.WithCodec("application/msgpack", msgpackCodec{}))
+```
+
+`NewServer` panics, and a client's `New` (or `NewSender`) fails, when a
+media type its operations use has no codec, so a missing registration is
+found at start. Media types match without parameters or case.
+
+The codec decodes into the generated type itself, and `Validate` then
+checks it. What the JSON decoder does besides is not done: required
+properties are only checked if the type's zero value fails `Validate`,
+read-only and write-only properties are kept in both directions,
+defaults are not applied, and problems the codec reports have no JSON
+pointer (`body: invalid application/msgpack: ...`). Wildcards
+(`application/*`) cannot have codecs.
+
+TypeScript clients take codecs as an option, and throw without one they
+need:
+
+```ts
+const client = new Client({
+  codecs: { "application/msgpack": { encode: (v) => msgpack.encode(v), decode: (bytes) => msgpack.decode(bytes) } },
+});
+```
 
 ### Positional multipart bodies
 

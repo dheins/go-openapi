@@ -4,6 +4,11 @@
 
 ### Added
 
+- Codecs: `goapi generate -codec` and `x-goapi-codec` declare media types
+  goapi does not know whose bodies decode into their schemas' types with
+  a `server.Codec` registered by `server.WithCodec` or `client.WithCodec`
+  (or a TypeScript client's `codecs` option). `NewServer` panics, and
+  `New` and `NewSender` fail, without the codecs they use.
 - go-swagger's `x-go-custom-tag` (struct tags added after the json tag)
   and `x-omitempty: false` (an optional property generated as a plain
   field and written even when unset, its zero value not validated;

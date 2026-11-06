@@ -693,6 +693,8 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			f.imp(serverImport, "server")
 			shape := f.declareVar(lowerFirst(o.Name)+"RequestXMLShape", xmlNodeLiteral(m.XML))
 			stmt = fmt.Sprintf("r.XMLBody(%s, %s, %s)", ct, value, shape)
+		case "codec":
+			stmt = fmt.Sprintf("r.CodecBody(c, %s, %s)", ct, value)
 		case "form":
 			stmt = fmt.Sprintf("r.FormBody(%s, %s)", ct, value)
 		case "multipart":
@@ -802,6 +804,9 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		f.imp(serverImport, "server")
 		shape := f.declareVar(lowerFirst(r.TypeName)+"ReadXMLShape", xmlNodeLiteral(r.XML))
 		check(fmt.Sprintf("client.DecodeXML(resp, body, %s, &v.Body)", shape))
+	case "codec":
+		readBody("body")
+		check(fmt.Sprintf("c.DecodeCodec(resp, body, %q, &v.Body)", r.MediaType))
 	case "text":
 		readBody("body")
 		w(2, "v.Body = %s(body)", f.goType(r.Body))
@@ -889,7 +894,7 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		}
 		w(2, "}")
 	}
-	if r.Kind == "json" || r.Kind == "xml" || r.Kind == "parts" {
+	if r.Kind == "json" || r.Kind == "xml" || r.Kind == "codec" || r.Kind == "parts" {
 		if stmts := f.validation("v.Body", r.Body, 3); stmts != "" {
 			w(2, "if c.ValidateResponses {")
 			w(3, "var errs oapi.ValidationErrors")

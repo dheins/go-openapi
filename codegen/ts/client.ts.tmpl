@@ -4,7 +4,7 @@ of each operation, its descriptor, and the Client class. The descriptors
 (.Spec) are what the runtime sends requests and reads responses with.
 */ -}}
 
-{{/* "client" gets ServerURL, Schemes (as "credentials" gets them) and Ops (as "operation" gets each). */}}
+{{/* "client" gets ServerURL, Schemes (as "credentials" gets them), Ops (as "operation" gets each) and Codecs (the media types with codecs, as JavaScript strings joined by commas). */}}
 {{define "client"}}
 /** The URL of the document's first server, if it is absolute. */
 export const defaultServerUrl = {{jsString .ServerURL}};
@@ -14,7 +14,7 @@ export class Client {
   readonly #cfg: Config;
 
   constructor(options: ClientOptions{{if .Schemes}} & { credentials?: Credentials }{{end}} = {}) {
-    this.#cfg = config(options, defaultServerUrl, {{if .Schemes}}options.credentials{{else}}undefined{{end}});
+    this.#cfg = config(options, defaultServerUrl, {{if .Schemes}}options.credentials{{else}}undefined{{end}}{{with .Codecs}}, [{{.}}]{{end}});
   }
 {{range .Ops}}{{template "method" .}}{{range .Links}}{{template "linkMethod" .}}{{end}}{{end}}}
 {{end}}
