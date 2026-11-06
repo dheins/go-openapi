@@ -24,6 +24,7 @@ its tests.
 - [Generate a TypeScript client](#generate-a-typescript-client)
 - [Webhooks and callbacks](#webhooks-and-callbacks)
 - [Generate a document from Go code](#generate-a-document-from-go-code)
+- [Custom templates](#custom-templates)
 - [Running in production](#running-in-production)
 - [Logging](#logging)
 - [Using the libraries directly](#using-the-libraries-directly)
@@ -1623,6 +1624,74 @@ package store
 Values with spaces are double-quoted, as Go strings. The scanned document
 can be fed to every other command; for example, `goapi generate client`
 gives a typed client of the service the annotations describe.
+
+## Custom templates
+
+```sh
+goapi templates -out templates             # the built-in Go templates, to copy from
+goapi templates -out ts-templates -target ts
+goapi generate model -templates my-templates openapi.yaml
+goapi generate ts-client -templates my-ts-templates openapi.yaml
+```
+
+The generated code is written from Go templates, which a directory of
+your own can change: every `generate` command takes `-templates dir`
+(`codegen.Options.Templates` and `TSOptions.Templates` from Go). Its
+`*.tmpl` files are read after the built-in ones, so a
+`{{define "enum"}}` in them replaces the built-in `enum` block and
+nothing else; other blocks of yours may be helpers that your blocks call
+with `{{template}}`. `goapi templates` writes the built-in files, each
+block with a comment saying what it gets, to copy the blocks to change
+from; passed back as they are, they generate the same code.
+
+```text
+{{define "enum"}}
+{{typeDoc .}}
+type {{.Name}} {{goType .Base}}
+...
+// String returns the value as text.
+func (e {{.Name}}) String() string { return {{imp "fmt" "fmt"}}.Sprint({{goType .Base}}(e)) }
+{{end}}
+```
+
+| Files | Blocks |
+|---|---|
+| `model.go.tmpl` | `types` (a file's types), `struct`, `union`, `enum`, `defined`, `alias` (a `*ir.Type` each) |
+| `server.go.tmpl` | `server` (`NewServer`), `interfaces` (`Handler`, `SecurityHandler`), `operation` (an operation's request and response types), `handler` (its HTTP handler) |
+| `client.go.tmpl` | `client` (the `Client` type), `clientops` (an operation's request building and response reading) |
+| `sender.go.tmpl`, `receiver.go.tmpl` | `sender` (webhooks and callbacks a server sends), `receivers` (their handlers) |
+| `models.ts.tmpl` | `models`, `model`, `declaration`, `interface`, `object`, `enum`, `union` |
+| `client.ts.tmpl` | `client` (the `Client` class), `credentials`, `operation` (request and response types and descriptor), `method`, `linkMethod` |
+| `index.ts.tmpl` | `index` |
+
+Blocks are given what the built-in ones are, mostly the types of the
+`ir` package (`*ir.Type`, `*ir.Operation`, `*ir.Model`), and the same
+functions:
+
+- **Go:** `goType` (a Go type, imported as needed), `imp` (import a
+  package, returning its name), `opType`, `typeDoc`, `fieldDoc`, `tag`,
+  `kind`; and the statements the generator builds, which a block places
+  rather than writes: `validateStmts`, `bindStmts`, `writeStmts`,
+  `securityStmts`, the decoders and encoders of unions and streams, and
+  the other `...Stmts` and `...Decls`.
+- **TypeScript:** `name`, `schemaName`, `tsType`, `tsDoc`, `tsKey`,
+  `tsCamel`, `jsString`, `join`, `kind`, `fieldDoc`, `fieldType`,
+  `fieldOptional`, `hasOther`, `enumUnion`, `enumKey`, `enumLiteral`,
+  `operationDoc`, `linkDoc`, `schemeDoc`, and `typeSchema` for the schema
+  descriptors. The descriptors of schemas and operations (`.Spec`) are
+  what `runtime.ts` reads, and `runtime.ts` itself is not a template; the
+  imports of a file are worked out from what it uses.
+- **Both:** `goapiVersion`, the version of goapi generating the code.
+
+A block of yours that is neither a built-in one nor used by another of
+yours is an error, which names the blocks there are, so a misspelt
+`{{define "strcut"}}` does not go unnoticed; so is text outside
+`{{define}}`. Errors in your templates name the file and line.
+
+Custom templates are **experimental**: the data blocks are given, the
+`ir` types, may change in a minor release, which the CHANGELOG says. A
+block replaces the built-in one, which it cannot call, so one you only
+add to is a copy to keep up to date.
 
 ## Running in production
 

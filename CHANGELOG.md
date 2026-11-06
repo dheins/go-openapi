@@ -4,6 +4,15 @@
 
 ### Added
 
+- Custom templates (experimental): `goapi generate model|server|client|ts-client
+  -templates dir` (`codegen.Options.Templates`, `TSOptions.Templates`)
+  replaces the blocks of the built-in templates its `*.tmpl` files define,
+  by name, and may add blocks they use; a misspelt block or text outside
+  `{{define}}` is an error. The TypeScript client is generated from
+  templates now too, with the same output. `goapi templates [-out dir]
+  [-target go|ts]` (`codegen.GoTemplates`, `TSTemplates`) writes the
+  built-in templates, each block with the data it gets; templates get
+  `goapiVersion`. The data, ir's types, may change in minor releases.
 - `goapi diff [-format text|json] [-fail-on error|warning] old new` and the
   `diff` package (`diff.Documents`): the changes between two versions of a
   document, from the clients' side: errors for what breaks them (removed
