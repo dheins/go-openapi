@@ -27,11 +27,9 @@ shipped in.
   `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
   `additionalProperties` or property counts of a struct; these keywords on
   enums and unions. — later
-- go-swagger's model extensions: `x-omitempty`, `x-go-custom-tag` (struct
-  tags of other packages, such as `db:` or `yaml:`), `x-order`,
-  `x-isnullable` and `x-go-json-string`, so that documents tuned for
-  go-swagger generate the same shapes (only `x-nullable` is read, by the
-  2.0 conversion). — later
+- go-swagger's `x-order` (the order of struct fields and encoded
+  properties) and `x-go-json-string` (numbers and booleans written and
+  read as JSON strings, like `encoding/json`'s `,string`). — later
 
 ## Server
 
@@ -147,6 +145,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] go-swagger's model extensions `x-go-custom-tag` (struct tags after
+  the json tag), `x-omitempty: false` (an optional property written even
+  when unset) and `x-nullable`/`x-isnullable` (null allowed, in every
+  version). (ac3b6a9, 2db9cdb, 1475889)
 - [x] String formats of your own: a format's Go type, by
   `goapi generate -format-type` or `x-go-formats`, over the built-in
   ones, and checks registered with `oapi.RegisterFormat` (Go) and

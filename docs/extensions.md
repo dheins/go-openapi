@@ -57,6 +57,48 @@ x-go-formats:
 An entry that does not name a Go type is reported and not used. See the
 guide's [formats of your own](guide.md#formats-of-your-own).
 
+## `x-go-custom-tag`
+
+On a property: struct tags to add after the field's `json` tag, for other
+packages (databases, YAML, validators). They are `key:"value"` pairs
+separated by spaces, as `reflect.StructTag` reads them.
+
+```yaml
+name:
+  type: string
+  x-go-custom-tag: 'db:"name" yaml:"name,omitempty"'
+# Name oapi.Optional[string] `json:"name,omitzero" db:"name" yaml:"name,omitempty"`
+```
+
+goapi writes the `json` tag, so the extension cannot set it; tags that
+are not `key:"value"` pairs, set a key twice or have a backquote are
+reported and not added. Generated code encodes and decodes JSON itself,
+so the tags do not change it.
+
+## `x-omitempty`
+
+On an optional property, `false`: write it even when it is unset, as
+go-swagger does. The field is plain `T` rather than `oapi.Optional[T]`
+(or `*T`); an unset one is written as its zero value (an array or map
+empty), and an absent one decodes to the zero value, or the property's
+default. The zero value stands for an absent property, so `Validate`
+does not check it, nor do TypeScript clients. `true`, the default, and
+the extension on a required property change nothing.
+
+```yaml
+note:
+  type: string
+  x-omitempty: false   # Note string `json:"note"`, written as "note":"" when unset
+```
+
+## `x-nullable`, `x-isnullable`
+
+On a schema, `true`: the value may be null, as 3.0's `nullable: true`
+says, in any version (go-swagger reads both names). They add `"null"`
+to a single `type` when the document is loaded, so the generated type is
+`oapi.Nullable[T]`, TypeScript has `T | null`, and examples may be null.
+A schema with no type, or a type list, is left as it is.
+
 ## `x-enum-varnames`
 
 On a string or integer enum: names for the constants, in the order of

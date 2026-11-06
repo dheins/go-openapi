@@ -4,6 +4,10 @@
 
 ### Added
 
+- go-swagger's `x-go-custom-tag` (struct tags added after the json tag)
+  and `x-omitempty: false` (an optional property generated as a plain
+  field and written even when unset, its zero value not validated;
+  `oapi.IsZero`).
 - Formats of your own: `goapi generate -format-type format=type` and a
   root `x-go-formats` map give a format a Go type (built-in formats
   included), which may be a parameter; `oapi.RegisterFormat` registers a
@@ -448,6 +452,9 @@
 
 ### Changed
 
+- `x-nullable` and go-swagger's `x-isnullable` allow null in every
+  version, not only in converted Swagger 2.0 documents: loading adds
+  `"null"` to a schema's single type, as 3.0's `nullable` does.
 - Generated code checks every string format with `oapi.CheckFormat`, not
   only the built-in ones, so that registered checks apply; unknown
   formats are still accepted.

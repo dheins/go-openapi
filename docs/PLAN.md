@@ -659,6 +659,22 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   and TypeScript tests, which keeps the two runtimes in agreement.
 - *Not done*: see [features.md](../features.md).
 
+### M33 – go-swagger model extensions ✅
+- [x] `x-go-custom-tag`: struct tags after the json tag
+- [x] `x-omitempty: false`: optional properties written even when unset
+- [x] `x-nullable` and `x-isnullable` in every version
+
+**How it went**
+- *Tags only for others*: generated code encodes JSON itself, so custom
+  tags cannot change it, and the json tag stays goapi's.
+- *Zero means absent*: a property written when unset carries its zero
+  value, which may break its own constraints (`minLength`), so neither
+  Validate nor the TypeScript validator checks the zero value.
+- *At load*: the nullable extensions become `null` in `type` on the
+  document's tree, so the model, the examples checker (which compiles the
+  sources) and every generator agree.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
