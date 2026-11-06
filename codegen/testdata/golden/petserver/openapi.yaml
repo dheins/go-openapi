@@ -2,6 +2,10 @@ openapi: 3.2.0
 info:
   title: Pet server
   version: "1.0"
+x-go-formats:
+  pet-code: github.com/dheins/go-openapi/codegen/testdata/golden/petserver/formats.PetCode
+  # The Formats option maps color to formats.Color, over this.
+  color: string
 servers:
   - url: https://{env}.example.com/v1
     variables:
@@ -345,6 +349,36 @@ paths:
                 application/xml:
                   schema:
                     $ref: "#/components/schemas/Prefs"
+  /tags/{code}:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+          format: pet-code
+    put:
+      operationId: putTag
+      description: A tag, with formats of the fixture's own, echoed back.
+      parameters:
+        - name: slug
+          in: query
+          schema:
+            type: string
+            format: slug
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Tag"
+      responses:
+        "200":
+          description: The tag stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
   /pets/{petId}/settings:
     parameters:
       - name: petId
@@ -1444,6 +1478,20 @@ components:
           type: object
           additionalProperties:
             type: integer
+    Tag:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          format: pet-code
+        color:
+          type: string
+          format: color
+        slug:
+          type: string
+          format: slug
+          minLength: 2
     Settings:
       type: object
       properties:

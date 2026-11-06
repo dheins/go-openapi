@@ -20,6 +20,11 @@ type Options struct {
 	// Select, with Operations, keeps only the operations it selects, and
 	// the types and security schemes they use.
 	Select *Selection
+	// Formats maps formats to the Go types their values are, as x-go-type
+	// does for one schema: a predeclared type ("string") or an import path
+	// and a type name ("github.com/google/uuid.UUID"). They win over the
+	// document's x-go-formats and the built-in types of formats.
+	Formats map[string]string
 }
 
 // Model is the set of Go types for a document's schemas.
@@ -322,6 +327,10 @@ type Ref struct {
 	Tuple  *TupleType
 	// Checks are the validation constraints on values of this expression.
 	Checks *Checks
+	// MappedFormat is the format a Builtin type is the Go type of, by
+	// Options.Formats or x-go-formats, and MappedJSON the JSON type its
+	// values have, for clients in other languages.
+	MappedFormat, MappedJSON string
 }
 
 // Checks are JSON Schema validation keywords that apply to a value.

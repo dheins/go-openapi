@@ -701,3 +701,71 @@ components:
 		t.Errorf("warning: %s", w.Message)
 	}
 }
+
+func TestFormatTypes(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+x-go-formats:
+  money: github.com/shopspring/decimal.Decimal
+  code: string
+  bad: "not a type"
+paths: {}
+components:
+  schemas:
+    Price: {type: string, format: money}
+    Item:
+      type: object
+      properties:
+        price: {$ref: "#/components/schemas/Price"}
+        code: {type: string, format: code}
+        at: {type: string, format: date-time}
+        own: {type: string, format: money, x-go-type: string}
+        secret: {type: string, format: password}
+        count: {type: integer, format: tally}
+`, Options{Formats: map[string]string{"code": "example.com/codes.Code", "date-time": "int64", "tally": "example.com/tally.Count"}})
+	price := typeNamed(t, m, "Price")
+	if price.Kind != Alias || price.Underlying.Name != "decimal.Decimal" || price.Underlying.Import != "github.com/shopspring/decimal" ||
+		price.Underlying.MappedFormat != "money" || price.Underlying.MappedJSON != "string" {
+		t.Errorf("Price = %v %+v", price.Kind, price.Underlying)
+	}
+	item := typeNamed(t, m, "Item")
+	elem := func(name string) *Ref { return fieldNamed(t, item, name).Type.Elem }
+	// The option wins over the document, and over a built-in format.
+	if r := elem("Code"); r.Name != "codes.Code" || r.Import != "example.com/codes" {
+		t.Errorf("code = %+v", r)
+	}
+	if r := elem("At"); r.Name != "int64" || r.Import != "" || r.MappedFormat != "date-time" {
+		t.Errorf("at = %+v", r)
+	}
+	// A schema's x-go-type wins over its format's type.
+	if r := elem("Own"); r.Name != "string" || r.MappedFormat != "" {
+		t.Errorf("own = %+v", r)
+	}
+	// Other formats are checked, by what oapi.RegisterFormat registers.
+	if r := elem("Secret"); r.Name != "string" || r.Checks == nil || r.Checks.Format != "password" {
+		t.Errorf("secret = %+v", r)
+	}
+	if r := elem("Count"); r.Name != "tally.Count" || r.MappedJSON != "integer" {
+		t.Errorf("count = %+v", r)
+	}
+	if len(m.Warnings) != 1 || m.Warnings[0].Message != `"not a type" does not name a Go type; the format is not mapped` ||
+		m.Warnings[0].Location.Pointer != "/x-go-formats/bad" {
+		t.Errorf("warnings = %+v", m.Warnings)
+	}
+}
+
+func TestValidGoType(t *testing.T) {
+	for v, want := range map[string]string{
+		"string":                       "",
+		"github.com/google/uuid.UUID":  "",
+		"time.Duration":                "",
+		"github.com/x/y":               `"github.com/x/y" does not name a Go type`,
+		".UUID":                        `".UUID" is not an import path and a type name`,
+		"example.com/a b.T":            `"example.com/a b.T" is not an import path and a type name`,
+		"example.com/pkg.not-an-ident": `"example.com/pkg.not-an-ident" does not name a Go type`,
+	} {
+		if got := ValidGoType(v); got != want {
+			t.Errorf("ValidGoType(%q) = %q, want %q", v, got, want)
+		}
+	}
+}

@@ -303,6 +303,24 @@ func (c *Client) EchoPrefs(ctx context.Context, req *api.EchoPrefsRequest) (api.
 	return api.ReadEchoPrefsResponse(c.cfg, resp)
 }
 
+// PutTag calls PUT /tags/{code}. A nil req sends no parameters or body.
+//
+// A tag, with formats of the fixture's own, echoed back.
+func (c *Client) PutTag(ctx context.Context, req *api.PutTagRequest) (api.PutTagResponse, error) {
+	if req == nil {
+		req = &api.PutTagRequest{}
+	}
+	hreq, err := api.NewPutTagRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutTagResponse(c.cfg, resp)
+}
+
 // GetSettings calls GET /pets/{petId}/settings. A nil req sends no
 // parameters or body.
 //

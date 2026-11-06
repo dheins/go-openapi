@@ -3,6 +3,8 @@ package ir
 import (
 	"encoding/json"
 	"fmt"
+	"go/token"
+	"maps"
 	"path"
 	"reflect"
 	"regexp"
@@ -22,11 +24,14 @@ const (
 )
 
 type builder struct {
-	spec  *loader.Spec
-	opts  Options
-	model *Model
-	named map[*oas.Schema]*Type
-	names namespace
+	spec *loader.Spec
+	opts Options
+	// formats are the Go types of formats, from Options.Formats and the
+	// document's x-go-formats.
+	formats map[string]*Ref
+	model   *Model
+	named   map[*oas.Schema]*Type
+	names   namespace
 	// following guards against $ref chains that loop without ever
 	// reaching an object or other concrete schema.
 	following map[*oas.Schema]bool
@@ -55,6 +60,7 @@ func Build(spec *loader.Spec, opts Options) *Model {
 	b := &builder{
 		spec:      spec,
 		opts:      opts,
+		formats:   formatTypes(spec, opts),
 		model:     &Model{},
 		named:     make(map[*oas.Schema]*Type),
 		names:     namespace{},
@@ -62,6 +68,12 @@ func Build(spec *loader.Spec, opts Options) *Model {
 
 		securityMethods: namespace{},
 		oasOps:          map[*Operation]*oas.Operation{},
+	}
+	formats := documentFormats(spec)
+	for _, format := range slices.Sorted(maps.Keys(formats)) {
+		if why := ValidGoType(formats[format]); why != "" {
+			b.warnAt(spec.Document, []string{"x-go-formats", format}, why+"; the format is not mapped")
+		}
 	}
 	if opts.Operations {
 		for _, n := range reservedServerNames {
@@ -834,6 +846,15 @@ func (b *builder) inline(s *oas.Schema, types []string, hint string, root *Type)
 	if b.fileParts[s] {
 		return fileRef()
 	}
+	if r, ok := b.formats[s.Format]; ok && s.Format != "" {
+		// A copy: the Ref is changed where it is used.
+		c := *r
+		c.MappedFormat, c.MappedJSON = s.Format, inferType(s)
+		if len(types) == 1 {
+			c.MappedJSON = types[0]
+		}
+		return &c
+	}
 	var typ string
 	switch len(types) {
 	case 0:
@@ -920,9 +941,9 @@ func (b *builder) stringRef(s *oas.Schema) *Ref {
 			c.Pattern = s.Pattern
 		}
 	}
-	if checkedFormats[s.Format] {
-		c.Format = s.Format
-	}
+	// Every format is checked: oapi.CheckFormat checks the built-in ones
+	// and those registered with oapi.RegisterFormat, and accepts others.
+	c.Format = s.Format
 	return &Ref{Kind: Builtin, Name: "string", Checks: nilIfEmpty(c)}
 }
 
@@ -1032,12 +1053,67 @@ func goTypeOverride(s *oas.Schema) *Ref {
 	if v == "" {
 		return nil
 	}
+	return goTypeRef(v)
+}
+
+// goTypeRef returns the Go type v names, as x-go-type has it.
+func goTypeRef(v string) *Ref {
 	dot, slash := strings.LastIndex(v, "."), strings.LastIndex(v, "/")
 	if dot <= slash {
 		return &Ref{Kind: Builtin, Name: v}
 	}
 	pkg := v[:dot]
 	return &Ref{Kind: Builtin, Name: path.Base(pkg) + v[dot:], Import: pkg}
+}
+
+// ValidGoType reports why v cannot name a Go type for a format, as
+// Options.Formats and x-go-formats name them, or "".
+func ValidGoType(v string) string {
+	dot, slash := strings.LastIndex(v, "."), strings.LastIndex(v, "/")
+	name := v
+	if dot > slash {
+		name = v[dot+1:]
+		if pkg := v[:dot]; pkg == "" || strings.ContainsAny(pkg, " \t\n\"") {
+			return fmt.Sprintf("%q is not an import path and a type name", v)
+		}
+	}
+	if !token.IsIdentifier(name) {
+		return fmt.Sprintf("%q does not name a Go type", v)
+	}
+	return ""
+}
+
+// formatTypes returns the Go types of formats: the document's
+// x-go-formats, then opts.Formats over them. Invalid entries of the
+// document are left out; Build warns about them.
+func formatTypes(spec *loader.Spec, opts Options) map[string]*Ref {
+	out := map[string]*Ref{}
+	for format, v := range documentFormats(spec) {
+		if ValidGoType(v) == "" {
+			out[format] = goTypeRef(v)
+		}
+	}
+	for format, v := range opts.Formats {
+		out[format] = goTypeRef(v)
+	}
+	return out
+}
+
+// documentFormats returns the document's x-go-formats.
+func documentFormats(spec *loader.Spec) map[string]string {
+	d := spec.Document
+	if d == nil || d.Extensions == nil {
+		return nil
+	}
+	raw, ok := d.Extensions.Get("x-go-formats")
+	if !ok {
+		return nil
+	}
+	var v map[string]string
+	if json.Unmarshal(raw, &v) != nil {
+		return nil
+	}
+	return v
 }
 
 // refTarget returns the schema s stands for when it only refers to

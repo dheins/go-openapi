@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/formats"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"io"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -236,6 +238,11 @@ func (s *store) GetCard(ctx context.Context, req *api.GetCardRequest) (api.GetCa
 func (s *store) PutCard(_ context.Context, req *api.PutCardRequest) (api.PutCardResponse, error) {
 	s.seen["PutCard"] = req
 	return api.PutCard204Response{}, nil
+}
+
+func (s *store) PutTag(_ context.Context, req *api.PutTagRequest) (api.PutTagResponse, error) {
+	s.seen["PutTag"] = req
+	return api.PutTag200JSONResponse{Body: req.Body}, nil
 }
 
 func (s *store) PutFamily(_ context.Context, req *api.PutFamilyRequest) (api.PutFamilyResponse, error) {
@@ -1005,6 +1012,46 @@ func TestNestedFields(t *testing.T) {
 	}
 	if got := s.seen["Upload"].(*api.UploadRequest).Body.Value; got["a"] != "1" || got["b"] != "x" {
 		t.Errorf("upload = %v", got)
+	}
+}
+
+var slug = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// The fixture's slug format has no Go type: its check is registered.
+func init() {
+	oapi.RegisterFormat("slug", func(s string) error {
+		if !slug.MatchString(s) {
+			return errors.New("lower-case words joined by dashes")
+		}
+		return nil
+	})
+}
+
+// TestFormats covers formats mapped to Go types (pet-code by x-go-formats,
+// color by the Formats option over it) and a registered check (slug).
+func TestFormats(t *testing.T) {
+	s, h := newTestServer()
+	r := do(t, h, "PUT", "/tags/ABC-12?slug=big-dog", "application/json", `{"code":"ABC-12","color":"#ff0080","slug":"a-b"}`)
+	if r.status != 200 || r.body != `{"code":"ABC-12","color":"#ff0080","slug":"a-b"}` {
+		t.Errorf("echo: %d %s", r.status, r.body)
+	}
+	got := s.seen["PutTag"].(*api.PutTagRequest)
+	if got.Code != "ABC-12" || got.Slug.Value != "big-dog" || got.Body.Color.Value != (formats.Color{R: 0xff, B: 0x80}) {
+		t.Errorf("request = %+v", got)
+	}
+	for _, tt := range []struct {
+		target, body string
+		want         []string
+	}{
+		{"/tags/abc", `{"code":"ABC-1"}`, []string{"path code: must be three capital letters, a dash and digits"}},
+		{"/tags/ABC-1?slug=Big%20Dog", `{"code":"ABC-1"}`, []string{"query slug: must be a valid slug: lower-case words joined by dashes"}},
+		{"/tags/ABC-1", `{"code":"x","color":"red"}`, []string{"body /code: must be three capital letters, a dash and digits", "body /color: must be #rrggbb"}},
+		{"/tags/ABC-1", `{"code":"ABC-1","slug":"X"}`, []string{"body /slug: length must be at least 2", "body /slug: must be a valid slug: lower-case words joined by dashes"}},
+	} {
+		r := do(t, h, "PUT", tt.target, "application/json", tt.body)
+		if got := problemErrors(t, r); r.status != 400 || !slices.Equal(got, tt.want) {
+			t.Errorf("%s %s: %d %q, want %q", tt.target, tt.body, r.status, got, tt.want)
+		}
 	}
 }
 
