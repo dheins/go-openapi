@@ -571,6 +571,25 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   their top-level types are compared as text.
 - *Not done*: see [features.md](../features.md).
 
+### M28 – Custom templates ✅
+- [x] `-templates dir` (`Options.Templates`, `TSOptions.Templates`):
+  user blocks replace built-in ones by name, with checks for misspelt
+  blocks and stray text
+- [x] The TypeScript client generated from templates, byte for byte as
+  before
+- [x] `goapi templates`, and the data of each block noted in the files
+
+**How it went**
+- *Blocks, not files*: text/template lets a later {{define}} replace an
+  earlier one, so user files are parsed after the built-in ones and a
+  small change stays small.
+- *TypeScript onto templates*: the layout moved to templates and the
+  descriptors stayed in Go, the contract with runtime.ts; the goldens
+  checked the output did not change.
+- *A round trip*: the built-in templates, passed as user ones, must give
+  the same code, which keeps `goapi templates` usable as a start.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

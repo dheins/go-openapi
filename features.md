@@ -97,12 +97,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 ## Tooling
 
-- Custom templates for `goapi generate` (models, server, client and
-  TypeScript client): a `-templates` directory whose files override the
-  built-in ones by name, with the data each template is given documented,
-  as go-swagger's `--template-dir` and generator config allow. Only the
-  `x-go-*` extensions and the command-line flags adjust the generated code
-  today. — later
+- Custom templates: a block that only adds to a built-in one, without
+  copying it (a way to call the block it replaces), and `runtime.ts` as a
+  template. — later
 - `goapi diff`: callbacks, links, examples, defaults and discriminator
   mappings are not compared; `oneOf`/`anyOf` alternatives are matched by
   position, so reordered ones read as changed; and what breaks servers
@@ -122,6 +119,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Custom templates: `-templates dir` on every `goapi generate`
+  command replaces blocks of the Go and TypeScript templates by name, and
+  `goapi templates` writes the built-in ones. (7f45686, f0b37f0, ddd127a)
 - [x] `goapi diff` and the `diff` package: the changes between two versions
   of a document, as errors, warnings and information by what they break
   for clients, with `-fail-on` for CI. (ceb1603, 9b77eca)

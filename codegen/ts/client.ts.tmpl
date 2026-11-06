@@ -1,0 +1,56 @@
+{{- /*
+Templates of client.ts: the credentials, the request and response types
+of each operation, its descriptor, and the Client class. The descriptors
+(.Spec) are what the runtime sends requests and reads responses with.
+*/ -}}
+
+{{/* "client" gets ServerURL, Schemes (as "credentials" gets them) and Ops (as "operation" gets each). */}}
+{{define "client"}}
+/** The URL of the document's first server, if it is absolute. */
+export const defaultServerUrl = {{jsString .ServerURL}};
+{{with .Schemes}}{{template "credentials" .}}{{end}}{{range .Ops}}{{template "operation" .}}{{end}}
+/** A client of the API, with a method per operation. */
+export class Client {
+  readonly #cfg: Config;
+
+  constructor(options: ClientOptions{{if .Schemes}} & { credentials?: Credentials }{{end}} = {}) {
+    this.#cfg = config(options, defaultServerUrl, {{if .Schemes}}options.credentials{{else}}undefined{{end}});
+  }
+{{range .Ops}}{{template "method" .}}{{range .Links}}{{template "linkMethod" .}}{{end}}{{end}}}
+{{end}}
+
+{{/* "credentials" gets the security schemes: Scheme (*ir.SecurityScheme), Key and Type of each credential. */}}
+{{define "credentials"}}
+/** Credentials, by security scheme. An operation uses the first of its
+ * security requirements whose credentials are all given. */
+export interface Credentials {
+{{range .}}{{tsDoc "  " (schemeDoc .Scheme) false}}  {{.Key}}?: {{.Type}};
+{{end}}}
+{{end}}
+
+{{/* "operation" gets Operation (*ir.Operation), Method, Request (the body of its request type), Optional (all its properties are), Responses (the union of its responses), Spec (its descriptor) and Links. */}}
+{{define "operation"}}
+/** The inputs of {{.Method}}. */
+export interface {{.Operation.RequestType}} {{.Request}}
+
+/** The responses of {{.Method}}. */
+export type {{.Operation.ResponseType}} ={{.Responses}};
+
+const {{.Method}}Spec: OperationSpec = {{.Spec}};
+{{range .Links}}
+const {{.Method}}Link: LinkSpec = {{.Spec}};
+{{end}}{{end}}
+
+{{/* "method" gets an operation: Operation (*ir.Operation), Method, Request, Optional, Responses, Spec and Links. */}}
+{{define "method"}}
+{{tsDoc "  " (operationDoc .Operation) .Operation.Deprecated}}  {{.Method}}(req: {{.Operation.RequestType}}{{if .Optional}} = {}{{end}}, call?: CallOptions): Promise<{{.Operation.ResponseType}}> {
+    return send(this.#cfg, {{.Method}}Spec, req, call) as Promise<{{.Operation.ResponseType}}>;
+  }
+{{end}}
+
+{{/* "linkMethod" gets a link: Link (*ir.Link), Method, Source and Target (*ir.Operation), SourceMethod, TargetMethod and Spec. */}}
+{{define "linkMethod"}}
+{{tsDoc "  " (linkDoc .) false}}  async {{.Method}}(resp: {{.Source.ResponseType}}, req: {{.Source.RequestType}}, call?: CallOptions): Promise<{{.Target.ResponseType}}> {
+    return this.{{.TargetMethod}}(link({{.Method}}Link, resp, req) as {{.Target.RequestType}}, call);
+  }
+{{end}}

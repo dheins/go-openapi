@@ -28,6 +28,7 @@ func runGenerateTS(args []string, stdout, stderr io.Writer) int {
 	tags := fs.String("tags", "", "comma-separated tags of the operations to generate, as well as those -paths matches")
 	excludePaths := fs.String("exclude-paths", "", "comma-separated path patterns of operations to leave out")
 	excludeTags := fs.String("exclude-tags", "", "comma-separated tags of operations to leave out")
+	templates := fs.String("templates", "", "directory of *.tmpl files whose blocks replace the built-in ones (experimental)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -73,7 +74,14 @@ func runGenerateTS(args []string, stdout, stderr io.Writer) int {
 		return fail("no operation matches -paths, -tags, -exclude-paths and -exclude-tags")
 	}
 
-	files, warnings, err := codegen.TypeScript(model, codegen.TSOptions{Source: filepath.ToSlash(filepath.Base(file))})
+	tsOpts := codegen.TSOptions{Source: filepath.ToSlash(filepath.Base(file))}
+	if *templates != "" {
+		if info, err := os.Stat(*templates); err != nil || !info.IsDir() {
+			return fail("-templates %s is not a directory", *templates)
+		}
+		tsOpts.Templates = os.DirFS(*templates)
+	}
+	files, warnings, err := codegen.TypeScript(model, tsOpts)
 	if err != nil {
 		return fail("%v", err)
 	}

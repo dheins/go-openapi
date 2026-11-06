@@ -41,6 +41,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	out := fs.String("out", defaultOut, "directory to write the generated files to")
 	pkg := fs.String("package", "", "package name (default: the base name of -out)")
 	optional := fs.String("optional", "wrapper", "optional properties as oapi.Optional (wrapper) or pointers (pointer)")
+	templates := fs.String("templates", "", "directory of *.tmpl files whose blocks replace the built-in ones (experimental)")
 	var opsPkg, models, importPath, types *string
 	if operations {
 		usage := `subdirectory and package of the operations' request and response types ("" puts them in the server package)`
@@ -149,6 +150,12 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		Package: *pkg,
 		Source:  filepath.ToSlash(filepath.Base(file)),
 		Title:   strings.TrimSpace(res.Spec.Document.Info.Title),
+	}
+	if *templates != "" {
+		if info, err := os.Stat(*templates); err != nil || !info.IsDir() {
+			return fail("-templates %s is not a directory", *templates)
+		}
+		opts.Templates = os.DirFS(*templates)
 	}
 	generate := codegen.Models
 	if operations && (types == nil || *types == "") {

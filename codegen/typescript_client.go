@@ -17,29 +17,72 @@ var (
 	tsResponseKinds = []string{"", "json", "text", "binary", "byteranges", "parts", "partstream", "jsonl", "sse"}
 )
 
+// tsScheme is a security scheme, as the Credentials of client.ts hold it:
+// by the key of its credential, of a type.
+type tsScheme struct {
+	Scheme    *ir.SecurityScheme
+	Key, Type string
+}
+
+// tsOperation is an operation the client sends, for client.ts: its method
+// name, the bodies of its request and response types, its descriptor and
+// the links of its responses to operations the client sends too.
+type tsOperation struct {
+	Operation *ir.Operation
+	Method    string
+	// Request is the braced body of the request type, and Optional says
+	// that all its properties are; Responses is the union of the
+	// response variants.
+	Request   string
+	Optional  bool
+	Responses string
+	Spec      string
+	Links     []*tsLink
+}
+
+// tsLink is a link the client follows: from a response of Source to the
+// request of Target, by Method.
+type tsLink struct {
+	Link                 *ir.Link
+	Method, TargetMethod string
+	Source, Target       *ir.Operation
+	SourceMethod         string
+	Spec                 string
+}
+
+// schemeDoc is the documentation of a credential of the scheme s.
+func schemeDoc(s *ir.SecurityScheme) string {
+	return fmt.Sprintf("The %s scheme %q.", s.Type, s.Name) + "\n\n" + s.Doc
+}
+
+// operationDoc is the documentation of the method of o.
+func operationDoc(o *ir.Operation) string {
+	return strings.TrimSpace(fmt.Sprintf("%s %s.\n\n%s", o.Method, o.Path, o.Doc))
+}
+
+// linkDoc is the documentation of the method following l.
+func linkDoc(l *tsLink) string {
+	doc := fmt.Sprintf("Follows the link %q of a response of %s: sends the request of %s it builds from resp and req, the request resp answers.", l.Link.Name, l.SourceMethod, l.TargetMethod)
+	return strings.TrimSpace(doc + "\n\n" + l.Link.Doc)
+}
+
 // client renders client.ts: the credentials, the request and response
 // types of each operation, its descriptor, and the Client class.
-func (g *tsGen) client() string {
+func (g *tsGen) client() (string, error) {
 	g.qual = "$m."
 	defer func() { g.qual = "" }()
-	var b strings.Builder
 
-	fmt.Fprintf(&b, "\n/** The URL of the document's first server, if it is absolute. */\nexport const defaultServerUrl = %s;\n", jsString(g.m.ServerURL))
-	if len(g.m.SecuritySchemes) > 0 {
-		b.WriteString("\n/** Credentials, by security scheme. An operation uses the first of its\n * security requirements whose credentials are all given. */\nexport interface Credentials {\n")
-		for _, s := range g.m.SecuritySchemes {
-			typ := "Credential"
-			switch {
-			case s.Type == "http" && s.Scheme == "basic":
-				typ = "BasicCredential"
-			case s.Type == "mutualTLS":
-				// The certificate is the fetch's: true says it has one.
-				typ = "boolean"
-			}
-			b.WriteString(tsDoc("  ", fmt.Sprintf("The %s scheme %q.", s.Type, s.Name)+"\n\n"+s.Doc, false))
-			fmt.Fprintf(&b, "  %s?: %s;\n", tsCamel(s.Method), typ)
+	var schemes []tsScheme
+	for _, s := range g.m.SecuritySchemes {
+		typ := "Credential"
+		switch {
+		case s.Type == "http" && s.Scheme == "basic":
+			typ = "BasicCredential"
+		case s.Type == "mutualTLS":
+			// The certificate is the fetch's: true says it has one.
+			typ = "boolean"
 		}
-		b.WriteString("}\n")
+		schemes = append(schemes, tsScheme{Scheme: s, Key: tsCamel(s.Method), Type: typ})
 	}
 
 	// The operations the client sends, first: a link to another is not
@@ -53,58 +96,32 @@ func (g *tsGen) client() string {
 			specs[o] = spec
 		}
 	}
-	var methods strings.Builder
+	var ops []*tsOperation
 	for _, o := range g.m.Operations {
 		spec, ok := specs[o]
 		if !ok {
 			continue
 		}
-		name := tsMethodName(o)
 		req, optional := g.requestType(o)
-		fmt.Fprintf(&b, "\n/** The inputs of %s. */\nexport interface %s %s\n", name, o.RequestType, req)
-		fmt.Fprintf(&b, "\n/** The responses of %s. */\nexport type %s =%s;\n", name, o.ResponseType, g.responseType(o))
-		fmt.Fprintf(&b, "\nconst %sSpec: OperationSpec = %s;\n", name, spec)
-
-		doc := strings.TrimSpace(fmt.Sprintf("%s %s.\n\n%s", o.Method, o.Path, o.Doc))
-		methods.WriteString("\n" + tsDoc("  ", doc, o.Deprecated))
-		def := ""
-		if optional {
-			def = " = {}"
-		}
-		fmt.Fprintf(&methods, "  %s(req: %s%s, call?: CallOptions): Promise<%s> {\n    return send(this.#cfg, %sSpec, req, call) as Promise<%s>;\n  }\n",
-			name, o.RequestType, def, o.ResponseType, name, o.ResponseType)
+		op := &tsOperation{Operation: o, Method: tsMethodName(o), Request: req, Optional: optional, Responses: g.responseType(o), Spec: spec}
 		for _, l := range operationLinks(o) {
 			if _, ok := specs[l.Operation]; !ok {
 				continue
 			}
-			follow := tsCamel(l.Follow)
-			fmt.Fprintf(&b, "\nconst %sLink: LinkSpec = %s;\n", follow, g.linkSpec(o, l))
-			doc := fmt.Sprintf("Follows the link %q of a response of %s: sends the request of %s it builds from resp and req, the request resp answers.", l.Name, name, tsMethodName(l.Operation))
-			methods.WriteString("\n" + tsDoc("  ", strings.TrimSpace(doc+"\n\n"+l.Doc), false))
-			// Async, so that a response without the link rejects.
-			fmt.Fprintf(&methods, "  async %s(resp: %s, req: %s, call?: CallOptions): Promise<%s> {\n    return this.%s(link(%sLink, resp, req) as %s, call);\n  }\n",
-				follow, o.ResponseType, o.RequestType, l.Operation.ResponseType, tsMethodName(l.Operation), follow, l.Operation.RequestType)
+			op.Links = append(op.Links, &tsLink{Link: l, Method: tsCamel(l.Follow), TargetMethod: tsMethodName(l.Operation),
+				Source: o, Target: l.Operation, SourceMethod: op.Method, Spec: g.linkSpec(o, l)})
 		}
+		ops = append(ops, op)
+	}
+	body, err := g.render("client", struct {
+		ServerURL string
+		Schemes   []tsScheme
+		Ops       []*tsOperation
+	}{g.m.ServerURL, schemes, ops})
+	if err != nil {
+		return "", err
 	}
 
-	creds, credsType := "", ""
-	if len(g.m.SecuritySchemes) > 0 {
-		creds, credsType = "options.credentials", " & { credentials?: Credentials }"
-	} else {
-		creds = "undefined"
-	}
-	fmt.Fprintf(&b, `
-/** A client of the API, with a method per operation. */
-export class Client {
-  readonly #cfg: Config;
-
-  constructor(options: ClientOptions%s = {}) {
-    this.#cfg = config(options, defaultServerUrl, %s);
-  }
-%s}
-`, credsType, creds, methods.String())
-
-	body := b.String()
 	imports := []string{"config", "send", "type CallOptions", "type ClientOptions", "type Config", "type OperationSpec"}
 	if strings.Contains(body, ": LinkSpec = ") {
 		imports = append(imports, "link", "type LinkSpec")
@@ -127,7 +144,7 @@ export class Client {
 	if strings.Contains(body, "$m.") {
 		head += "import * as $m from \"./models.ts\";\n"
 	}
-	return head + body
+	return head + body, nil
 }
 
 // tsMedia returns the request media types of o the runtime can send.

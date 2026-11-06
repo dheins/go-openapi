@@ -1,0 +1,49 @@
+{{- /*
+Templates of models.ts: a type and a schema descriptor per type of the
+model. The descriptor is what the runtime validates and encodes values
+with; typeSchema writes it.
+*/ -}}
+
+{{/* "models" gets []*ir.Type. */}}
+{{define "models"}}{{range .}}
+{{template "model" .}}
+{{end}}{{end}}
+
+{{/* "model" gets *ir.Type. */}}
+{{define "model"}}{{tsDoc "" .Doc .Deprecated}}{{template "declaration" .}}
+
+/** The schema of {{name .}}, for validation and encoding. */
+export const {{schemaName .}}: $Schema = {{typeSchema .}};{{end}}
+
+{{/* "declaration" gets *ir.Type. */}}
+{{define "declaration"}}
+{{- if eq (kind .) "struct"}}{{template "interface" .}}
+{{- else if eq (kind .) "enum"}}{{template "enum" .}}
+{{- else if eq (kind .) "union"}}{{template "union" .}}
+{{- else}}export type {{name .}} = {{tsType .Underlying}};
+{{- end}}{{end}}
+
+{{/* "interface" gets *ir.Type of kind ir.Struct. */}}
+{{define "interface"}}
+{{- if .InlineUnions}}export type {{name .}} = {{template "object" .}}{{range .InlineUnions}} & ({{tsType .Type}}){{end}};
+{{- else}}export interface {{name .}} {{template "object" .}}
+{{- end}}{{end}}
+
+{{/* "object" gets *ir.Type of kind ir.Struct. */}}
+{{define "object"}}{
+{{range .Fields}}{{fieldDoc .}}  {{if .ReadOnly}}readonly {{end}}{{tsKey .JSONName}}{{if fieldOptional .}}?{{end}}: {{fieldType .}};
+{{end}}{{if hasOther .}}  /** Other properties. */
+  [key: string]: unknown;
+{{end}}}{{end}}
+
+{{/* "enum" gets *ir.Type of kind ir.Enum. */}}
+{{define "enum"}}export type {{name .}} = {{enumUnion .}};
+
+/** The values of {{name .}}. */
+export const {{name .}} = {
+{{range .Values}}  {{enumKey $ .}}: {{enumLiteral .Literal}},
+{{else}}
+{{end}}} as const;{{end}}
+
+{{/* "union" gets *ir.Type of kind ir.Union. */}}
+{{define "union"}}export type {{name .}} = {{range $i, $v := .Variants}}{{if $i}} | {{end}}{{tsType $v.Type}}{{end}};{{end}}

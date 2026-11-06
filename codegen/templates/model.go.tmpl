@@ -4,6 +4,7 @@ type gets a Validate method. Helpers marked "stmts" return Go statements
 built by the generator.
 */ -}}
 
+{{/* "types" gets []*ir.Type: a schema's type and the types derived from it, one file's. */}}
 {{define "types"}}
 {{- range .}}
 {{- if eq (kind .) "struct"}}{{template "struct" .}}
@@ -15,6 +16,7 @@ built by the generator.
 {{end}}
 {{- end}}
 
+{{/* "struct" gets *ir.Type of kind ir.Struct. */}}
 {{define "struct"}}
 {{typeDoc .}}
 type {{.Name}} struct {
@@ -108,6 +110,7 @@ func (m {{.Name}}) Validate() error {
 {{- propertyNameMethod .}}
 {{- end}}
 
+{{/* "union" gets *ir.Type of kind ir.Union. */}}
 {{define "union"}}
 {{typeDoc .}}
 //
@@ -175,6 +178,7 @@ func (u {{.Name}}) Validate() error {
 }
 {{- end}}
 
+{{/* "enum" gets *ir.Type of kind ir.Enum. */}}
 {{define "enum"}}
 {{typeDoc .}}
 type {{.Name}} {{goType .Base}}
@@ -199,6 +203,7 @@ func (e {{.Name}}) Validate() error {
 }
 {{- end}}
 
+{{/* "defined" gets *ir.Type of kind ir.Defined. */}}
 {{define "defined"}}
 {{typeDoc .}}
 type {{.Name}} {{goType .Underlying}}
@@ -212,6 +217,7 @@ func (v {{.Name}}) Validate() error {
 {{- alternativeMethods .}}
 {{- end}}
 
+{{/* "alias" gets *ir.Type of kind ir.Alias. */}}
 {{define "alias"}}
 {{typeDoc .}}
 type {{.Name}} = {{goType .Underlying}}

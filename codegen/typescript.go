@@ -1,13 +1,15 @@
 package codegen
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/dheins/go-openapi/ir"
 )
@@ -18,10 +20,19 @@ import (
 //go:embed ts/runtime.ts
 var tsRuntime []byte
 
+// tsTemplateFiles are the templates of models.ts, client.ts and index.ts.
+//
+//go:embed ts/*.tmpl
+var tsTemplateFiles embed.FS
+
 // TSOptions configures a TypeScript client.
 type TSOptions struct {
 	// Source names the input document in the generated file header.
 	Source string
+	// Templates, if set, holds *.tmpl files whose {{define}} blocks
+	// replace the built-in blocks of models.ts, client.ts and index.ts, as
+	// Options.Templates does for Go. This is experimental.
+	Templates fs.FS
 }
 
 // TypeScript generates a TypeScript client of the model: runtime.ts, the
@@ -33,16 +44,87 @@ type TSOptions struct {
 // leaves out, such as media types the TypeScript runtime cannot send.
 func TypeScript(m *ir.Model, opts TSOptions) ([]File, []string, error) {
 	g := newTSGen(m, opts)
+	if err := g.parseTemplates(); err != nil {
+		return nil, nil, err
+	}
+	models, err := g.models()
+	if err != nil {
+		return nil, nil, err
+	}
 	files := []File{
 		{Name: "runtime.ts", Content: tsRuntime},
-		{Name: "models.ts", Content: []byte(g.models())},
+		{Name: "models.ts", Content: []byte(models)},
 	}
 	hasClient := len(m.Operations) > 0
 	if hasClient {
-		files = append(files, File{Name: "client.ts", Content: []byte(g.client())})
+		client, err := g.client()
+		if err != nil {
+			return nil, nil, err
+		}
+		files = append(files, File{Name: "client.ts", Content: []byte(client)})
 	}
-	files = append(files, File{Name: "index.ts", Content: []byte(g.index(hasClient))})
+	index, err := g.index(hasClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	files = append(files, File{Name: "index.ts", Content: []byte(index)})
 	return files, g.warnings, nil
+}
+
+// parseTemplates parses the templates of the files, the built-in ones
+// and, after them, those of opts.Templates, whose blocks replace them.
+func (g *tsGen) parseTemplates() error {
+	funcs := g.funcs()
+	tmpl, err := template.New("ts").Funcs(funcs).ParseFS(tsTemplateFiles, "ts/*.tmpl")
+	if err != nil {
+		return err
+	}
+	if g.opts.Templates != nil {
+		if err := checkTemplates(g.opts.Templates, tmpl, funcs); err != nil {
+			return err
+		}
+		if err := parseUserTemplates(tmpl, g.opts.Templates); err != nil {
+			return err
+		}
+	}
+	g.tmpl = tmpl
+	return nil
+}
+
+// render executes the block name with data.
+func (g *tsGen) render(name string, data any) (string, error) {
+	var b strings.Builder
+	if err := g.tmpl.ExecuteTemplate(&b, name, data); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// funcs are the functions of the TypeScript templates.
+func (g *tsGen) funcs() template.FuncMap {
+	return template.FuncMap{
+		"tsDoc":         tsDoc,
+		"tsType":        func(r *ir.Ref) string { return g.tsType(r) },
+		"tsKey":         tsKey,
+		"tsCamel":       tsCamel,
+		"jsString":      jsString,
+		"join":          strings.Join,
+		"kind":          kindName,
+		"name":          func(t *ir.Type) string { return g.names[t] },
+		"schemaName":    func(t *ir.Type) string { return g.schemas[t] },
+		"typeSchema":    g.typeSchema,
+		"fieldDoc":      func(f *ir.Field) string { return tsDoc("  ", fieldText(f), f.Deprecated) },
+		"fieldType":     g.fieldType,
+		"fieldOptional": fieldOptional,
+		"hasOther":      hasOther,
+		"enumUnion":     enumUnion,
+		"enumKey":       enumKey,
+		"enumLiteral":   enumLiteral,
+		"schemeDoc":     schemeDoc,
+		"operationDoc":  operationDoc,
+		"linkDoc":       linkDoc,
+		"goapiVersion":  goapiVersion,
+	}
 }
 
 // tsRuntimeExports are the names of runtime.ts that users of a client
@@ -58,7 +140,7 @@ var tsRuntimeExports = []struct {
 	{"NoCredentialsError", false}, {"validate", false}, {"encode", false},
 }
 
-func (g *tsGen) index(hasClient bool) string {
+func (g *tsGen) index(hasClient bool) (string, error) {
 	taken := map[string]bool{"Client": hasClient, "Credentials": hasClient, "defaultServerUrl": hasClient}
 	for _, t := range g.m.Types {
 		taken[g.names[t]], taken[g.schemas[t]] = true, true
@@ -74,15 +156,14 @@ func (g *tsGen) index(hasClient bool) string {
 			names = append(names, e.name)
 		}
 	}
-	var b strings.Builder
-	b.WriteString(g.header())
-	fmt.Fprintf(&b, "export { %s } from \"./runtime.ts\";\n", strings.Join(names, ", "))
-	b.WriteString("export * as runtime from \"./runtime.ts\";\n")
-	b.WriteString("export * from \"./models.ts\";\n")
-	if hasClient {
-		b.WriteString("export * from \"./client.ts\";\n")
+	body, err := g.render("index", struct {
+		Names  []string
+		Client bool
+	}{names, hasClient})
+	if err != nil {
+		return "", err
 	}
-	return b.String()
+	return g.header() + body, nil
 }
 
 // tsGen generates the TypeScript of one model.
@@ -96,6 +177,8 @@ type tsGen struct {
 	// client.ts, which imports them as $m.
 	qual     string
 	warnings []string
+	// tmpl are the templates of the files.
+	tmpl *template.Template
 }
 
 // tsReserved are global names the generated code refers to, which a type
@@ -132,17 +215,11 @@ func (g *tsGen) header() string {
 	return fmt.Sprintf("// Code generated by goapi from %s. DO NOT EDIT.\n\n", source)
 }
 
-func (g *tsGen) models() string {
-	var b strings.Builder
-	for _, t := range g.m.Types {
-		b.WriteString("\n")
-		b.WriteString(tsDoc("", t.Doc, t.Deprecated))
-		b.WriteString(g.typeDecl(t))
-		b.WriteString("\n")
-		fmt.Fprintf(&b, "\n/** The schema of %s, for validation and encoding. */\n", g.names[t])
-		fmt.Fprintf(&b, "export const %s: $Schema = %s;\n", g.schemas[t], g.typeSchema(t))
+func (g *tsGen) models() (string, error) {
+	body, err := g.render("models", g.m.Types)
+	if err != nil {
+		return "", err
 	}
-	body := b.String()
 	// Only what is used, as noUnusedLocals requires.
 	var imports []string
 	if strings.Contains(body, "$ref(") {
@@ -159,77 +236,52 @@ func (g *tsGen) models() string {
 		// Still a module, which index.ts re-exports.
 		body = "export {};\n"
 	}
-	return head + body
+	return head + body, nil
 }
 
-// typeDecl declares the TypeScript type of t.
-func (g *tsGen) typeDecl(t *ir.Type) string {
-	name := g.names[t]
-	switch t.Kind {
-	case ir.Struct:
-		body := g.objectBody(t)
-		if len(t.InlineUnions) == 0 {
-			return fmt.Sprintf("export interface %s %s", name, body)
-		}
-		parts := []string{body}
-		for _, u := range t.InlineUnions {
-			parts = append(parts, "("+g.tsType(u.Type)+")")
-		}
-		return fmt.Sprintf("export type %s = %s;", name, strings.Join(parts, " & "))
-	case ir.Enum:
-		var literals, entries []string
-		for _, v := range t.Values {
-			lit := enumLiteral(v.Literal)
-			literals = append(literals, lit)
-			key := strings.TrimPrefix(v.Name, t.Name)
-			if key == "" {
-				key = v.Name
-			}
-			entries = append(entries, fmt.Sprintf("  %s: %s,", tsKey(key), lit))
-		}
-		if len(literals) == 0 {
-			literals = []string{"never"}
-		}
-		return fmt.Sprintf("export type %s = %s;\n\n/** The values of %s. */\nexport const %s = {\n%s\n} as const;",
-			name, strings.Join(literals, " | "), name, name, strings.Join(entries, "\n"))
-	case ir.Union:
-		var variants []string
-		for _, v := range t.Variants {
-			variants = append(variants, g.tsType(v.Type))
-		}
-		return fmt.Sprintf("export type %s = %s;", name, strings.Join(variants, " | "))
-	default:
-		return fmt.Sprintf("export type %s = %s;", name, g.tsType(t.Underlying))
+// fieldType is the TypeScript type of a property.
+func (g *tsGen) fieldType(f *ir.Field) string {
+	typ := g.tsType(f.Type)
+	if f.Nullable && !strings.HasSuffix(typ, " | null") {
+		typ += " | null"
 	}
+	return typ
 }
 
-// objectBody renders the braced properties of a struct type.
-func (g *tsGen) objectBody(t *ir.Type) string {
-	var b strings.Builder
-	b.WriteString("{\n")
-	for _, f := range t.Fields {
-		b.WriteString(tsDoc("  ", fieldText(f), f.Deprecated))
-		typ := g.tsType(f.Type)
-		if f.Nullable && !strings.HasSuffix(typ, " | null") {
-			typ += " | null"
-		}
-		// Read-only properties are absent from requests and write-only
-		// ones from responses, so neither is required by the type.
-		optional := ""
-		if !f.Required || f.ReadOnly || f.WriteOnly {
-			optional = "?"
-		}
-		readonly := ""
-		if f.ReadOnly {
-			readonly = "readonly "
-		}
-		fmt.Fprintf(&b, "  %s%s%s: %s;\n", readonly, tsKey(f.JSONName), optional, typ)
+// fieldOptional reports whether a property may be left out. Read-only
+// properties are absent from requests and write-only ones from responses,
+// so neither is required by the type.
+func fieldOptional(f *ir.Field) bool {
+	return !f.Required || f.ReadOnly || f.WriteOnly
+}
+
+// hasOther reports whether an object type allows properties it does not
+// declare.
+func hasOther(t *ir.Type) bool {
+	a := t.Additional
+	return (a != nil && !a.Forbidden && a.Value != nil) || t.Patterns != nil
+}
+
+// enumUnion is the union of the literals of an enum, never for none.
+func enumUnion(t *ir.Type) string {
+	var literals []string
+	for _, v := range t.Values {
+		literals = append(literals, enumLiteral(v.Literal))
 	}
-	if a := t.Additional; (a != nil && !a.Forbidden && a.Value != nil) || t.Patterns != nil {
-		b.WriteString("  /** Other properties. */\n  [key: string]: unknown;\n")
+	if len(literals) == 0 {
+		return "never"
 	}
-	b.WriteString("}")
-	return b.String()
+	return strings.Join(literals, " | ")
+}
+
+// enumKey is the key of an enum's value in the constant of its values:
+// its name without the enum's.
+func enumKey(t *ir.Type, v *ir.EnumValue) string {
+	key := strings.TrimPrefix(v.Name, t.Name)
+	if key == "" {
+		key = v.Name
+	}
+	return tsKey(key)
 }
 
 func fieldText(f *ir.Field) string {

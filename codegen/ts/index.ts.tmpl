@@ -1,0 +1,11 @@
+{{- /*
+Templates of index.ts, which re-exports the runtime's names users need
+(.Names), the models and the client.
+*/ -}}
+
+{{/* "index" gets Names (the runtime's names to export) and Client (whether there is a client.ts). */}}
+{{define "index"}}export { {{join .Names ", "}} } from "./runtime.ts";
+export * as runtime from "./runtime.ts";
+export * from "./models.ts";
+{{if .Client}}export * from "./client.ts";
+{{end}}{{end}}
