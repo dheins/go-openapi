@@ -1501,6 +1501,9 @@ components:
           items:
             type: string
           x-omitempty: false
+        alias:
+          type: string
+          x-isnullable: true
     Settings:
       type: object
       properties:

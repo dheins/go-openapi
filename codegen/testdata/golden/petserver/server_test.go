@@ -1054,6 +1054,11 @@ func TestFormats(t *testing.T) {
 	if r.status != 200 || r.body != `{"code":"ABC-12","note":"hi","labels":["a"]}` {
 		t.Errorf("echo with note: %d %s", r.status, r.body)
 	}
+	// alias (x-isnullable) may be null.
+	r = do(t, h, "PUT", "/tags/ABC-12", "application/json", `{"code":"ABC-12","alias":null}`)
+	if r.status != 200 || r.body != `{"code":"ABC-12","note":"","labels":[],"alias":null}` {
+		t.Errorf("echo with null alias: %d %s", r.status, r.body)
+	}
 	for _, tt := range []struct {
 		target, body string
 		want         []string

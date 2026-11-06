@@ -242,6 +242,33 @@ func isRef(n *yaml.Node) bool {
 	return mappingValue(n, "$ref") != nil
 }
 
+// nullableExtensions adds null to the type of every schema below n that
+// go-swagger's x-nullable or x-isnullable allows it for, in any version,
+// as 3.0's nullable does: only next to a single type.
+func nullableExtensions(n *yaml.Node) {
+	addNullable(n, map[*yaml.Node]bool{})
+}
+
+// addNullable does nullableExtensions' work. seen guards against aliases,
+// which could expand exponentially.
+func addNullable(n *yaml.Node, seen map[*yaml.Node]bool) {
+	n = resolveAlias(n)
+	if n == nil || seen[n] {
+		return
+	}
+	seen[n] = true
+	if n.Kind == yaml.MappingNode && (isTrue(mappingValue(n, "x-nullable")) || isTrue(mappingValue(n, "x-isnullable"))) {
+		if t := mappingValue(n, "type"); t != nil && t.Kind == yaml.ScalarNode && t.Value != "null" {
+			null := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "null", Line: t.Line, Column: t.Column}
+			typ := *t
+			*t = yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Line: t.Line, Column: t.Column, Content: []*yaml.Node{&typ, null}}
+		}
+	}
+	for _, c := range n.Content {
+		addNullable(c, seen)
+	}
+}
+
 func isTrue(n *yaml.Node) bool {
 	return n != nil && n.Kind == yaml.ScalarNode && n.ShortTag() == "!!bool" && n.Value == "true"
 }

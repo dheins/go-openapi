@@ -12,11 +12,12 @@ import (
 
 // Tag is generated from the schema at /components/schemas/Tag.
 type Tag struct {
-	Code   formats.PetCode              `json:"code"`
-	Color  oapi.Optional[formats.Color] `json:"color,omitzero"`
-	Slug   oapi.Optional[string]        `json:"slug,omitzero"`
-	Note   string                       `json:"note"`
-	Labels []string                     `json:"labels"`
+	Code   formats.PetCode                      `json:"code"`
+	Color  oapi.Optional[formats.Color]         `json:"color,omitzero"`
+	Slug   oapi.Optional[string]                `json:"slug,omitzero"`
+	Note   string                               `json:"note"`
+	Labels []string                             `json:"labels"`
+	Alias  oapi.Optional[oapi.Nullable[string]] `json:"alias,omitzero"`
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -46,8 +47,8 @@ func (m *Tag) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 func (m *Tag) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	obj := oapi.BeginObject(dec)
 	var v Tag
-	var seen [5]bool
-	var problems [5]error
+	var seen [6]bool
+	var problems [6]error
 	for obj.Next() {
 		switch obj.Name() {
 		case "code":
@@ -65,6 +66,9 @@ func (m *Tag) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 		case "labels":
 			seen[4] = true
 			problems[4] = obj.Decode(&v.Labels, false, dir)
+		case "alias":
+			seen[5] = true
+			problems[5] = obj.Decode(&v.Alias, false, dir)
 		default:
 			obj.Skip()
 		}
@@ -89,6 +93,9 @@ func (m *Tag) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	}
 	if seen[4] {
 		errs.Nested("/labels", problems[4])
+	}
+	if seen[5] {
+		errs.Nested("/alias", problems[5])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -142,6 +149,15 @@ func (m Tag) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 		}
 	}
 	dst = append(dst, ',')
+	if m.Alias.Set {
+		dst = append(dst, "\"alias\":"...)
+		if !m.Alias.Value.Valid {
+			dst = append(dst, "null"...)
+		} else {
+			dst = oapi.AppendString(dst, m.Alias.Value.Value)
+		}
+		dst = append(dst, ',')
+	}
 	return oapi.EndObject(dst, start), nil
 }
 
