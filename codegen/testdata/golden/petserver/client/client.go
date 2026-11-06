@@ -303,6 +303,25 @@ func (c *Client) EchoPrefs(ctx context.Context, req *api.EchoPrefsRequest) (api.
 	return api.ReadEchoPrefsResponse(c.cfg, resp)
 }
 
+// Attach calls POST /pets/{petId}/attachments. A nil req sends no
+// parameters or body.
+//
+// Files as base64 parts, echoed, with object headers.
+func (c *Client) Attach(ctx context.Context, req *api.AttachRequest) (api.AttachResponse, error) {
+	if req == nil {
+		req = &api.AttachRequest{}
+	}
+	hreq, err := api.NewAttachRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadAttachResponse(c.cfg, resp)
+}
+
 // GetPhoto calls GET /pets/{petId}/photo. A nil req sends no parameters or
 // body.
 func (c *Client) GetPhoto(ctx context.Context, req *api.GetPhotoRequest) (api.GetPhotoResponse, error) {

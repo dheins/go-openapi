@@ -91,6 +91,14 @@ export interface FilterOwner {
 /** The schema of FilterOwner, for validation and encoding. */
 export const FilterOwnerSchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } }, age: { schema: { kind: "integer" } } } };
 
+export interface Size {
+  w?: number;
+  h?: number;
+}
+
+/** The schema of Size, for validation and encoding. */
+export const SizeSchema: $Schema = { kind: "object", properties: { w: { schema: { kind: "integer", minimum: 1 } }, h: { schema: { kind: "integer", minimum: 1 } } } };
+
 export interface Prefs {
   theme?: string;
   compact?: boolean;
@@ -150,6 +158,22 @@ export interface SearchPetsRequestBody {
 
 /** The schema of SearchPetsRequestBody, for validation and encoding. */
 export const SearchPetsRequestBodySchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } } } };
+
+export interface AttachRequestBody {
+  name?: string;
+  thumb: string;
+}
+
+/** The schema of AttachRequestBody, for validation and encoding. */
+export const AttachRequestBodySchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } }, thumb: { schema: { kind: "string", format: "byte" }, required: true } } };
+
+export interface Attach200XRate {
+  limit: number;
+  remaining?: number;
+}
+
+/** The schema of Attach200XRate, for validation and encoding. */
+export const Attach200XRateSchema: $Schema = { kind: "object", properties: { limit: { schema: { kind: "integer", minimum: 1 }, required: true }, remaining: { schema: { kind: "integer" } } } };
 
 export interface UploadPhotoRequestBody {
   caption?: string;

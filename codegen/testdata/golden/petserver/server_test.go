@@ -182,6 +182,19 @@ func (s *store) DownloadPhoto(_ context.Context, req *api.DownloadPhotoRequest) 
 	return api.DownloadPhoto200PNGResponse{Body: []byte("0123456789"), ETag: oapi.Some(`"v1"`)}, nil
 }
 
+// Attach echoes the files it is sent, with the rate left and a signature.
+func (s *store) Attach(_ context.Context, req *api.AttachRequest) (api.AttachResponse, error) {
+	s.seen["Attach"] = req
+	files := [][]byte{req.Body.Thumb}
+	if parts, ok := req.MixedBody.Get(); ok {
+		files = nil
+		for _, p := range parts {
+			files = append(files, p.Value)
+		}
+	}
+	return api.Attach200MixedResponse{Body: files, XRate: model.Attach200XRate{Limit: 10, Remaining: oapi.Some(int64(10 - len(files)))}, XSig: oapi.Some("abc.def")}, nil
+}
+
 func (s *store) UploadRecords(_ context.Context, req *api.UploadRecordsRequest) (api.UploadRecordsResponse, error) {
 	s.seen["UploadRecords"] = req
 	return api.UploadRecords204Response{}, nil
@@ -1421,6 +1434,53 @@ func TestRanges(t *testing.T) {
 	ranges, err := server.DecodeByteRanges([]byte(r.body), r.header.Get("Content-Type"))
 	if r.status != 206 || err != nil || len(ranges) != 2 || string(ranges[1].Data) != "9" || ranges[1].ContentType != "image/png" {
 		t.Errorf("%d %+v, %v", r.status, ranges, err)
+	}
+}
+
+func TestBase64PartsAndObjectHeaders(t *testing.T) {
+	s, h := newTestServer()
+	form := func(enc, data, size string) (string, string) {
+		var b bytes.Buffer
+		mw := multipart.NewWriter(&b)
+		hdr := textproto.MIMEHeader{"Content-Disposition": {`form-data; name="thumb"`}, "X-Size": {size}}
+		if enc != "" {
+			hdr.Set("Content-Transfer-Encoding", enc)
+		}
+		w, _ := mw.CreatePart(hdr)
+		_, _ = w.Write([]byte(data))
+		_ = mw.Close()
+		return mw.FormDataContentType(), b.String()
+	}
+	ct, body := form("base64", "UE5H", "w=2,h=3")
+	r := do(t, h, "POST", "/pets/1/attachments", ct, body)
+	if r.status != 200 || r.header.Get("X-Rate") != "limit=10,remaining=9" || r.header.Get("X-Sig") != "abc.def" {
+		t.Fatalf("%d %v %s", r.status, r.header, r.body)
+	}
+	if got := s.seen["Attach"].(*api.AttachRequest).Body.Thumb; string(got) != "PNG" {
+		t.Errorf("thumb %q", got)
+	}
+	// The echo is base64 too.
+	if !strings.Contains(r.body, "Content-Transfer-Encoding: base64") || !strings.Contains(r.body, "UE5H") {
+		t.Errorf("echo %q", r.body)
+	}
+	// Positional parts, without a transfer encoding, are their bytes.
+	ct, body = partsBody(t, "mixed", header("X-Size", "w,1,h,1"), "raw", header(), "two")
+	r = do(t, h, "POST", "/pets/1/attachments", ct, body)
+	parts := s.seen["Attach"].(*api.AttachRequest).MixedBody.Value
+	if r.status != 200 || len(parts) != 2 || string(parts[0].Value) != "raw" || parts[0].Header.Get("X-Size") != "w,1,h,1" || r.header.Get("X-Rate") != "limit=10,remaining=8" {
+		t.Errorf("%d %+v", r.status, parts)
+	}
+	// Object headers are parsed and checked, and data decoded.
+	for _, tc := range []struct{ enc, data, size, want string }{
+		{"base64", "UE5H", "w=0,h=3", `body /thumb: part header "X-Size": /w: must be at least 1`},
+		{"base64", "UE5H", "w=x", `body /thumb: part header "X-Size"`},
+		{"base64", "!!", "w=1,h=1", "body /thumb: invalid base64 data"},
+	} {
+		ct, body := form(tc.enc, tc.data, tc.size)
+		r := do(t, h, "POST", "/pets/1/attachments", ct, body)
+		if got := strings.Join(problemErrors(t, r), "\n"); !strings.HasPrefix(got, tc.want) {
+			t.Errorf("%s %q: %s", tc.size, tc.data, got)
+		}
 	}
 }
 

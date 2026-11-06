@@ -941,6 +941,9 @@ func (f *fileGen) partHeaderCheck(h *ir.Header) string {
 	case h.Content != "":
 		hint := "partHeader" + ir.GoName(h.Name)
 		parse = f.decodeContent(h.ContentKind, f.goType(h.Type), "vals[0]", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Request")
+	case h.Object:
+		props := f.headerFields(h, "partHeader"+ir.GoName(h.Name))
+		parse = fmt.Sprintf("server.ParseObjectHeader[%s](vals, %t, %s, %s.Request)", f.goType(h.Type), h.Explode, props, f.imp(oapiImport, "oapi"))
 	case h.Array:
 		parse = fmt.Sprintf("server.ParseArray[%s](vals)", f.goType(h.Elem))
 	default:
@@ -1213,6 +1216,8 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 			format = "server.EncodeFormContent(%s, " + f.imp(oapiImport, "oapi") + ".Response)"
 		case h.ContentKind == "xml":
 			format = "server.EncodeXMLContent(%s, " + f.declareVar(lowerFirst(r.TypeName)+ir.GoName(h.Name)+"XMLShape", xmlNodeLiteral(h.XML)) + ", " + f.imp(oapiImport, "oapi") + ".Response)"
+		case h.Object:
+			format = fmt.Sprintf("server.FormatObject(%%s, %t, %s.Response)", h.Explode, f.imp(oapiImport, "oapi"))
 		case h.Array:
 			format = "server.FormatArray(%s)"
 		}

@@ -871,6 +871,11 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 			elem := f.goType(h.Elem)
 			read = fmt.Sprintf("client.Header(resp, %q, func(vals []string) ([]%s, error) { return %s.ParseArray[%s](client.SplitHeader(vals)) }, &%s)",
 				h.Name, elem, f.imp(serverImport, "server"), elem, x)
+		case h.Object:
+			typ := f.goType(inner)
+			props := f.headerFields(h, lowerFirst(r.TypeName)+"Read"+ir.GoName(h.Name))
+			read = fmt.Sprintf("client.Header(resp, %q, func(vals []string) (%s, error) { return %s.ParseObjectHeader[%s](vals, %t, %s, %s.Response) }, &%s)",
+				h.Name, typ, f.imp(serverImport, "server"), typ, h.Explode, props, f.imp(oapiImport, "oapi"), x)
 		default:
 			read = fmt.Sprintf("client.Header(resp, %q, %s.ParseScalar[%s], &%s)", h.Name, f.imp(serverImport, "server"), f.goType(h.Elem), x)
 		}
