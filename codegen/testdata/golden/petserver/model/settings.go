@@ -4,6 +4,7 @@ package model
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 	"strconv"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -16,7 +17,8 @@ type Settings struct {
 	// Read-only: sent in responses only.
 	Version oapi.Optional[int64] `json:"version,omitzero"`
 	// Write-only: sent in requests only.
-	Pin oapi.Optional[string] `json:"pin,omitzero"`
+	Pin      oapi.Optional[string]                    `json:"pin,omitzero"`
+	Previous oapi.Optional[oapi.Nullable[[]Settings]] `json:"previous,omitzero"`
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -46,8 +48,8 @@ func (m *Settings) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 func (m *Settings) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	obj := oapi.BeginObject(dec)
 	var v Settings
-	var seen [4]bool
-	var problems [4]error
+	var seen [5]bool
+	var problems [5]error
 	for obj.Next() {
 		switch obj.Name() {
 		case "theme":
@@ -66,6 +68,9 @@ func (m *Settings) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) err
 		case "pin":
 			seen[3] = true
 			problems[3] = obj.Decode(&v.Pin, false, dir)
+		case "previous":
+			seen[4] = true
+			problems[4] = obj.Decode(&v.Previous, false, dir)
 		default:
 			obj.Skip()
 		}
@@ -94,6 +99,9 @@ func (m *Settings) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) err
 	} else if dir == oapi.Request {
 		errs.Nested("/pin", oapi.DecodeField([]byte("\"0000\""), &v.Pin, false, dir))
 	}
+	if seen[4] {
+		errs.Nested("/previous", problems[4])
+	}
 	if err := errs.Err(); err != nil {
 		return err
 	}
@@ -116,6 +124,7 @@ func (m Settings) EncodeJSON(dir oapi.Direction) ([]byte, error) {
 func (m Settings) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 	start := len(dst)
 	dst = append(dst, '{')
+	var err error
 	if m.Theme.Set {
 		dst = append(dst, "\"theme\":"...)
 		dst = oapi.AppendString(dst, string(m.Theme.Value))
@@ -145,6 +154,17 @@ func (m Settings) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 		dst = oapi.AppendString(dst, m.Pin.Value)
 		dst = append(dst, ',')
 	}
+	if m.Previous.Set {
+		dst = append(dst, "\"previous\":"...)
+		if !m.Previous.Value.Valid {
+			dst = append(dst, "null"...)
+		} else {
+			if dst, err = oapi.AppendValue(dst, m.Previous.Value.Value, dir); err != nil {
+				return nil, fmt.Errorf("previous: %w", err)
+			}
+		}
+		dst = append(dst, ',')
+	}
 	return oapi.EndObject(dst, start), nil
 }
 
@@ -153,6 +173,13 @@ func (m Settings) Validate() error {
 	var errs oapi.ValidationErrors
 	if m.Theme.Set {
 		errs.Nested("/theme", m.Theme.Value.Validate())
+	}
+	if m.Previous.Set {
+		if m.Previous.Value.Valid {
+			for i3, item3 := range m.Previous.Value.Value {
+				errs.Nested(oapi.Index("/previous", i3), item3.Validate())
+			}
+		}
 	}
 	return errs.Err()
 }

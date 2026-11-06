@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -395,6 +396,12 @@ func (g *tsGen) objectSchema(t *ir.Type) string {
 		}
 		if f.WriteOnly {
 			p += ", writeOnly: true"
+		}
+		if f.Default != "" {
+			var lit bytes.Buffer
+			if json.Compact(&lit, []byte(f.Default)) == nil {
+				p += ", default: " + lit.String()
+			}
 		}
 		props = append(props, fmt.Sprintf("%s: { %s }", tsKey(f.JSONName), p))
 	}

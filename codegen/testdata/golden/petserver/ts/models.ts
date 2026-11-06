@@ -97,10 +97,11 @@ export interface Settings {
   /** Set by the server: it is not sent in requests. */
   readonly version?: number;
   pin?: string;
+  previous?: Settings[] | null;
 }
 
 /** The schema of Settings, for validation and encoding. */
-export const SettingsSchema: $Schema = { kind: "object", properties: { theme: { schema: $ref(() => SettingsThemeSchema) }, notify: { schema: { kind: "boolean" } }, version: { schema: { kind: "integer" }, readOnly: true }, pin: { schema: { kind: "string" }, writeOnly: true } } };
+export const SettingsSchema: $Schema = { kind: "object", properties: { theme: { schema: $ref(() => SettingsThemeSchema), default: "light" }, notify: { schema: { kind: "boolean" }, default: true }, version: { schema: { kind: "integer" }, readOnly: true, default: 1 }, pin: { schema: { kind: "string" }, writeOnly: true, default: "0000" }, previous: { schema: { kind: "nullable", of: { kind: "array", items: $ref(() => SettingsSchema) } } } } };
 
 export type SettingsTheme = "light" | "dark";
 
@@ -187,7 +188,7 @@ export interface GetSettingsView {
 }
 
 /** The schema of GetSettingsView, for validation and encoding. */
-export const GetSettingsViewSchema: $Schema = { kind: "object", properties: { mode: { schema: { kind: "string" } }, depth: { schema: { kind: "integer" } } } };
+export const GetSettingsViewSchema: $Schema = { kind: "object", properties: { mode: { schema: { kind: "string" }, default: "full" }, depth: { schema: { kind: "integer" }, default: 1 } } };
 
 export interface AttachRequestBody {
   name?: string;

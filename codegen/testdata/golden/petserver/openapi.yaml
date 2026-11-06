@@ -1389,6 +1389,10 @@ components:
           type: string
           writeOnly: true
           default: "0000"
+        previous:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/Settings"
     Size:
       type: object
       properties:

@@ -69,6 +69,8 @@ export interface Property {
   readonly readOnly?: boolean;
   /** Sent by the client only: not required in responses. */
   readonly writeOnly?: boolean;
+  /** The value of an absent property, which responses read get. */
+  readonly default?: unknown;
 }
 
 export interface UnionSchema {
@@ -1625,6 +1627,60 @@ function isBytes(schema: Schema | undefined): boolean {
   return s.kind === "string" && s.format === "byte";
 }
 
+// withDefaults fills the absent properties of v, a response's value of
+// schema, with their defaults, through nested objects, arrays and maps,
+// but for write-only properties, which responses do not have. It changes
+// v, and returns it.
+function withDefaults<T>(schema: Schema | undefined, v: T): T {
+  fill(schema, v);
+  return v;
+}
+
+// fill does withDefaults' work. Values parsed from JSON have no cycles.
+function fill(schema: Schema | undefined, v: unknown): void {
+  if (schema === undefined || v === null || typeof v !== "object") {
+    return;
+  }
+  const s = resolve(schema);
+  switch (s.kind) {
+    case "nullable":
+      fill(s.of, v);
+      return;
+    case "all":
+      for (const part of s.of) {
+        fill(part, v);
+      }
+      return;
+    case "array":
+      if (Array.isArray(v)) {
+        for (const item of v) {
+          fill(s.items, item);
+        }
+      }
+      return;
+    case "map":
+      for (const x of Object.values(v)) {
+        fill(s.values, x);
+      }
+      return;
+    case "object": {
+      const obj = v as Values;
+      for (const [k, p] of Object.entries(s.properties)) {
+        if (p.writeOnly) {
+          continue;
+        }
+        if (obj[k] === undefined && p.default !== undefined) {
+          // A copy, so that responses do not share it.
+          obj[k] = structuredClone(p.default);
+        } else {
+          fill(p.schema, obj[k]);
+        }
+      }
+      return;
+    }
+  }
+}
+
 // scalarValue converts text to the primitive value schema describes (or
 // the items of an array schema): numbers and booleans by their text, and
 // anything else as the text, for validation to check.
@@ -1717,7 +1773,7 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
     case "json": {
       let body: unknown;
       try {
-        body = JSON.parse(await resp.text());
+        body = withDefaults(spec.schema, JSON.parse(await resp.text()));
       } catch (e) {
         throw new InvalidResponseError(resp.status, String(e));
       }
@@ -1749,7 +1805,7 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
       out["items"] = partStream(cfg, spec.parts!, resp);
       break;
     case "jsonl":
-      out["items"] = jsonLines(resp);
+      out["items"] = jsonLines(resp, spec.item);
       break;
     case "sse":
       out["events"] = spec.events === undefined ? serverEvents(resp) : typedEvents(cfg, spec.events, resp);
@@ -1803,10 +1859,10 @@ async function* lines(resp: Response, cr = false): AsyncGenerator<string> {
 }
 
 /** The items of a JSON Lines response, as they arrive. */
-async function* jsonLines(resp: Response): AsyncGenerator<unknown> {
+async function* jsonLines(resp: Response, item: Schema | undefined): AsyncGenerator<unknown> {
   for await (const line of lines(resp)) {
     if (line.trim() !== "") {
-      yield JSON.parse(line);
+      yield withDefaults(item, JSON.parse(line));
     }
   }
 }
@@ -1869,7 +1925,7 @@ async function* typedEvents(cfg: Config, spec: EventsSpec, resp: Response): Asyn
     let data: unknown = ev.data;
     if (!kind.text) {
       try {
-        data = JSON.parse(ev.data);
+        data = withDefaults(kind.schema, JSON.parse(ev.data));
       } catch (e) {
         throw new InvalidResponseError(resp.status, `event ${i}: ${String(e)}`);
       }
@@ -2141,7 +2197,7 @@ function partValue(spec: PartItemSpec, raw: RawPart): unknown {
       value = utf8.decode(raw.data);
       break;
     default:
-      value = JSON.parse(utf8.decode(raw.data));
+      value = withDefaults(spec.schema, JSON.parse(utf8.decode(raw.data)));
   }
   return spec.part ? ({ header: raw.header, value } satisfies Part<unknown>) : value;
 }

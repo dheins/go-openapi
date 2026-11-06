@@ -406,3 +406,8 @@ test("base64 parts and object headers", { skip }, async () => {
   );
   assert.ok(invalid.issues.some((i) => i.message.includes('part header "X-Size"')), JSON.stringify(invalid.issues));
 });
+
+test("defaults", { skip }, async () => {
+  // The server writes the defaults of what it leaves unset.
+  assert.deepEqual(await client().getSettings({ petId: 1 }), { status: 200, body: { theme: "light", notify: true, version: 1 } });
+});

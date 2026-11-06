@@ -598,6 +598,15 @@ func TestClientDefaults(t *testing.T) {
 	if body.Theme.Value != model.SettingsThemeLight || body.Notify.Value || body.Version.Value != 1 || body.Pin.Set {
 		t.Errorf("filled %+v", body)
 	}
+	// Nested objects too.
+	resp = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"previous":[{}]}`))}
+	if got, err = api.ReadGetSettingsResponse(cfg, resp); err != nil {
+		t.Fatal(err)
+	}
+	prev := got.(api.GetSettings200JSONResponse).Body.Previous.Value.Value
+	if len(prev) != 1 || prev[0].Theme.Value != model.SettingsThemeLight || prev[0].Version.Value != 1 {
+		t.Errorf("nested %+v", prev)
+	}
 }
 
 func TestClientTupleParts(t *testing.T) {
