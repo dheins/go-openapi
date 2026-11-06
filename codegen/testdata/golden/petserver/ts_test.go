@@ -88,6 +88,10 @@ func TestTypeScriptClient(t *testing.T) {
 	if batch := s.seen["BatchPets"].(*api.BatchPetsRequest).Body; len(batch) != 2 || batch[1].Value.Name != "Tom" || !slices.Equal(batch[1].Header.Values("X-Tags"), []string{"a, b"}) {
 		t.Errorf("batch = %+v", batch)
 	}
+	// Base64 parts, as their bytes, with their object header.
+	if att := s.seen["Attach"].(*api.AttachRequest).MixedBody.Value; len(att) != 2 || string(att[0].Value) != "\x00\xffP" || att[0].Header.Get("X-Size") != "w,4,h,5" {
+		t.Errorf("attach = %+v", att)
+	}
 	lines := s.seen["PutLines"].(*api.PutLinesRequest)
 	if lines.ID != "o-1" || len(lines.Body.Lines) != 2 || lines.Body.Lines[0].Tags.Value[1] != "sweet" || string(lines.Body.Receipt.Value.Data) != "paid" {
 		t.Errorf("lines = %+v", lines)

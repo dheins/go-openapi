@@ -382,3 +382,27 @@ test("range requests", { skip }, async () => {
   assert.equal(await whole.body.text(), "0123456789");
   assert.equal((await c.downloadPhoto({ petId: 1, range: "bytes=50-" })).status, 416);
 });
+
+test("base64 parts and object headers", { skip }, async () => {
+  const c = client({ validateResponses: true });
+  // A []byte is base64: sent as its bytes in a form, and echoed in parts.
+  const form = await c.attach({ petId: 1, body: { thumb: "AP9Q" } });
+  assert.deepEqual(form, { status: 200, body: ["AP9Q"], headers: { xRate: { limit: 10, remaining: 9 }, xSig: "abc.def" } });
+
+  const parts = await c.attach({
+    petId: 1,
+    contentType: "multipart/mixed",
+    mixedBody: [
+      { header: new Headers({ "X-Size": "w,4,h,5" }), value: "AP9Q" },
+      { header: new Headers(), value: "eA==" },
+    ],
+  });
+  assert.deepEqual(parts, { status: 200, body: ["AP9Q", "eA=="], headers: { xRate: { limit: 10, remaining: 8 }, xSig: "abc.def" } });
+
+  // Object headers are checked before sending.
+  const invalid = await rejects(
+    c.attach({ petId: 1, contentType: "multipart/mixed", mixedBody: [{ header: new Headers({ "X-Size": "w,0,h,1" }), value: "AA==" }] }),
+    InvalidRequestError,
+  );
+  assert.ok(invalid.issues.some((i) => i.message.includes('part header "X-Size"')), JSON.stringify(invalid.issues));
+});

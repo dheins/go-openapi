@@ -147,34 +147,6 @@ func (g *tsGen) client() (string, error) {
 	return head + body, nil
 }
 
-// tsUnsupported reports whether o has base64 (bytes) parts or object
-// headers, which the TypeScript runtime does not handle yet.
-func tsUnsupported(o *ir.Operation) bool {
-	bytesParts := func(p *ir.Parts) bool {
-		return p != nil && (p.Item == "bytes" || slices.Contains(p.Kinds, "bytes"))
-	}
-	objectHeaders := func(headers []*ir.Header) bool {
-		return slices.ContainsFunc(headers, func(h *ir.Header) bool { return h.Object })
-	}
-	var encodings func(props []ir.ParamProperty) bool
-	encodings = func(props []ir.ParamProperty) bool {
-		return slices.ContainsFunc(props, func(p ir.ParamProperty) bool {
-			return p.Type == "bytes" || objectHeaders(p.Headers) || encodings(p.Properties)
-		})
-	}
-	if o.Body != nil {
-		for _, m := range o.Body.Media {
-			if bytesParts(m.Parts) || encodings(m.Properties) {
-				return true
-			}
-			if m.Parts != nil && (objectHeaders(m.Parts.Rest.Headers) || slices.ContainsFunc(m.Parts.Prefix, func(e ir.ParamProperty) bool { return objectHeaders(e.Headers) })) {
-				return true
-			}
-		}
-	}
-	return slices.ContainsFunc(o.Responses, func(r *ir.Response) bool { return bytesParts(r.Parts) || objectHeaders(r.Headers) })
-}
-
 // tsMedia returns the request media types of o the runtime can send.
 func tsMedia(o *ir.Operation) []*ir.BodyMedia {
 	if o.Body == nil {
@@ -338,6 +310,12 @@ func (g *tsGen) partsSpec(value *ir.Ref, p *ir.Parts) string {
 				}
 				if h.Array {
 					hdr += ", array: true"
+				}
+				if h.Object {
+					hdr += ", object: true"
+				}
+				if h.Explode {
+					hdr += ", explode: true"
 				}
 				schema := g.schema(h.Type)
 				switch h.ContentKind {
@@ -503,10 +481,6 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 // operationSpec renders the descriptor of o, or reports that the runtime
 // cannot send it.
 func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
-	if tsUnsupported(o) {
-		g.warnings = append(g.warnings, fmt.Sprintf("%s: the TypeScript client cannot send or read base64 parts or object headers yet; the operation is left out", o.Name))
-		return "", false
-	}
 	media := tsMedia(o)
 	if o.Body != nil && len(media) < len(o.Body.Media) {
 		var left []string
@@ -624,6 +598,12 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 				}
 				if h.Array {
 					hdr += ", array: true"
+				}
+				if h.Object {
+					hdr += ", object: true"
+				}
+				if h.Explode {
+					hdr += ", explode: true"
 				}
 				if h.Content != "" {
 					hdr += fmt.Sprintf(", content: %q", h.ContentKind)

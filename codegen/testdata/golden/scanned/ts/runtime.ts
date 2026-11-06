@@ -438,7 +438,7 @@ export interface BodyMediaSpec {
  * or its body as JSON, of schema; a Part with the part's headers if part
  * is set. */
 export interface PartItemSpec {
-  readonly kind: "file" | "text" | "json";
+  readonly kind: "file" | "bytes" | "text" | "json";
   readonly schema: Schema;
   readonly part?: boolean;
 }
@@ -476,6 +476,10 @@ export interface HeaderSpec {
   readonly name: string;
   readonly required?: boolean;
   readonly array?: boolean;
+  /** The value is an object in the simple style: name,value pairs, or
+   * name=value ones with explode. */
+  readonly object?: boolean;
+  readonly explode?: boolean;
   readonly content?: Content;
   readonly schema: Schema;
 }
@@ -946,9 +950,18 @@ function buildBody(op: OperationSpec, req: Values, b: Built, checkItems: boolean
     case "multipart": {
       // fetch writes the content type, with the boundary.
       const form = new FormData();
+      const object = resolve(media.schema);
       for (const [k, x] of entries(encode(media.schema, v, "request"))) {
+        let prop = object.kind === "object" ? object.properties[k]?.schema : undefined;
+        if (prop !== undefined && resolve(prop).kind === "array") {
+          prop = (resolve(prop) as ArraySchema).items;
+        }
         for (const item of Array.isArray(x) ? x : [x]) {
-          if (item instanceof Blob) {
+          if (isBytes(prop) && typeof item === "string") {
+            // As its bytes, which a server reads as they are: FormData
+            // cannot give a part a Content-Transfer-Encoding.
+            form.append(k, new Blob([fromBase64(item)], { type: "application/octet-stream" }));
+          } else if (item instanceof Blob) {
             const name = fileName(item);
             if (name === undefined) {
               form.append(k, item);
@@ -1272,6 +1285,14 @@ function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string
       }
       break;
     }
+    case "bytes": {
+      // Sent base64, in lines of 76 characters, as RFC 2045 has it.
+      const b64 = text(value).replace(/\s+/g, "");
+      data = encoder.encode(b64.replace(/.{76}(?=.)/g, "$&\r\n"));
+      type = "application/octet-stream";
+      header.set("Content-Transfer-Encoding", "base64");
+      break;
+    }
     case "text":
       data = encoder.encode(text(value));
       type = "text/plain; charset=utf-8";
@@ -1505,6 +1526,9 @@ async function unexpected(resp: Response): Promise<UnexpectedResponseError> {
 }
 
 function headerValue(h: HeaderSpec, raw: string): unknown {
+  if (h.object) {
+    return objectHeader(h.schema, raw, h.explode === true);
+  }
   switch (h.content) {
     case "json":
       return JSON.parse(raw);
@@ -1514,6 +1538,91 @@ function headerValue(h: HeaderSpec, raw: string): unknown {
       return formValue(h.schema, raw);
   }
   return h.array ? raw.split(",").map((s) => scalarValue(h.schema, s.trim())) : scalarValue(h.schema, raw.trim());
+}
+
+// objectHeader reads the value of a header holding an object in the
+// simple style: name,value pairs, or name=value ones with explode, in a
+// comma-separated list whose quoted items are unquoted. Values are
+// converted by the properties' schemas.
+function objectHeader(schema: Schema, raw: string, explode: boolean): Values {
+  const items = headerItems(raw);
+  const pairs: [string, string][] = [];
+  if (explode) {
+    for (const item of items) {
+      const eq = item.indexOf("=");
+      if (eq < 0) {
+        throw new Error(`expected name=value, got ${JSON.stringify(item)}`);
+      }
+      pairs.push([item.slice(0, eq), item.slice(eq + 1)]);
+    }
+  } else {
+    if (items.length % 2 !== 0) {
+      throw new Error("expected name,value pairs");
+    }
+    for (let i = 0; i < items.length; i += 2) {
+      pairs.push([items[i]!, items[i + 1]!]);
+    }
+  }
+  let s = resolve(schema);
+  if (s.kind === "nullable") {
+    s = resolve(s.of);
+  }
+  const out: Values = {};
+  for (const [k, v] of pairs) {
+    out[k] = scalarValue(s.kind === "object" ? (s.properties[k]?.schema ?? { kind: "any" }) : { kind: "any" }, v);
+  }
+  return out;
+}
+
+// headerItems splits a header list at its commas, outside quoted items,
+// which are unquoted.
+function headerItems(raw: string): string[] {
+  const items: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i]!;
+    if (quoted && c === "\\" && i + 1 < raw.length) {
+      cur += raw[++i];
+    } else if (c === '"') {
+      quoted = !quoted;
+    } else if (c === "," && !quoted) {
+      items.push(cur.trim());
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  items.push(cur.trim());
+  return items;
+}
+
+// toBase64 and fromBase64 convert bytes to base64 and back, as a []byte is
+// a base64 string.
+function toBase64(data: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < data.length; i += 0x8000) {
+    s += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}
+
+function fromBase64(s: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(s.replace(/\s+/g, ""));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
+
+// isBytes reports whether schema is a []byte, a base64 string.
+function isBytes(schema: Schema | undefined): boolean {
+  if (schema === undefined) {
+    return false;
+  }
+  const s = resolve(schema);
+  return s.kind === "string" && s.format === "byte";
 }
 
 // scalarValue converts text to the primitive value schema describes (or
@@ -2025,6 +2134,9 @@ function partValue(spec: PartItemSpec, raw: RawPart): unknown {
           : new Blob([raw.data], { type });
       break;
     }
+    case "bytes":
+      value = partBytes(raw);
+      break;
     case "text":
       value = utf8.decode(raw.data);
       break;
@@ -2032,6 +2144,28 @@ function partValue(spec: PartItemSpec, raw: RawPart): unknown {
       value = JSON.parse(utf8.decode(raw.data));
   }
   return spec.part ? ({ header: raw.header, value } satisfies Part<unknown>) : value;
+}
+
+// partBytes returns the data of a part as a base64 string, read as its
+// Content-Transfer-Encoding says: base64 as it is, without one (or 7bit,
+// 8bit, binary) its bytes. Quoted-printable is not read.
+function partBytes(raw: RawPart): string {
+  const enc = (raw.header.get("Content-Transfer-Encoding") ?? "").trim().toLowerCase();
+  switch (enc) {
+    case "":
+    case "7bit":
+    case "8bit":
+    case "binary":
+      return toBase64(raw.data);
+    case "base64": {
+      const b64 = new TextDecoder().decode(raw.data).replace(/\s+/g, "");
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 !== 0) {
+        throw new Error("invalid base64 data");
+      }
+      return b64;
+    }
+  }
+  throw new Error(`Content-Transfer-Encoding ${JSON.stringify(enc)} is not supported`);
 }
 
 // decodePart returns the item of raw, the part at index i, of item, after
