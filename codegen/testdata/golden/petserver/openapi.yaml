@@ -1499,6 +1499,7 @@ components:
           type: string
           enum: [light, dark]
           default: light
+          x-go-custom-tag: 'db:"theme" yaml:"theme,omitempty"'
         notify:
           type: boolean
           default: true

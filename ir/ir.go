@@ -220,6 +220,9 @@ type Field struct {
 	// CyclePointer means Type was made a pointer because the field's type
 	// contains the struct itself.
 	CyclePointer bool
+	// Tags are struct tags to add after the json tag, from
+	// x-go-custom-tag (`db:"name" yaml:"name"`), or "".
+	Tags string
 	// Default is the JSON literal of the property's default value, or "".
 	// It is applied to absent optional properties of requests.
 	Default string

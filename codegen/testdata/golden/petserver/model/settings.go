@@ -12,7 +12,7 @@ import (
 
 // Settings is generated from the schema at /components/schemas/Settings.
 type Settings struct {
-	Theme  oapi.Optional[SettingsTheme] `json:"theme,omitzero"`
+	Theme  oapi.Optional[SettingsTheme] `json:"theme,omitzero" db:"theme" yaml:"theme,omitempty"`
 	Notify oapi.Optional[bool]          `json:"notify,omitzero"`
 	// Read-only: sent in responses only.
 	Version oapi.Optional[int64] `json:"version,omitzero"`

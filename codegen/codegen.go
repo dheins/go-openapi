@@ -490,7 +490,11 @@ func tag(fd *ir.Field) string {
 	default:
 		opt = ",omitempty"
 	}
-	return "`json:" + strconv.Quote(fd.JSONName+opt) + "`"
+	tags := "json:" + strconv.Quote(fd.JSONName+opt)
+	if fd.Tags != "" {
+		tags += " " + fd.Tags
+	}
+	return "`" + tags + "`"
 }
 
 func enumMessage(t *ir.Type) string {

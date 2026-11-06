@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -1025,6 +1026,15 @@ func init() {
 		}
 		return nil
 	})
+}
+
+// TestCustomTags checks the struct tags of x-go-custom-tag, after the
+// json tag.
+func TestCustomTags(t *testing.T) {
+	f, _ := reflect.TypeFor[model.Settings]().FieldByName("Theme")
+	if f.Tag.Get("json") != "theme,omitzero" || f.Tag.Get("db") != "theme" || f.Tag.Get("yaml") != "theme,omitempty" {
+		t.Errorf("tag = %s", f.Tag)
+	}
 }
 
 // TestFormats covers formats mapped to Go types (pet-code by x-go-formats,
