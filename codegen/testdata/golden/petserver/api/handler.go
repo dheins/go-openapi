@@ -44,6 +44,12 @@ type Handler interface {
 	//
 	// A header parameter serialized as XML.
 	EchoPrefs(ctx context.Context, req *EchoPrefsRequest) (EchoPrefsResponse, error)
+	// GetSettings handles GET /pets/{petId}/settings.
+	//
+	// The pet's settings, with defaults for what is not set.
+	GetSettings(ctx context.Context, req *GetSettingsRequest) (GetSettingsResponse, error)
+	// PutSettings handles PUT /pets/{petId}/settings.
+	PutSettings(ctx context.Context, req *PutSettingsRequest) (PutSettingsResponse, error)
 	// Attach handles POST /pets/{petId}/attachments.
 	//
 	// Files as base64 parts, echoed, with object headers.

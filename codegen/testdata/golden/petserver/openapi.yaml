@@ -345,6 +345,53 @@ paths:
                 application/xml:
                   schema:
                     $ref: "#/components/schemas/Prefs"
+  /pets/{petId}/settings:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getSettings
+      description: The pet's settings, with defaults for what is not set.
+      parameters:
+        - name: view
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              mode:
+                type: string
+                default: full
+              depth:
+                type: integer
+                default: 1
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    put:
+      operationId: putSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Settings"
+      responses:
+        "200":
+          description: The settings, as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
   /pets/{petId}/attachments:
     parameters:
       - name: petId
@@ -1324,6 +1371,24 @@ components:
           type: object
           additionalProperties:
             type: integer
+    Settings:
+      type: object
+      properties:
+        theme:
+          type: string
+          enum: [light, dark]
+          default: light
+        notify:
+          type: boolean
+          default: true
+        version:
+          type: integer
+          readOnly: true
+          default: 1
+        pin:
+          type: string
+          writeOnly: true
+          default: "0000"
     Size:
       type: object
       properties:

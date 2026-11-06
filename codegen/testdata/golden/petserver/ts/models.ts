@@ -91,6 +91,28 @@ export interface FilterOwner {
 /** The schema of FilterOwner, for validation and encoding. */
 export const FilterOwnerSchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } }, age: { schema: { kind: "integer" } } } };
 
+export interface Settings {
+  theme?: SettingsTheme;
+  notify?: boolean;
+  /** Set by the server: it is not sent in requests. */
+  readonly version?: number;
+  pin?: string;
+}
+
+/** The schema of Settings, for validation and encoding. */
+export const SettingsSchema: $Schema = { kind: "object", properties: { theme: { schema: $ref(() => SettingsThemeSchema) }, notify: { schema: { kind: "boolean" } }, version: { schema: { kind: "integer" }, readOnly: true }, pin: { schema: { kind: "string" }, writeOnly: true } } };
+
+export type SettingsTheme = "light" | "dark";
+
+/** The values of SettingsTheme. */
+export const SettingsTheme = {
+  Light: "light",
+  Dark: "dark",
+} as const;
+
+/** The schema of SettingsTheme, for validation and encoding. */
+export const SettingsThemeSchema: $Schema = { kind: "string", enum: ["light", "dark"] };
+
 export interface Size {
   w?: number;
   h?: number;
@@ -158,6 +180,14 @@ export interface SearchPetsRequestBody {
 
 /** The schema of SearchPetsRequestBody, for validation and encoding. */
 export const SearchPetsRequestBodySchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } } } };
+
+export interface GetSettingsView {
+  mode?: string;
+  depth?: number;
+}
+
+/** The schema of GetSettingsView, for validation and encoding. */
+export const GetSettingsViewSchema: $Schema = { kind: "object", properties: { mode: { schema: { kind: "string" } }, depth: { schema: { kind: "integer" } } } };
 
 export interface AttachRequestBody {
   name?: string;

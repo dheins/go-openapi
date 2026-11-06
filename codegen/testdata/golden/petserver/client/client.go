@@ -303,6 +303,42 @@ func (c *Client) EchoPrefs(ctx context.Context, req *api.EchoPrefsRequest) (api.
 	return api.ReadEchoPrefsResponse(c.cfg, resp)
 }
 
+// GetSettings calls GET /pets/{petId}/settings. A nil req sends no
+// parameters or body.
+//
+// The pet's settings, with defaults for what is not set.
+func (c *Client) GetSettings(ctx context.Context, req *api.GetSettingsRequest) (api.GetSettingsResponse, error) {
+	if req == nil {
+		req = &api.GetSettingsRequest{}
+	}
+	hreq, err := api.NewGetSettingsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadGetSettingsResponse(c.cfg, resp)
+}
+
+// PutSettings calls PUT /pets/{petId}/settings. A nil req sends no
+// parameters or body.
+func (c *Client) PutSettings(ctx context.Context, req *api.PutSettingsRequest) (api.PutSettingsResponse, error) {
+	if req == nil {
+		req = &api.PutSettingsRequest{}
+	}
+	hreq, err := api.NewPutSettingsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutSettingsResponse(c.cfg, resp)
+}
+
 // Attach calls POST /pets/{petId}/attachments. A nil req sends no
 // parameters or body.
 //

@@ -373,18 +373,26 @@ func TestReadOnlyAndWriteOnly(t *testing.T) {
 	}
 	assertMessages(t, oapi.DecodeRequest([]byte(`{"username": "ann"}`), &a), "/password: required property is missing")
 
-	// A response: id is required, password not; nothing is defaulted.
+	// A response: id is required, password not; absent properties get
+	// their defaults too.
+	a = Account{}
 	if err := oapi.DecodeResponse([]byte(`{"id": 1, "username": "ann"}`), &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.Role.Set {
-		t.Error("defaults must only be applied to requests")
+	if a.Role.Value != "user" || a.Limit.Value != 10 {
+		t.Errorf("response account = %+v", a)
+	}
+	// Decoding without a direction applies none.
+	a = Account{}
+	if err := json.Unmarshal([]byte(`{"id": 1, "username": "ann"}`), &a); err != nil || a.Role.Set {
+		t.Errorf("no direction: %+v, %v", a, err)
 	}
 	assertMessages(t, oapi.DecodeResponse([]byte(`{"username": "ann"}`), &a), "/id: required property is missing")
 
 	acct := Account{ID: 1, Username: "ann", Password: "s3cret", Role: oapi.Some("admin")}
 	out, err := oapi.EncodeResponse(acct)
-	if err != nil || string(out) != `{"id":1,"username":"ann","role":"admin"}` {
+	// The response has the default of the limit left unset.
+	if err != nil || string(out) != `{"id":1,"username":"ann","role":"admin","limit":10}` {
 		t.Errorf("response = %s, %v", out, err)
 	}
 	out, err = oapi.EncodeRequest(acct)

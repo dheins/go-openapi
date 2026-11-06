@@ -576,6 +576,30 @@ func TestClientBase64PartsAndObjectHeaders(t *testing.T) {
 	}
 }
 
+func TestClientDefaults(t *testing.T) {
+	ctx := context.Background()
+	_, c := newTestClient(t, petclient.Credentials{})
+	r := as[api.GetSettings200JSONResponse](t)(c.GetSettings(ctx, &api.GetSettingsRequest{PetID: 1}))
+	if r.Body.Theme.Value != model.SettingsThemeLight || !r.Body.Notify.Value || r.Body.Version.Value != 1 {
+		t.Errorf("settings %+v", r.Body)
+	}
+	// A response that leaves properties out, from another server, has
+	// their defaults too, but for write-only ones.
+	cfg, err := client.NewConfig(client.WithBaseURL("https://pets.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"notify":false}`))}
+	got, err := api.ReadGetSettingsResponse(cfg, resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := got.(api.GetSettings200JSONResponse).Body
+	if body.Theme.Value != model.SettingsThemeLight || body.Notify.Value || body.Version.Value != 1 || body.Pin.Set {
+		t.Errorf("filled %+v", body)
+	}
+}
+
 func TestClientTupleParts(t *testing.T) {
 	ctx := context.Background()
 	s, c := newTestClient(t, petclient.Credentials{})

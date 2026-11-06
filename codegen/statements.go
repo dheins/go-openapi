@@ -119,8 +119,8 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 		case cond != "":
 			w(1, "} %s {", cond)
 			w(2, "errs.Add(%s, \"required property is missing\")", path)
-		case fd.Default != "" && !fd.ReadOnly:
-			w(1, "} else if dir == oapi.Request {")
+		case fd.Default != "" && defaultCondition(fd) != "":
+			w(1, "} else if %s {", defaultCondition(fd))
 			w(2, "errs.Nested(%s, oapi.DecodeField([]byte(%s), &v.%s, %t, dir))", path, strconv.Quote(fd.Default), fd.Name, fd.CyclePointer && fd.Nullable)
 		}
 		w(1, "}")
@@ -212,6 +212,21 @@ func propertyNames(r *ir.Ref, seen map[*ir.Type]bool) []string {
 		names = propertyNames(t.Underlying, seen)
 	}
 	return names
+}
+
+// defaultCondition returns the condition under which an absent property
+// gets its default, or "" if it never does: in a request or a response
+// it may be in, not when decoding without a direction.
+func defaultCondition(fd *ir.Field) string {
+	switch {
+	case fd.ReadOnly && fd.WriteOnly:
+		return ""
+	case fd.ReadOnly:
+		return "dir == oapi.Response"
+	case fd.WriteOnly:
+		return "dir == oapi.Request"
+	}
+	return "dir != oapi.AnyDirection"
 }
 
 // requiredCondition returns the else clause under which a missing
