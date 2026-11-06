@@ -591,3 +591,26 @@ func TestStreaming(t *testing.T) {
 		t.Errorf("sse = %q\nwant %q", rec.Body, want)
 	}
 }
+
+func TestValuesJSON(t *testing.T) {
+	for _, tt := range []struct {
+		v     Values
+		shape Shape
+		prop  Property
+		want  string
+	}{
+		{Values{Items: []string{"7"}}, Scalar, Property{Type: "integer"}, `7`},
+		{Values{Items: []string{"x"}}, Scalar, Property{Type: "integer"}, `"x"`},
+		{Values{Items: []string{"1", "2.5", "y"}}, Array, Property{Type: "number"}, `[1,2.5,"y"]`},
+		{Values{Items: []string{"true"}}, Array, Property{Type: "boolean"}, `[true]`},
+		{Values{Fields: map[string][]string{"a": {"1"}, "b": {"x"}}}, Object, Property{Type: "object", Properties: map[string]Property{"a": {Type: "integer"}}}, `{"a":1,"b":"x"}`},
+	} {
+		got, err := ValuesJSON(tt.v, tt.shape, tt.prop)
+		if err != nil || string(got) != tt.want {
+			t.Errorf("ValuesJSON(%+v) = %s, %v; want %s", tt.v, got, err, tt.want)
+		}
+	}
+	if _, err := ValuesJSON(Values{Items: []string{"a", "b"}}, Scalar, Property{Type: "string"}); err == nil {
+		t.Error("two values of a scalar: no error")
+	}
+}
