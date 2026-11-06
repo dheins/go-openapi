@@ -130,6 +130,15 @@ export interface FilterOwner {
 /** The schema of FilterOwner, for validation and encoding. */
 export const FilterOwnerSchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } }, age: { schema: { kind: "integer" } } } };
 
+export interface Tag {
+  code: string;
+  color?: string;
+  slug?: string;
+}
+
+/** The schema of Tag, for validation and encoding. */
+export const TagSchema: $Schema = { kind: "object", properties: { code: { schema: { kind: "string", format: "pet-code" }, required: true }, color: { schema: { kind: "string", format: "color" } }, slug: { schema: { kind: "string", minLength: 2, format: "slug" } } } };
+
 export interface Settings {
   theme?: SettingsTheme;
   notify?: boolean;

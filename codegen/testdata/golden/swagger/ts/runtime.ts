@@ -174,6 +174,12 @@ function check(schema: Schema, v: unknown, dir: Direction, at: string, out: Issu
       if (schema.pattern !== undefined && !compile(schema.pattern).test(v)) {
         add(`must match the pattern ${schema.pattern}`);
       }
+      if (schema.format !== undefined) {
+        const why = formatIssue(schema.format, v);
+        if (why !== undefined) {
+          add(why);
+        }
+      }
       if (schema.enum !== undefined && !schema.enum.includes(v)) {
         add(`must be one of ${schema.enum.map((e) => JSON.stringify(e)).join(", ")}`);
       }
@@ -305,6 +311,103 @@ function check(schema: Schema, v: unknown, dir: Direction, at: string, out: Issu
       return;
     }
   }
+}
+
+// ---- Formats -------------------------------------------------------------
+
+/** A check of a string format: why s is not of the format, or undefined
+ * if it is. */
+export type FormatCheck = (s: string) => string | undefined;
+
+const registeredFormats = new Map<string, FormatCheck>();
+
+/** Makes validation check strings of a format with check, as the Go
+ * runtime's oapi.RegisterFormat does. It replaces the built-in check of a
+ * format and an earlier registration; undefined removes it. */
+export function registerFormat(format: string, check: FormatCheck | undefined): void {
+  if (check === undefined) {
+    registeredFormats.delete(format);
+  } else {
+    registeredFormats.set(format, check);
+  }
+}
+
+const daysIn = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+function validDate(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m === null) {
+    return false;
+  }
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return mo >= 1 && mo <= 12 && d >= 1 && d <= daysIn(y, mo);
+}
+
+// validTime checks hh:mm:ss[.frac] and an offset, Z or ±hh:mm.
+function validTime(s: string): boolean {
+  const m = /^(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/.exec(s);
+  return m !== null && Number(m[1]) < 24 && Number(m[2]) < 60 && Number(m[3]) < 60 && (m[6] === undefined || (Number(m[6]) < 24 && Number(m[7]) < 60));
+}
+
+const atom = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+";
+const emailPattern = new RegExp(`^${atom}(\\.${atom})*@${atom}(\\.${atom})*$`);
+const hostnamePattern = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.?$/i;
+const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const uuidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+// uriReference checks what Go's url.Parse rejects: control characters,
+// bad escapes, and a colon in a first segment without a scheme.
+function uriReference(s: string): boolean {
+  return !/[\x00-\x1f\x7f]/.test(s) && !/%(?![0-9A-Fa-f]{2})/.test(s) && !/^[^/?#:]*[^A-Za-z0-9+.-][^/?#:]*:/.test(s) && !s.startsWith(":");
+}
+
+function validIPv6(s: string): boolean {
+  if (!s.includes(":") || /[^0-9A-Fa-f:.]/.test(s)) {
+    return false;
+  }
+  try {
+    new URL(`http://[${s}]/`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// builtinFormats are the formats the Go runtime's oapi.CheckFormat checks.
+const builtinFormats: Readonly<Record<string, (s: string) => boolean>> = {
+  "date-time": (s) => s[10] === "T" && validDate(s.slice(0, 10)) && validTime(s.slice(11)),
+  date: validDate,
+  time: validTime,
+  email: (s) => emailPattern.test(s),
+  hostname: (s) => s.length <= 253 && hostnamePattern.test(s),
+  ipv4: (s) => ipv4Pattern.test(s),
+  ipv6: validIPv6,
+  uri: (s) => /^[A-Za-z][A-Za-z0-9+.-]*:/.test(s) && uriReference(s),
+  "uri-reference": uriReference,
+  uuid: (s) => uuidPattern.test(s),
+  byte: (s) => base64Pattern.test(s),
+  regex: (s) => {
+    try {
+      new RegExp(s);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+};
+
+// formatIssue checks s against a format: with its registered check, else
+// a built-in one. Other formats are accepted, as the specification
+// requires.
+function formatIssue(format: string, s: string): string | undefined {
+  const registered = registeredFormats.get(format);
+  if (registered !== undefined) {
+    const why = registered(s);
+    return why === undefined ? undefined : `must be a valid ${format}: ${why}`;
+  }
+  const builtin = builtinFormats[format];
+  return builtin === undefined || builtin(s) ? undefined : `must be a valid ${format}`;
 }
 
 function countProperties(n: number, schema: { minProperties?: number; maxProperties?: number }, add: (m: string) => void): void {

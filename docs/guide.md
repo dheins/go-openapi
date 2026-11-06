@@ -250,6 +250,45 @@ pet.Tag = oapi.Optional[string]{}              // absent
 if name, ok := pet.Nickname.Get(); ok { ... }  // read
 ```
 
+### Formats of your own
+
+A format can be given a Go type of your own, for every schema that has
+it: with `-format-type` on `goapi generate model`, `server` and `client`
+(repeatable), or a root `x-go-formats` map in the document
+([extensions](extensions.md#x-go-formats)). The flag wins over the
+document, both win over the built-in types of formats, and a schema's
+own `x-go-type` wins over them all.
+
+```sh
+goapi generate server -format-type uuid=github.com/google/uuid.UUID -format-type money=github.com/shopspring/decimal.Decimal openapi.yaml
+```
+
+The type must encode and decode itself as its schema's JSON (a string
+format as a JSON string), and implement `encoding.TextMarshaler` and
+`TextUnmarshaler` to be a parameter or header. It checks its values as
+it decodes them; other constraints of the schema next to it are not
+checked by `Validate`, as with `x-go-type`.
+
+A format without a Go type stays a string and is checked by
+`oapi.CheckFormat`: the built-in formats (`email`, `uuid`, `uri`, ...)
+and any you register, which also replace a built-in check. Register them
+before serving or sending, usually in an `init` function:
+
+```go
+func init() {
+	oapi.RegisterFormat("slug", func(s string) error {
+		if !slugPattern.MatchString(s) {
+			return errors.New("lower-case words joined by dashes")
+		}
+		return nil
+	})
+}
+```
+
+A failed check reads `must be a valid slug: lower-case words joined by
+dashes`. Formats neither built in nor registered are accepted, as JSON
+Schema requires.
+
 ### Decoding and validating
 
 `json.Unmarshal` into a generated type reports every problem with a JSON
@@ -1238,7 +1277,7 @@ if (resp.status === 200) {
   - **Objects** become interfaces, with descriptions as JSDoc comments. Read-only properties are `readonly` and optional, since the server sets them.
   - **Enums** become a union of literals plus a constant object (`PetStatus.Available`).
   - **Unions** become TypeScript unions, and maps index signatures.
-  - **Dates and other formats** are strings, and files and bytes are `Blob`s.
+  - **Dates and other formats** are strings, also those with a Go type of your own, and files and bytes are `Blob`s. Formats are checked as the Go runtime checks them (`email`, `ipv6`, `uri` and `regex` as closely as JavaScript allows), and with checks registered by `registerFormat(name, (s) => reason | undefined)`, which also replace built-in ones.
   - **`int64`** values are `number`s, exact up to 2^53.
 - **Requests:**
   - Request properties are named after the parameters, in camel case (`petId`, `xRequestID`), plus `body` (or one property per body type) and `contentType`.

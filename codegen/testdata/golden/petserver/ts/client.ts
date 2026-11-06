@@ -227,6 +227,25 @@ const echoPrefsSpec: OperationSpec = {
   responses: [{ status: "204", headers: [{ key: "xPrefs", name: "X-Prefs", content: "xml", xml: { name: "Prefs", type: "object", properties: [{ name: "theme", node: { name: "theme", type: "string" } }, { name: "compact", node: { name: "compact", type: "boolean" } }] }, schema: $ref(() => $m.PrefsSchema) }] }],
 };
 
+/** The inputs of putTag. */
+export interface PutTagRequest {
+  code: string;
+  slug?: string;
+  body: $m.Tag;
+}
+
+/** The responses of putTag. */
+export type PutTagResponse =
+  | { status: 200; body: $m.Tag };
+
+const putTagSpec: OperationSpec = {
+  method: "PUT",
+  path: "/tags/{code}",
+  params: [{ key: "code", name: "code", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "string", format: "pet-code" } }, { key: "slug", name: "slug", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "string", format: "slug" } }],
+  body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "body", schema: $ref(() => $m.TagSchema) }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.TagSchema) }],
+};
+
 /** The inputs of getSettings. */
 export interface GetSettingsRequest {
   petId: number;
@@ -927,6 +946,15 @@ export class Client {
    */
   echoPrefs(req: EchoPrefsRequest, call?: CallOptions): Promise<EchoPrefsResponse> {
     return send(this.#cfg, echoPrefsSpec, req, call) as Promise<EchoPrefsResponse>;
+  }
+
+  /**
+   * PUT /tags/{code}.
+   *
+   * A tag, with formats of the fixture's own, echoed back.
+   */
+  putTag(req: PutTagRequest, call?: CallOptions): Promise<PutTagResponse> {
+    return send(this.#cfg, putTagSpec, req, call) as Promise<PutTagResponse>;
   }
 
   /**

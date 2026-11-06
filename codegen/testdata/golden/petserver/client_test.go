@@ -18,6 +18,7 @@ import (
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
 	petclient "github.com/dheins/go-openapi/codegen/testdata/golden/petserver/client"
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/formats"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/client"
@@ -245,6 +246,18 @@ func TestClientResponses(t *testing.T) {
 	if r.Body.ID != 3 || r.Body.Note.Value.Text.Value != "likes <bones>" || r.Body.Vets.Value[0].Phone.Value != "555" ||
 		!slices.Equal(r.Body.Nicknames.Value, []string{"T-Rex"}) {
 		t.Errorf("XML card = %+v", r.Body)
+	}
+
+	tag := as[api.PutTag200JSONResponse](t)(c.PutTag(ctx, &api.PutTagRequest{Code: "ABC-1", Slug: oapi.Some("a-b"),
+		Body: model.Tag{Code: "ABC-1", Color: oapi.Some(formats.Color{G: 0x10})}}))
+	if tag.Body.Code != "ABC-1" || tag.Body.Color.Value != (formats.Color{G: 0x10}) {
+		t.Errorf("tag = %+v", tag.Body)
+	}
+	// The client checks the registered format before sending.
+	_, err := c.PutTag(ctx, &api.PutTagRequest{Code: "ABC-1", Slug: oapi.Some("No"), Body: model.Tag{Code: "ABC-1"}})
+	if invalid := (*client.InvalidRequest)(nil); !errors.As(err, &invalid) || len(invalid.Problem.Errors) != 1 ||
+		invalid.Problem.Errors[0].Parameter != "slug" || !strings.HasPrefix(invalid.Problem.Errors[0].Detail, "must be a valid slug") {
+		t.Errorf("invalid slug: %v", err)
 	}
 
 	family := model.Family{Name: "Rex", Litters: oapi.Some([]model.Family{{Name: "Pup", Scores: oapi.Some(map[string]int64{"speed": 3})}}),

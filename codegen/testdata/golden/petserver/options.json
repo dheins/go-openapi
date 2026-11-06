@@ -1,1 +1,1 @@
-{"operations": true}
+{"operations": true, "formats": {"color": "github.com/dheins/go-openapi/codegen/testdata/golden/petserver/formats.Color"}}

@@ -436,3 +436,12 @@ test("XML bodies", { skip }, async () => {
   });
   await rejects(client().putFamily({ petId: 1, body: { name: "a", mark: {} as Family["mark"] & object } }), InvalidRequestError);
 });
+
+test("formats", { skip }, async () => {
+  // pet-code and color have Go types on the server; slug is checked by
+  // what is registered, on both sides.
+  const tag = { code: "ABC-12", color: "#ff0080", slug: "big-dog" };
+  assert.deepEqual(await client({ validateResponses: true }).putTag({ code: "ABC-12", slug: "a-b", body: tag }), { status: 200, body: tag });
+  const bad = await rejects(client({ validateRequests: false }).putTag({ code: "abc", body: { code: "x" } }), UnexpectedResponseError);
+  assert.equal(bad.status, 400);
+});

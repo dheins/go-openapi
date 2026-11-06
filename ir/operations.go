@@ -768,6 +768,10 @@ func jsonType(r *Ref) string {
 func isScalar(r *Ref) bool {
 	switch r.Kind {
 	case Builtin:
+		if r.MappedFormat != "" && r.MappedJSON != "object" && r.MappedJSON != "array" && r.MappedJSON != "" {
+			// The type of a format is parsed and formatted as text.
+			return true
+		}
 		switch r.Name {
 		case "string", "int32", "int64", "float32", "float64", "bool", "time.Time", "oapi.Date":
 			return true

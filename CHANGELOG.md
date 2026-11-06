@@ -4,6 +4,12 @@
 
 ### Added
 
+- Formats of your own: `goapi generate -format-type format=type` and a
+  root `x-go-formats` map give a format a Go type (built-in formats
+  included), which may be a parameter; `oapi.RegisterFormat` registers a
+  check that `oapi.CheckFormat` uses, over a built-in one.
+- TypeScript clients check string formats as the Go runtime does, and
+  those registered with `registerFormat`.
 - XML for maps (an element per key), unions (one object with the
   properties of all their variants), recursive types and `nodeType: none`
   on objects, in servers and Go clients; `server.XMLNode` gains `Values`,
@@ -442,6 +448,12 @@
 
 ### Changed
 
+- Generated code checks every string format with `oapi.CheckFormat`, not
+  only the built-in ones, so that registered checks apply; unknown
+  formats are still accepted.
+- TypeScript clients now reject requests (and, with `validateResponses`,
+  responses) whose strings do not match their built-in format, such as a
+  `format: uri` that is not a URI.
 - Reading XML ignores undeclared attributes and elements named like a
   declared property or one of its elements, which could not be written
   back. A schema made only of `oneOf`, `anyOf` or `allOf` is an XML body

@@ -41,6 +41,22 @@ timeout:
 The type must encode and decode itself as the schema describes; its
 constraints are not checked by `Validate`.
 
+## `x-go-formats`
+
+At the root of the document: the Go types of formats, for every schema
+that has the format, as `x-go-type` gives one schema its type. A built-in
+format can be mapped too; `goapi generate -format-type` wins over it, and
+a schema's `x-go-type` wins over both.
+
+```yaml
+x-go-formats:
+  uuid: github.com/google/uuid.UUID
+  money: github.com/shopspring/decimal.Decimal
+```
+
+An entry that does not name a Go type is reported and not used. See the
+guide's [formats of your own](guide.md#formats-of-your-own).
+
 ## `x-enum-varnames`
 
 On a string or integer enum: names for the constants, in the order of

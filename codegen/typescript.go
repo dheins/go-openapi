@@ -136,9 +136,9 @@ var tsRuntimeExports = []struct {
 	typ  bool
 }{
 	{"ClientOptions", true}, {"CallOptions", true}, {"Credential", true}, {"BasicCredential", true},
-	{"ServerEvent", true}, {"NamedEvent", true}, {"Part", true}, {"ByteRange", true}, {"Problem", true}, {"Issue", true}, {"Schema", true},
+	{"ServerEvent", true}, {"NamedEvent", true}, {"Part", true}, {"ByteRange", true}, {"Problem", true}, {"Issue", true}, {"Schema", true}, {"FormatCheck", true},
 	{"InvalidRequestError", false}, {"UnexpectedResponseError", false}, {"InvalidResponseError", false},
-	{"NoCredentialsError", false}, {"validate", false}, {"encode", false},
+	{"NoCredentialsError", false}, {"validate", false}, {"encode", false}, {"registerFormat", false},
 }
 
 func (g *tsGen) index(hasClient bool) (string, error) {
@@ -310,6 +310,14 @@ func (g *tsGen) tsType(r *ir.Ref) string {
 	case ir.Nullable:
 		return g.tsType(r.Elem) + " | null"
 	case ir.Builtin:
+		switch r.MappedJSON {
+		case "string":
+			return "string"
+		case "integer", "number":
+			return "number"
+		case "boolean":
+			return "boolean"
+		}
 		switch r.Name {
 		case "string", "time.Time", "oapi.Date", "[]byte":
 			return "string"
@@ -440,6 +448,15 @@ func (g *tsGen) schema(r *ir.Ref) string {
 	case ir.Map:
 		return fmt.Sprintf(`{ kind: "map", values: %s`, g.schema(r.Elem)) + counts("Properties", c.MinProperties, c.MaxProperties) + " }"
 	case ir.Builtin:
+		if r.MappedFormat != "" {
+			// A Go type of the format: its values are checked by it.
+			switch r.MappedJSON {
+			case "string":
+				return `{ kind: "string", format: ` + jsString(r.MappedFormat) + ` }`
+			case "integer", "number", "boolean":
+				return fmt.Sprintf(`{ kind: %q }`, r.MappedJSON)
+			}
+		}
 		switch r.Name {
 		case "string", "time.Time", "oapi.Date", "[]byte":
 			format := c.Format

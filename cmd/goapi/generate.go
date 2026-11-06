@@ -7,9 +7,11 @@ import (
 	"go/token"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/dheins/go-openapi/codegen"
@@ -42,6 +44,8 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	pkg := fs.String("package", "", "package name (default: the base name of -out)")
 	optional := fs.String("optional", "wrapper", "optional properties as oapi.Optional (wrapper) or pointers (pointer)")
 	templates := fs.String("templates", "", "directory of *.tmpl files whose blocks replace the built-in ones (experimental)")
+	formats := formatFlag{}
+	fs.Var(formats, "format-type", "`format=type`: the Go type of a format's values, a predeclared type or an import path and type name, such as uuid=github.com/google/uuid.UUID (repeatable)")
 	var opsPkg, models, importPath, types *string
 	if operations {
 		usage := `subdirectory and package of the operations' request and response types ("" puts them in the server package)`
@@ -127,7 +131,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	irOpts := ir.Options{OptionalPointers: *optional == "pointer", Operations: operations}
+	irOpts := ir.Options{OptionalPointers: *optional == "pointer", Operations: operations, Formats: formats}
 	if paths != nil {
 		sel := &ir.Selection{Paths: splitList(*paths), Tags: splitList(*tags), ExcludePaths: splitList(*excludePaths), ExcludeTags: splitList(*excludeTags)}
 		if len(sel.Paths)+len(sel.Tags)+len(sel.ExcludePaths)+len(sel.ExcludeTags) > 0 {
@@ -245,4 +249,28 @@ func modulePath(gomod []byte) string {
 		}
 	}
 	return ""
+}
+
+// formatFlag collects -format-type flags: formats and the Go types of
+// their values.
+type formatFlag map[string]string
+
+func (f formatFlag) String() string {
+	var out []string
+	for _, k := range slices.Sorted(maps.Keys(f)) {
+		out = append(out, k+"="+f[k])
+	}
+	return strings.Join(out, ",")
+}
+
+func (f formatFlag) Set(v string) error {
+	format, typ, ok := strings.Cut(v, "=")
+	if !ok || format == "" {
+		return fmt.Errorf("%q is not format=type", v)
+	}
+	if why := ir.ValidGoType(typ); why != "" {
+		return errors.New(why)
+	}
+	f[format] = typ
+	return nil
 }

@@ -44,6 +44,10 @@ type Handler interface {
 	//
 	// A header parameter serialized as XML.
 	EchoPrefs(ctx context.Context, req *EchoPrefsRequest) (EchoPrefsResponse, error)
+	// PutTag handles PUT /tags/{code}.
+	//
+	// A tag, with formats of the fixture's own, echoed back.
+	PutTag(ctx context.Context, req *PutTagRequest) (PutTagResponse, error)
 	// GetSettings handles GET /pets/{petId}/settings.
 	//
 	// The pet's settings, with defaults for what is not set.

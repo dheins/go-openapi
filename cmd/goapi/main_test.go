@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -94,6 +95,32 @@ func TestGenerateModel(t *testing.T) {
 	}
 }
 
+func TestGenerateFormatTypes(t *testing.T) {
+	dir := t.TempDir()
+	doc := filepath.Join(dir, "openapi.yaml")
+	writeFile(t, doc, `openapi: 3.2.0
+info: {title: t, version: v}
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        at: {type: string, format: date-time}
+`)
+	var stdout, stderr bytes.Buffer
+	out := filepath.Join(dir, "m")
+	args := []string{"generate", "model", "-out", out, "-format-type", "uuid=github.com/google/uuid.UUID", "-format-type", "date-time=string", doc}
+	if code := run(args, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	a := readFile(t, filepath.Join(out, "a.go"))
+	if !strings.Contains(a, `"github.com/google/uuid"`) || !regexp.MustCompile(`ID\s+oapi.Optional\[uuid.UUID\]`).MatchString(a) ||
+		!regexp.MustCompile(`At\s+oapi.Optional\[string\]`).MatchString(a) {
+		t.Errorf("a.go:\n%s", a)
+	}
+}
+
 func TestGenerateReportsWarnings(t *testing.T) {
 	dir := t.TempDir()
 	doc := filepath.Join(dir, "openapi.yaml")
@@ -119,6 +146,8 @@ func TestGenerateModelErrors(t *testing.T) {
 		{"invalid document", []string{"generate", "model", "-out", t.TempDir(), "-package", "m", "../../validate/testdata/semantic.yaml"}, exitInvalid},
 		{"bad package name", []string{"generate", "model", "-out", t.TempDir(), "-package", "not-valid", "../../testdata/oai/v3.0/petstore.yaml"}, exitFailure},
 		{"bad optional style", []string{"generate", "model", "-optional", "maybe", "x.yaml"}, exitFailure},
+		{"bad format type", []string{"generate", "model", "-format-type", "uuid", "x.yaml"}, exitFailure},
+		{"bad format Go type", []string{"generate", "model", "-format-type", "uuid=a b", "x.yaml"}, exitFailure},
 		{"unknown target", []string{"generate", "client", "x.yaml"}, exitFailure},
 		{"no document", []string{"generate", "model"}, exitFailure},
 	}
