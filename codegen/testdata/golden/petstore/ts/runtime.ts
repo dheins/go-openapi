@@ -373,6 +373,730 @@ export function encode(schema: Schema, value: unknown, direction: Direction): un
   }
 }
 
+// ---- XML -----------------------------------------------------------------
+
+/** How a value is written as XML, as the Go server's XMLNode describes it:
+ * an element (or an attribute, or the text of its parent), and what is
+ * inside it. */
+export interface XMLNode {
+  readonly name?: string;
+  readonly namespace?: string;
+  readonly prefix?: string;
+  readonly kind?: "attribute" | "text" | "cdata";
+  readonly type: "string" | "integer" | "number" | "boolean" | "object" | "array" | "map" | "any";
+  /** An array's items are inside an element of their own; otherwise
+   * they are elements of the array's parent. */
+  readonly wrapped?: boolean;
+  readonly items?: XMLNode;
+  /** The declared properties of an object, by JSON name, in order. */
+  readonly properties?: readonly XMLProperty[];
+  /** The values of a map, each an element named by its key. */
+  readonly values?: XMLNode;
+  /** An object without an element of its own: its properties are in its
+   * parent's element. */
+  readonly inline?: boolean;
+  /** The shape of the root's shapes this node has, named as it is. */
+  readonly ref?: string;
+  readonly shapes?: Readonly<Record<string, XMLNode>>;
+}
+
+export interface XMLProperty {
+  readonly name: string;
+  readonly node: XMLNode;
+}
+
+/** A problem with an XML document, at the JSON pointer of the value. */
+export class XMLError extends Error {
+  readonly pointer: string;
+  constructor(pointer: string, message: string) {
+    super(pointer === "" ? message : `${pointer}: ${message}`);
+    this.name = "XMLError";
+    this.pointer = pointer;
+  }
+}
+
+const xsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
+const xmlNamespace = "http://www.w3.org/XML/1998/namespace";
+const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>\n';
+// maxXMLDepth bounds the nesting of elements, as the Go server's does.
+const maxXMLDepth = 256;
+
+interface XMLName {
+  readonly space: string;
+  readonly local: string;
+}
+
+interface XMLElement {
+  readonly name: XMLName;
+  readonly attrs: readonly (XMLName & { readonly value: string })[];
+  /** Child elements and character data (text and CDATA), in order. */
+  readonly children: (XMLElement | string)[];
+}
+
+function invalidXML(message: string): XMLError {
+  return new XMLError("", "invalid XML: " + message);
+}
+
+const entities: Readonly<Record<string, string>> = { lt: "<", gt: ">", amp: "&", apos: "'", quot: '"' };
+
+// unescapeXML replaces the references of text; only the predefined
+// entities and character references are known.
+function unescapeXML(s: string): string {
+  s = s.replace(/\r\n?/g, "\n");
+  if (!s.includes("&")) {
+    return s;
+  }
+  return s.replace(/&([^;&]*);?/g, (ref, name: string) => {
+    if (!ref.endsWith(";")) {
+      throw invalidXML("invalid character entity " + ref);
+    }
+    const known = entities[name];
+    if (known !== undefined) {
+      return known;
+    }
+    const m = /^#(?:x([0-9a-fA-F]+)|([0-9]+))$/.exec(name);
+    const code = m === null ? NaN : m[1] !== undefined ? parseInt(m[1], 16) : parseInt(m[2]!, 10);
+    if (!(code === 0x9 || code === 0xa || code === 0xd || (code >= 0x20 && code <= 0xd7ff) || (code >= 0xe000 && code <= 0x10ffff && (code < 0xfffe || code > 0xffff)))) {
+      throw invalidXML("invalid character entity " + ref);
+    }
+    return String.fromCodePoint(code);
+  });
+}
+
+const namePattern = /[\p{L}_:][\p{L}\p{N}._:\-·]*/uy;
+
+// parseXML reads a document into the tree of its root element, its names
+// resolved to namespaces. Comments, processing instructions and the
+// document type are skipped.
+function parseXML(doc: string): XMLElement {
+  let i = doc.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const stack: { element: XMLElement; raw: string; scope: Map<string, string> }[] = [];
+  let root: XMLElement | undefined;
+  // at matches a sticky pattern at i.
+  const at = (re: RegExp): RegExpExecArray | null => {
+    re.lastIndex = i;
+    return re.exec(doc);
+  };
+  const expect = (s: string) => {
+    const end = doc.indexOf(s, i);
+    if (end < 0) {
+      throw invalidXML("unexpected EOF");
+    }
+    return end;
+  };
+  const resolveName = (raw: string, scope: Map<string, string>, attribute: boolean): XMLName => {
+    const colon = raw.indexOf(":");
+    if (colon < 0) {
+      return { space: attribute ? "" : (scope.get("") ?? ""), local: raw };
+    }
+    const prefix = raw.slice(0, colon);
+    const space = prefix === "xmlns" ? "xmlns" : prefix === "xml" ? xmlNamespace : (scope.get(prefix) ?? prefix);
+    return { space, local: raw.slice(colon + 1) };
+  };
+  while (i < doc.length) {
+    const lt = doc.indexOf("<", i);
+    const chars = doc.slice(i, lt < 0 ? doc.length : lt);
+    if (chars !== "") {
+      const top = stack[stack.length - 1];
+      if (top !== undefined) {
+        top.element.children.push(unescapeXML(chars));
+      } else if (chars.trim() !== "") {
+        throw invalidXML(root === undefined ? "text before the root element" : "data after the root element");
+      }
+    }
+    if (lt < 0) {
+      break;
+    }
+    i = lt;
+    if (doc.startsWith("<!--", i)) {
+      i = expect("-->") + 3;
+    } else if (doc.startsWith("<?", i)) {
+      i = expect("?>") + 2;
+    } else if (doc.startsWith("<![CDATA[", i)) {
+      const top = stack[stack.length - 1];
+      if (top === undefined) {
+        throw invalidXML("CDATA outside the root element");
+      }
+      const end = expect("]]>");
+      top.element.children.push(doc.slice(i + 9, end).replace(/\r\n?/g, "\n"));
+      i = end + 3;
+    } else if (doc.startsWith("<!", i)) {
+      // A document type, which may have an internal subset in brackets.
+      let depth = 0;
+      let j = i + 2;
+      for (; j < doc.length; j++) {
+        const c = doc[j];
+        if (c === "[") depth++;
+        else if (c === "]") depth--;
+        else if (c === ">" && depth <= 0) break;
+      }
+      if (j >= doc.length) {
+        throw invalidXML("unexpected EOF");
+      }
+      i = j + 1;
+    } else if (doc.startsWith("</", i)) {
+      const end = expect(">");
+      const raw = doc.slice(i + 2, end).trim();
+      const top = stack.pop();
+      if (top === undefined || top.raw !== raw) {
+        throw invalidXML(top === undefined ? `unexpected end element </${raw}>` : `element <${top.raw}> closed by </${raw}>`);
+      }
+      i = end + 1;
+    } else {
+      if (root !== undefined && stack.length === 0) {
+        throw invalidXML("data after the root element");
+      }
+      i++;
+      const m = at(namePattern);
+      if (m === null) {
+        throw invalidXML("invalid element name");
+      }
+      const raw = m[0];
+      i += raw.length;
+      const rawAttrs: [string, string][] = [];
+      let selfClosing = false;
+      for (;;) {
+        const ws = at(/\s*/y)![0].length;
+        i += ws;
+        if (doc.startsWith("/>", i)) {
+          selfClosing = true;
+          i += 2;
+          break;
+        }
+        if (doc.startsWith(">", i)) {
+          i++;
+          break;
+        }
+        if (i >= doc.length) {
+          throw invalidXML("unexpected EOF");
+        }
+        const a = at(namePattern);
+        if (a === null || (ws === 0 && rawAttrs.length > 0)) {
+          throw invalidXML("invalid attribute in element <" + raw + ">");
+        }
+        i += a[0].length;
+        const eq = at(/\s*=\s*(["'])/y);
+        if (eq === null) {
+          throw invalidXML("attribute " + a[0] + " has no value");
+        }
+        i += eq[0].length;
+        const close = doc.indexOf(eq[1]!, i);
+        if (close < 0) {
+          throw invalidXML("unexpected EOF");
+        }
+        const value = doc.slice(i, close);
+        if (value.includes("<")) {
+          throw invalidXML("unescaped < in attribute " + a[0]);
+        }
+        if (rawAttrs.some(([n]) => n === a[0])) {
+          throw invalidXML("attribute " + a[0] + " is repeated");
+        }
+        rawAttrs.push([a[0], unescapeXML(value)]);
+        i = close + 1;
+      }
+      const scope = new Map(stack[stack.length - 1]?.scope ?? []);
+      for (const [n, v] of rawAttrs) {
+        if (n === "xmlns") {
+          scope.set("", v);
+        } else if (n.startsWith("xmlns:")) {
+          scope.set(n.slice(6), v);
+        }
+      }
+      const element: XMLElement = {
+        name: resolveName(raw, scope, false),
+        attrs: rawAttrs.map(([n, value]) => ({ ...resolveName(n, scope, true), value })),
+        children: [],
+      };
+      const parent = stack[stack.length - 1];
+      if (parent !== undefined) {
+        parent.element.children.push(element);
+      } else {
+        root = element;
+      }
+      if (!selfClosing) {
+        // Deeper documents fail when read; this keeps the tree bounded.
+        if (stack.length > maxXMLDepth * 2) {
+          throw invalidXML("nested too deeply");
+        }
+        stack.push({ element, raw, scope });
+      }
+    }
+  }
+  if (stack.length > 0) {
+    throw invalidXML("unexpected EOF");
+  }
+  if (root === undefined) {
+    throw new XMLError("", "expected an XML document, got nothing");
+  }
+  return root;
+}
+
+// resolveShape returns the node n stands for: n, or the shape it refers
+// to (which has no name of its own), named as n is.
+function resolveShape(shapes: Readonly<Record<string, XMLNode>> | undefined, n: XMLNode): XMLNode {
+  const shape = n.ref === undefined ? undefined : shapes?.[n.ref];
+  if (shape === undefined) {
+    return n;
+  }
+  const { name, namespace, prefix, kind, inline } = n;
+  return {
+    ...shape,
+    ...(name !== undefined && { name }),
+    ...(namespace !== undefined && { namespace }),
+    ...(prefix !== undefined && { prefix }),
+    ...(kind !== undefined && { kind }),
+    ...(inline !== undefined && { inline }),
+  };
+}
+
+function nameMatches(name: XMLName, n: XMLNode | undefined): boolean {
+  return n !== undefined && name.local === (n.name ?? "") && (n.namespace === undefined || name.space === n.namespace);
+}
+
+function mismatch(n: XMLNode, got: XMLName): string {
+  const want = `<${n.name ?? ""}>` + (n.namespace !== undefined ? " in namespace " + n.namespace : "");
+  const have = `<${got.local}>` + (got.space !== "" ? " in namespace " + got.space : "");
+  return `expected element ${want}, got ${have}`;
+}
+
+function isXMLName(s: string): boolean {
+  return /^[\p{L}_][\p{L}\p{Nd}._-]*$/u.test(s) && !s.toLowerCase().startsWith("xml");
+}
+
+// xmlScalar converts text to the JSON type of a node: numbers and booleans
+// where they parse, around white space; anything else stays text, for
+// validation to report.
+function xmlScalar(text: string, type: string): unknown {
+  const t = text.trim();
+  switch (type) {
+    case "integer":
+      if (/^[+-]?[0-9]+$/.test(t) && Number.isSafeInteger(Number(t))) {
+        return Number(t);
+      }
+      break;
+    case "number":
+      if (/^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$/.test(t) && Number.isFinite(Number(t))) {
+        return Number(t);
+      }
+      break;
+    case "boolean":
+      if (t === "true" || t === "false") {
+        return t === "true";
+      }
+      break;
+  }
+  return text;
+}
+
+function isNil(e: XMLElement): boolean {
+  const a = e.attrs.find((a) => a.space === xsiNamespace && a.local === "nil");
+  return a !== undefined && (a.value === "true" || a.value === "1");
+}
+
+function skippedAttribute(a: XMLName): boolean {
+  return a.space === "xmlns" || a.local === "xmlns" || a.space === xsiNamespace;
+}
+
+// A member of an object being read: its value, or the items of an array.
+interface Member {
+  value?: unknown;
+  items?: unknown[];
+}
+
+function membersObject(members: Map<string, Member>): Values {
+  const out: Values = {};
+  for (const k of [...members.keys()].sort()) {
+    const m = members.get(k)!;
+    out[k] = m.items !== undefined ? m.items : m.value;
+  }
+  return out;
+}
+
+/** An object being read, and the inline objects among its properties,
+ * whose attributes and elements are its own. */
+interface ObjectState {
+  readonly node: XMLNode;
+  readonly members: Map<string, Member>;
+  readonly inlines: Map<string, ObjectState>;
+}
+
+/** Converts an XML document to the JSON value root describes, as the Go
+ * server does: numbers and booleans where they parse, undeclared
+ * attributes and elements as strings, objects and arrays, xsi:nil
+ * elements as null. Throws an XMLError. */
+export function fromXML(doc: string, root: XMLNode): unknown {
+  const shapes = root.shapes;
+  const el = parseXML(doc);
+  if (!nameMatches(el.name, root)) {
+    throw new XMLError("", mismatch(root, el.name));
+  }
+  const node = resolveShape(shapes, root);
+
+  const childElements = (e: XMLElement, at: string): XMLElement[] => {
+    const out: XMLElement[] = [];
+    for (const c of e.children) {
+      if (typeof c !== "string") {
+        out.push(c);
+      } else if (c.trim() !== "") {
+        throw new XMLError(at, `unexpected text in element <${e.name.local}>`);
+      }
+    }
+    return out;
+  };
+  const textOf = (e: XMLElement, at: string): string => {
+    let s = "";
+    for (const c of e.children) {
+      if (typeof c !== "string") {
+        throw new XMLError(at, `expected text, got element <${c.name.local}>`);
+      }
+      s += c;
+    }
+    return s;
+  };
+  const element = (e: XMLElement, n: XMLNode, at: string, depth: number): unknown => {
+    if (depth > maxXMLDepth) {
+      throw new XMLError(at, "XML nested too deeply");
+    }
+    if (isNil(e)) {
+      return null;
+    }
+    n = resolveShape(shapes, n);
+    switch (n.type) {
+      case "object":
+        return object(e, n, at, depth);
+      case "map": {
+        const members = new Map<string, Member>();
+        for (const c of childElements(e, at)) {
+          members.set(c.name.local, { value: element(c, n.values!, child(at, c.name.local), depth + 1) });
+        }
+        return membersObject(members);
+      }
+      case "array":
+        return wrapped(e, n, at, depth);
+      case "any":
+        return anyElement(e, at, depth);
+    }
+    return xmlScalar(textOf(e, at), n.type);
+  };
+  const wrapped = (e: XMLElement, n: XMLNode, at: string, depth: number): unknown[] =>
+    childElements(e, at).map((c, i) => {
+      if (!nameMatches(c.name, n.items)) {
+        throw new XMLError(child(at, i), mismatch(n.items!, c.name));
+      }
+      return element(c, n.items!, child(at, i), depth + 1);
+    });
+  const anyElement = (e: XMLElement, at: string, depth: number): unknown => {
+    if (depth > maxXMLDepth) {
+      throw new XMLError(at, "XML nested too deeply");
+    }
+    if (isNil(e)) {
+      return null;
+    }
+    const members = new Map<string, Member>();
+    for (const a of e.attrs) {
+      if (!skippedAttribute(a) && isXMLName(a.local)) {
+        members.set(a.local, { value: a.value });
+      }
+    }
+    let chars = "";
+    for (const c of e.children) {
+      if (typeof c === "string") {
+        chars += c;
+      } else {
+        undeclared(members, c, at, depth);
+      }
+    }
+    if (members.size === 0) {
+      return chars;
+    }
+    if (chars.trim() !== "") {
+      members.set("#text", { value: chars.trim() });
+    }
+    return membersObject(members);
+  };
+  const undeclared = (members: Map<string, Member>, c: XMLElement, at: string, depth: number): void => {
+    const name = c.name.local;
+    if (!isXMLName(name)) {
+      return;
+    }
+    const value = anyElement(c, child(at, name), depth + 1);
+    const m = members.get(name);
+    if (m === undefined) {
+      members.set(name, { value });
+    } else if (m.items !== undefined) {
+      m.items.push(value);
+    } else {
+      members.set(name, { items: [m.value, value] });
+    }
+  };
+  const newState = (n: XMLNode): ObjectState => {
+    const st: ObjectState = { node: n, members: new Map(), inlines: new Map() };
+    for (const p of n.properties ?? []) {
+      const pn = resolveShape(shapes, p.node);
+      if (pn.inline && pn.type === "object") {
+        st.inlines.set(p.name, newState(pn));
+      }
+    }
+    return st;
+  };
+  const attribute = (st: ObjectState, a: XMLName & { value: string }): boolean => {
+    const p = (st.node.properties ?? []).find((p) => p.node.kind === "attribute" && nameMatches(a, p.node));
+    if (p !== undefined) {
+      st.members.set(p.name, { value: xmlScalar(a.value, p.node.type) });
+      return true;
+    }
+    return [...st.inlines.values()].some((sub) => attribute(sub, a));
+  };
+  // declares reports whether a name is a property of the object (or of
+  // its inline objects) or an element one is read from: an undeclared
+  // attribute or element of that name could not be written back.
+  const declares = (st: ObjectState, name: string): boolean =>
+    (st.node.properties ?? []).some((p) => {
+      const n = resolveShape(shapes, p.node);
+      return p.name === name || (n.kind === undefined && n.name === name) || (n.type === "array" && !n.wrapped && n.items?.name === name);
+    }) || [...st.inlines.values()].some((sub) => declares(sub, name));
+  const claim = (st: ObjectState, c: XMLElement, at: string, depth: number): boolean => {
+    for (const p of st.node.properties ?? []) {
+      const n = resolveShape(shapes, p.node);
+      if (n.kind !== undefined || n.inline) {
+        continue;
+      }
+      if (n.type === "array" && !n.wrapped) {
+        if (!nameMatches(c.name, n.items)) {
+          continue;
+        }
+        let m = st.members.get(p.name);
+        if (m?.items === undefined) {
+          m = { items: [] };
+          st.members.set(p.name, m);
+        }
+        m.items!.push(element(c, n.items!, child(child(at, p.name), m.items!.length), depth + 1));
+        return true;
+      }
+      if (nameMatches(c.name, n)) {
+        st.members.set(p.name, { value: element(c, n, child(at, p.name), depth + 1) });
+        return true;
+      }
+    }
+    for (const [name, sub] of st.inlines) {
+      if (claim(sub, c, child(at, name), depth)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const stateValue = (st: ObjectState): Values => {
+    for (const [name, sub] of st.inlines) {
+      const v = stateValue(sub);
+      if (sub.members.size > 0) {
+        st.members.set(name, { value: v });
+      }
+    }
+    return membersObject(st.members);
+  };
+  const object = (e: XMLElement, n: XMLNode, at: string, depth: number): Values => {
+    const st = newState(n);
+    const text = (n.properties ?? []).find((p) => p.node.kind === "text" || p.node.kind === "cdata");
+    for (const a of e.attrs) {
+      if (skippedAttribute(a) || attribute(st, a)) {
+        continue;
+      }
+      if (isXMLName(a.local) && !declares(st, a.local)) {
+        st.members.set(a.local, { value: a.value });
+      }
+    }
+    let chars = "";
+    for (const c of e.children) {
+      if (typeof c === "string") {
+        chars += c;
+      } else if (!claim(st, c, at, depth) && !declares(st, c.name.local)) {
+        undeclared(st.members, c, at, depth);
+      }
+    }
+    if (text !== undefined) {
+      st.members.set(text.name, { value: xmlScalar(chars, text.node.type) });
+    } else if (chars.trim() !== "") {
+      throw new XMLError(at, `unexpected text in element <${e.name.local}>`);
+    }
+    return stateValue(st);
+  };
+
+  return node.type === "array" ? wrapped(el, node, "", 0) : element(el, node, "", 0);
+}
+
+// escapeXML escapes text as Go's xml.EscapeText does, so both write the
+// same documents.
+function escapeXML(s: string): string {
+  return s.replace(/[&<>"'\t\n\r]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&#34;", "'": "&#39;", "\t": "&#x9;", "\n": "&#xA;", "\r": "&#xD;" })[c]!);
+}
+
+/** Writes a JSON value, encoded for its direction, as the XML document
+ * root describes: properties in the order root lists them, then
+ * undeclared ones by name; null elements with xsi:nil. */
+export function toXML(value: unknown, root: XMLNode): string {
+  const shapes = root.shapes;
+  const namespaces = new Map<string, string>();
+  const seen = new Set<XMLNode>();
+  const collect = (n: XMLNode | undefined): void => {
+    if (n === undefined || seen.has(n)) {
+      return;
+    }
+    seen.add(n);
+    if (n.prefix !== undefined && n.namespace !== undefined) {
+      namespaces.set(n.prefix, n.namespace);
+    }
+    collect(n.items);
+    collect(n.values);
+    for (const p of n.properties ?? []) {
+      collect(p.node);
+    }
+    for (const s of Object.values(n.shapes ?? {})) {
+      collect(s);
+    }
+  };
+  collect(root);
+  let out = xmlHeader;
+  const qualified = (name: string, n: XMLNode | undefined) => (n?.prefix !== undefined ? `${n.prefix}:${name}` : name);
+  const open = (name: string, n: XMLNode | undefined, isRoot: boolean) => {
+    out += "<" + qualified(name, n);
+    if (isRoot) {
+      for (const prefix of [...namespaces.keys()].sort()) {
+        out += ` xmlns:${prefix}="${escapeXML(namespaces.get(prefix)!)}"`;
+      }
+    }
+    if (n?.namespace !== undefined && n.prefix === undefined) {
+      out += ` xmlns="${escapeXML(n.namespace)}"`;
+    }
+  };
+  const close = (name: string, n: XMLNode | undefined) => {
+    out += `</${qualified(name, n)}>`;
+  };
+  const scalar = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "");
+  const text = (v: unknown, cdata: boolean) => {
+    const s = scalar(v);
+    out += cdata ? "<![CDATA[" + s.replaceAll("]]>", "]]]]><![CDATA[>") + "]]>" : escapeXML(s);
+  };
+  const element = (name: string, node: XMLNode | undefined, v: unknown, isRoot: boolean): void => {
+    const n = node === undefined ? undefined : resolveShape(shapes, node);
+    if (v === null) {
+      open(name, n, isRoot);
+      out += ` xmlns:xsi="${xsiNamespace}" xsi:nil="true"/>`;
+      return;
+    }
+    if (n?.type === "array" || (n === undefined && Array.isArray(v))) {
+      open(name, n, isRoot);
+      out += ">";
+      for (const item of Array.isArray(v) ? v : []) {
+        element(n?.items?.name ?? name, n?.items, item, false);
+      }
+      close(name, n);
+      return;
+    }
+    if (!isObject(v)) {
+      open(name, n, isRoot);
+      out += ">";
+      text(v, n?.kind === "cdata");
+      close(name, n);
+      return;
+    }
+    if (n?.type === "map") {
+      open(name, n, isRoot);
+      out += ">";
+      for (const k of Object.keys(v).sort()) {
+        if (!isXMLName(k)) {
+          throw new Error(`key ${JSON.stringify(k)} cannot be written as an XML element`);
+        }
+        element(k, n.values, v[k], false);
+      }
+      close(name, n);
+      return;
+    }
+    open(name, n, isRoot);
+    attributes(n, v);
+    out += ">";
+    content(n, v);
+    close(name, n);
+  };
+  const attributes = (n: XMLNode | undefined, obj: Values): void => {
+    for (const p of n?.properties ?? []) {
+      const v = obj[p.name];
+      if (v === undefined || v === null) {
+        continue;
+      }
+      const pn = resolveShape(shapes, p.node);
+      if (pn.inline) {
+        if (isObject(v)) {
+          attributes(pn, v);
+        }
+        continue;
+      }
+      if (pn.kind !== "attribute") {
+        continue;
+      }
+      if (isObject(v) || Array.isArray(v)) {
+        throw new Error(`attribute ${pn.name ?? ""} is not a simple value`);
+      }
+      out += ` ${qualified(pn.name ?? "", pn)}="${escapeXML(scalar(v))}"`;
+    }
+  };
+  const content = (n: XMLNode | undefined, obj: Values): void => {
+    const props = n?.properties ?? [];
+    const declared = new Set(props.map((p) => p.name));
+    for (const p of props) {
+      const v = obj[p.name];
+      if (v === undefined) {
+        continue;
+      }
+      const pn = resolveShape(shapes, p.node);
+      if (pn.inline) {
+        if (isObject(v)) {
+          content(pn, v);
+        }
+      } else if (pn.kind === "attribute") {
+        continue;
+      } else if (pn.kind === "text" || pn.kind === "cdata") {
+        if (v !== null) {
+          text(v, pn.kind === "cdata");
+        }
+      } else if (pn.type === "array" && !pn.wrapped) {
+        for (const item of Array.isArray(v) ? v : []) {
+          element(pn.items!.name ?? "", pn.items, item, false);
+        }
+      } else {
+        element(pn.name ?? "", pn, v, false);
+      }
+    }
+    // The text of an undescribed element, as fromXML reads it.
+    if (obj["#text"] !== undefined && !declared.has("#text")) {
+      text(obj["#text"], false);
+    }
+    for (const k of Object.keys(obj).sort()) {
+      if (declared.has(k) || k === "#text" || obj[k] === undefined) {
+        continue;
+      }
+      if (!isXMLName(k)) {
+        throw new Error(`property ${JSON.stringify(k)} cannot be written as an XML element`);
+      }
+      const v = obj[k];
+      if (Array.isArray(v)) {
+        for (const item of v) {
+          element(k, undefined, item, false);
+        }
+      } else {
+        element(k, undefined, v, false);
+      }
+    }
+  };
+  element(root.name ?? "", root, value, true);
+  return out;
+}
+
+// xmlContent writes a parameter or header value as XML: the element alone,
+// without the declaration's line.
+function xmlContent(v: unknown, root: XMLNode): string {
+  return toXML(v, root).slice(xmlHeader.length);
+}
+
 // ---- HTTP ----------------------------------------------------------------
 
 /** How a client sends requests. */
@@ -414,20 +1138,24 @@ export interface ParamSpec {
   readonly explode: boolean;
   readonly shape: "scalar" | "array" | "object";
   /** The parameter is serialized with a media type (content), not in a
-   * style: as JSON, as text, or as form fields. */
+   * style: as JSON, as text, as form fields, or as XML. */
   readonly content?: Content;
+  /** How the value is written as XML, for XML content. */
+  readonly xml?: XMLNode;
   readonly required?: boolean;
   readonly schema: Schema;
 }
 
 /** How a parameter or header with content is written. */
-export type Content = "json" | "text" | "form";
+export type Content = "json" | "text" | "form" | "xml";
 
 export interface BodyMediaSpec {
   readonly mediaType: string;
-  readonly kind: "json" | "form" | "multipart" | "parts" | "partstream" | "text" | "binary" | "jsonl" | "sse";
+  readonly kind: "json" | "xml" | "form" | "multipart" | "parts" | "partstream" | "text" | "binary" | "jsonl" | "sse";
   /** The request property holding a body of this media type. */
   readonly key: string;
+  /** How an XML body is written. */
+  readonly xml?: XMLNode;
   /** The schema of the body, or of each item of a stream. */
   readonly schema: Schema;
   /** How the data of server-sent events is typed, if it is. */
@@ -483,6 +1211,7 @@ export interface HeaderSpec {
   readonly object?: boolean;
   readonly explode?: boolean;
   readonly content?: Content;
+  readonly xml?: XMLNode;
   readonly schema: Schema;
 }
 
@@ -490,8 +1219,10 @@ export interface ResponseSpec {
   /** "200", a range such as "4XX", or "default". */
   readonly status: string;
   readonly mediaType?: string;
-  readonly kind?: "json" | "text" | "binary" | "byteranges" | "parts" | "partstream" | "jsonl" | "sse";
+  readonly kind?: "json" | "xml" | "text" | "binary" | "byteranges" | "parts" | "partstream" | "jsonl" | "sse";
   readonly schema?: Schema;
+  /** How an XML body is read. */
+  readonly xml?: XMLNode;
   /** The parts of positional parts. */
   readonly parts?: PartsSpec;
   /** The schema of each item, for JSON Lines. */
@@ -769,8 +1500,8 @@ function simple(p: ParamSpec, v: unknown, item: (s: string) => string): string {
 
 // contentText writes the value of a parameter with content as its media
 // type has it.
-function contentText(content: Content, v: unknown): string {
-  switch (content) {
+function contentText(p: ParamSpec, v: unknown): string {
+  switch (p.content) {
     case "text":
       return text(v);
     case "form": {
@@ -778,13 +1509,15 @@ function contentText(content: Content, v: unknown): string {
       fields(v, "", out);
       return new URLSearchParams(out).toString();
     }
+    case "xml":
+      return xmlContent(encode(p.schema, v, "request"), p.xml!);
   }
   return JSON.stringify(v);
 }
 
 function pathValue(p: ParamSpec, v: unknown): string {
   if (p.content !== undefined) {
-    return unreserved(contentText(p.content, v));
+    return unreserved(contentText(p, v));
   }
   switch (p.style) {
     case "label":
@@ -815,7 +1548,7 @@ function pathValue(p: ParamSpec, v: unknown): string {
 
 function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown): void {
   if (p.content !== undefined) {
-    q.append(p.name, contentText(p.content, v));
+    q.append(p.name, contentText(p, v));
     return;
   }
   if (p.style === "deepObject") {
@@ -880,8 +1613,8 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
         queryValue(b.query, p, v);
         break;
       case "querystring":
-        if (p.content === "json") {
-          b.rawQuery = encodeURIComponent(JSON.stringify(v));
+        if (p.content === "json" || p.content === "xml") {
+          b.rawQuery = encodeURIComponent(contentText(p, v));
         } else {
           const out: [string, string][] = [];
           fields(v, "", out);
@@ -893,11 +1626,11 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
       case "header":
         // Only the items of a list are quoted: a scalar, such as a Range
         // of several ranges, is sent as it is, as the Go client does.
-        b.headers.set(p.name, p.content !== undefined ? contentText(p.content, v) : p.shape === "scalar" ? text(v) : simple(p, v, quoteItem));
+        b.headers.set(p.name, p.content !== undefined ? contentText(p, v) : p.shape === "scalar" ? text(v) : simple(p, v, quoteItem));
         break;
       case "cookie":
         if (p.content !== undefined) {
-          b.cookies.push(`${p.name}=${encodeURIComponent(contentText(p.content, v))}`);
+          b.cookies.push(`${p.name}=${encodeURIComponent(contentText(p, v))}`);
         } else if (p.shape === "array" && Array.isArray(v) && p.explode) {
           for (const x of v) {
             b.cookies.push(`${p.name}=${encodeURIComponent(text(x))}`);
@@ -941,6 +1674,10 @@ function buildBody(op: OperationSpec, req: Values, b: Built, checkItems: boolean
     case "json":
       b.headers.set("Content-Type", media.mediaType);
       b.body = JSON.stringify(encode(media.schema, v, "request"));
+      break;
+    case "xml":
+      b.headers.set("Content-Type", media.mediaType);
+      b.body = toXML(encode(media.schema, v, "request"), media.xml!);
       break;
     case "form": {
       const out: [string, string][] = [];
@@ -1538,6 +2275,8 @@ function headerValue(h: HeaderSpec, raw: string): unknown {
       return scalarValue(h.schema, raw);
     case "form":
       return formValue(h.schema, raw);
+    case "xml":
+      return withDefaults(h.schema, fromXML(raw, h.xml!));
   }
   return h.array ? raw.split(",").map((s) => scalarValue(h.schema, s.trim())) : scalarValue(h.schema, raw.trim());
 }
@@ -1770,10 +2509,12 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
     out["headers"] = headers;
   }
   switch (spec.kind) {
-    case "json": {
+    case "json":
+    case "xml": {
       let body: unknown;
       try {
-        body = withDefaults(spec.schema, JSON.parse(await resp.text()));
+        const raw = await resp.text();
+        body = withDefaults(spec.schema, spec.kind === "xml" ? fromXML(raw, spec.xml!) : JSON.parse(raw));
       } catch (e) {
         throw new InvalidResponseError(resp.status, String(e));
       }

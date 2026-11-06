@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,8 +14,8 @@ import (
 // tsBodyKinds are the request body kinds the TypeScript runtime sends,
 // and tsResponseKinds the response kinds it reads.
 var (
-	tsBodyKinds     = []string{"json", "form", "multipart", "parts", "partstream", "text", "binary", "jsonl", "sse"}
-	tsResponseKinds = []string{"", "json", "text", "binary", "byteranges", "parts", "partstream", "jsonl", "sse"}
+	tsBodyKinds     = []string{"json", "xml", "form", "multipart", "parts", "partstream", "text", "binary", "jsonl", "sse"}
+	tsResponseKinds = []string{"", "json", "xml", "text", "binary", "byteranges", "parts", "partstream", "jsonl", "sse"}
 )
 
 // tsScheme is a security scheme, as the Credentials of client.ts hold it:
@@ -438,7 +439,7 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 			fields = append(fields, "contentType: "+jsString(r.MediaType))
 		}
 		switch r.Kind {
-		case "json":
+		case "json", "xml":
 			fields = append(fields, "body: "+g.tsType(r.Body))
 		case "text":
 			fields = append(fields, "body: string")
@@ -459,7 +460,7 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 			}
 			fields = append(fields, "events: AsyncIterable<"+ev+">")
 		}
-		if headers := tsHeaders(r); len(headers) > 0 {
+		if headers := r.Headers; len(headers) > 0 {
 			var hs []string
 			for _, h := range headers {
 				q := "?"
@@ -495,19 +496,6 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		}
 		g.warnings = append(g.warnings, fmt.Sprintf("%s: the TypeScript client cannot send %s bodies yet", o.Name, strings.Join(left, ", ")))
 	}
-	for _, p := range o.Params {
-		if p.ContentKind == "xml" {
-			g.warnings = append(g.warnings, fmt.Sprintf("%s: the TypeScript client cannot send parameters with XML content yet (%s); the operation is left out", o.Name, p.Name))
-			return "", false
-		}
-	}
-	for _, r := range o.Responses {
-		for _, h := range r.Headers {
-			if h.ContentKind == "xml" {
-				g.warnings = append(g.warnings, fmt.Sprintf("%s: the TypeScript client cannot read headers with XML content yet; header %s of response %s is left out", o.Name, h.Name, r.Status))
-			}
-		}
-	}
 	if responses := tsResponses(o); len(responses) < len(o.Responses) {
 		for _, r := range o.Responses {
 			if !slices.Contains(tsResponseKinds, r.Kind) {
@@ -530,6 +518,9 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 			jsString(keys[p]), jsString(p.Name), p.In, jsString(p.Style), p.Explode, shape)
 		if p.Content != "" {
 			s += fmt.Sprintf(", content: %q", p.ContentKind)
+		}
+		if p.XML != nil {
+			s += ", xml: " + tsXMLNode(p.XML)
 		}
 		if p.Required && p.Default == "" {
 			s += ", required: true"
@@ -554,6 +545,9 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 				// The parts' own schemas check them.
 				s, extra = `{ kind: "any" }`, ", parts: "+g.partsSpec(m.Field.Value, m.Parts)
 			}
+			if m.XML != nil {
+				extra = ", xml: " + tsXMLNode(m.XML)
+			}
 			ms = append(ms, fmt.Sprintf("{ mediaType: %s, kind: %q, key: %s, schema: %s%s }", jsString(m.MediaType), m.Kind, jsString(tsCamel(m.Field.Name)), s, extra))
 		}
 		spec += fmt.Sprintf("  body: { required: %t, media: [%s] },\n", o.Body.Required, strings.Join(ms, ", "))
@@ -574,6 +568,8 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		switch r.Kind {
 		case "json":
 			s += ", schema: " + g.schema(r.Body)
+		case "xml":
+			s += ", schema: " + g.schema(r.Body) + ", xml: " + tsXMLNode(r.XML)
 		case "jsonl":
 			s += ", item: " + g.schema(r.Item)
 		case "parts":
@@ -588,7 +584,7 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		if perStatus[r.Status] > 1 {
 			s += ", withContentType: true"
 		}
-		if headers := tsHeaders(r); len(headers) > 0 {
+		if headers := r.Headers; len(headers) > 0 {
 			headerKeys := headerKeys(r)
 			var hs []string
 			for _, h := range headers {
@@ -607,6 +603,9 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 				}
 				if h.Content != "" {
 					hdr += fmt.Sprintf(", content: %q", h.ContentKind)
+				}
+				if h.XML != nil {
+					hdr += ", xml: " + tsXMLNode(h.XML)
 				}
 				hs = append(hs, hdr+", schema: "+g.schema(h.Type)+" }")
 			}
@@ -652,10 +651,46 @@ func paramKeys(o *ir.Operation) map[*ir.Param]string {
 	return keys
 }
 
-// tsHeaders returns the headers of r the TypeScript runtime reads: not
-// those with XML content.
-func tsHeaders(r *ir.Response) []*ir.Header {
-	return slices.DeleteFunc(slices.Clone(r.Headers), func(h *ir.Header) bool { return h.ContentKind == "xml" })
+// tsXMLNode renders an XML shape as the runtime's XMLNode.
+func tsXMLNode(n *ir.XMLNode) string {
+	var fields []string
+	add := func(name, value string) { fields = append(fields, name+": "+value) }
+	for _, f := range []struct{ name, value string }{{"name", n.Name}, {"namespace", n.Namespace}, {"prefix", n.Prefix}, {"kind", n.Kind}} {
+		if f.value != "" {
+			add(f.name, jsString(f.value))
+		}
+	}
+	add("type", jsString(n.Type))
+	if n.Wrapped {
+		add("wrapped", "true")
+	}
+	if n.Items != nil {
+		add("items", tsXMLNode(n.Items))
+	}
+	if len(n.Properties) > 0 {
+		props := make([]string, len(n.Properties))
+		for i, p := range n.Properties {
+			props[i] = fmt.Sprintf("{ name: %s, node: %s }", jsString(p.Name), tsXMLNode(p.Node))
+		}
+		add("properties", "["+strings.Join(props, ", ")+"]")
+	}
+	if n.Values != nil {
+		add("values", tsXMLNode(n.Values))
+	}
+	if n.Inline {
+		add("inline", "true")
+	}
+	if n.Ref != "" {
+		add("ref", jsString(n.Ref))
+	}
+	if len(n.Shapes) > 0 {
+		var shapes []string
+		for _, name := range slices.Sorted(maps.Keys(n.Shapes)) {
+			shapes = append(shapes, jsString(name)+": "+tsXMLNode(n.Shapes[name]))
+		}
+		add("shapes", "{ "+strings.Join(shapes, ", ")+" }")
+	}
+	return "{ " + strings.Join(fields, ", ") + " }"
 }
 
 // headerKeys returns the properties of the headers of r, as paramKeys.

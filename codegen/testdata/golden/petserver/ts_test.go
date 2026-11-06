@@ -62,6 +62,9 @@ func TestTypeScriptClient(t *testing.T) {
 	}
 	// The last getPet is the link the TypeScript client followed, with
 	// the link's constant.
+	if got := s.seen["PutCard"].(*api.PutCardRequest).Body; got.Name != `"a" <b> & 'c'` || got.Note.Value.Text.Value != "x]]>y" || got.Nicknames.Value[0] != "x" {
+		t.Errorf("PutCard = %+v", got)
+	}
 	if got := s.seen["GetPet"].(*api.GetPetRequest); got.Session.Value != "s1" {
 		t.Errorf("last pet = %+v", got)
 	}
