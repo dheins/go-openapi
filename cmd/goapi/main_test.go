@@ -497,3 +497,82 @@ func TestGenerateServerBundlesDocument(t *testing.T) {
 		t.Errorf("schemas/pet.yaml is not copied in:\n%s", doc)
 	}
 }
+
+func TestGenerateTemplates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the go command")
+	}
+	goCmd, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go command not found")
+	}
+	// Inside the module, so the generated code builds against it.
+	root, err := os.MkdirTemp(".", "_tmpl-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	templates := filepath.Join(root, "templates")
+	if err := os.Mkdir(templates, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Enums get a String method, and keep their checks.
+	const enum = `{{define "enum"}}
+{{typeDoc .}}
+type {{.Name}} {{goType .Base}}
+
+const (
+{{- range .Values}}
+	{{.Name}} {{$.Name}} = {{.Literal}}
+{{- end}}
+)
+
+// String returns the value as text.
+func (e {{.Name}}) String() string { return {{imp "fmt" "fmt"}}.Sprint({{goType .Base}}(e)) }
+
+// Validate checks that the value is one of the constants.
+func (e {{.Name}}) Validate() error {
+	switch e {
+	case {{range $i, $v := .Values}}{{if $i}}, {{end}}{{$v.Name}}{{end}}:
+		return nil
+	}
+	return &oapi.ValidationError{Message: {{enumMessage .}}}
+}
+{{end}}
+`
+	const petstoreDoc = "../../codegen/testdata/golden/petstore/openapi.yaml"
+	if err := os.WriteFile(filepath.Join(templates, "enum.tmpl"), []byte(enum), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "models")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"generate", "model", "-out", out, "-templates", templates, petstoreDoc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	matches, err := filepath.Glob(filepath.Join(out, "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withString int
+	for _, m := range matches {
+		if strings.Contains(readFile(t, m), ") String() string {") {
+			withString++
+		}
+	}
+	if withString == 0 {
+		t.Error("no enum has the String method")
+	}
+	if vet, err := exec.Command(goCmd, "vet", "./"+filepath.ToSlash(out)).CombinedOutput(); err != nil {
+		t.Errorf("go vet: %v\n%s", err, vet)
+	}
+
+	stderr.Reset()
+	if code := run([]string{"generate", "model", "-out", out, "-templates", filepath.Join(templates, "enum.tmpl"), petserverDoc}, &stdout, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), "is not a directory") {
+		t.Errorf("not a directory: exit code %d\nstderr: %s", code, &stderr)
+	}
+}

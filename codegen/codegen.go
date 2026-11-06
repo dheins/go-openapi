@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"go/format"
+	"io/fs"
 	"path"
 	"slices"
 	"strconv"
@@ -47,6 +48,13 @@ type Options struct {
 	// name and import path, instead of generating the types again.
 	TypesPackage string
 	TypesImport  string
+	// Templates, if set, holds *.tmpl files whose {{define}} blocks
+	// replace the built-in blocks of the same names, and may define more
+	// blocks for those to use. Blocks are given the data the built-in
+	// ones are, and the same functions; see the guide's "Custom
+	// templates". This is experimental: the data may change between
+	// minor releases.
+	Templates fs.FS
 }
 
 // layout says which package each kind of generated code goes to, by
@@ -108,7 +116,18 @@ func newGenerator(opts Options) (*generator, error) {
 	if opts.Package == "" {
 		return nil, fmt.Errorf("codegen: package name is required")
 	}
-	return &generator{opts: opts, vars: map[string]bool{}, params: map[*ir.Param]string{}, fileNames: map[string]bool{}}, nil
+	g := &generator{opts: opts, vars: map[string]bool{}, params: map[*ir.Param]string{}, fileNames: map[string]bool{}}
+	if opts.Templates != nil {
+		f := &fileGen{gen: g, imports: map[string]string{}}
+		builtin, err := template.New("go").Funcs(f.funcs()).ParseFS(templateFiles, "templates/*.tmpl")
+		if err != nil {
+			return nil, err
+		}
+		if err := checkTemplates(opts.Templates, builtin, f.funcs()); err != nil {
+			return nil, err
+		}
+	}
+	return g, nil
 }
 
 func (g *generator) models(m *ir.Model) error {
@@ -181,6 +200,11 @@ func (g *generator) render(name string, data any, setup func(*fileGen)) ([]byte,
 	tmpl, err := template.New("go").Funcs(f.funcs()).ParseFS(templateFiles, "templates/*.tmpl")
 	if err != nil {
 		return nil, err
+	}
+	if g.opts.Templates != nil {
+		if err := parseUserTemplates(tmpl, g.opts.Templates); err != nil {
+			return nil, err
+		}
 	}
 	var body bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&body, name, data); err != nil {
@@ -328,6 +352,7 @@ func (f *fileGen) funcs() template.FuncMap {
 		"unionMarshalStmts":  f.unionMarshalStmts,
 		"unionValidateStmts": f.unionValidateStmts,
 		"tupleDecls":         f.tupleDecls,
+		"goapiVersion":       goapiVersion,
 	}
 	for name, fn := range f.serverFuncs() {
 		funcs[name] = fn
