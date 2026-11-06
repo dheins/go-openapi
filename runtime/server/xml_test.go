@@ -110,3 +110,57 @@ func TestJSONToXML(t *testing.T) {
 		t.Errorf("root array read back: %s %v", back, err)
 	}
 }
+
+// treeXML is a recursive tree, through a shape reference: a map of
+// integers by key, and an inline object whose attribute and element are
+// the tree's own.
+var treeXML = &XMLNode{Name: "tree", Ref: "Tree", Shapes: map[string]*XMLNode{
+	"Tree": {Type: "object", Properties: []XMLProperty{
+		{"label", &XMLNode{Name: "label", Kind: "attribute", Type: "string"}},
+		{"children", &XMLNode{Name: "children", Type: "array", Items: &XMLNode{Name: "child", Ref: "Tree"}}},
+		{"counts", &XMLNode{Name: "counts", Type: "map", Values: &XMLNode{Type: "integer"}}},
+		{"info", &XMLNode{Type: "object", Inline: true, Properties: []XMLProperty{
+			{"owner", &XMLNode{Name: "owner", Kind: "attribute", Type: "string"}},
+			{"size", &XMLNode{Name: "size", Type: "integer"}},
+		}}},
+	}},
+}}
+
+func TestXMLShapes(t *testing.T) {
+	doc := `<tree label="root" owner="ann"><size>2</size>` +
+		`<child label="a"><counts><x>1</x><y>2</y></counts></child>` +
+		`<child label="b"><child label="c"/></child></tree>`
+	got, err := XMLToJSON([]byte(doc), treeXML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"children":[{"counts":{"x":1,"y":2},"label":"a"},{"children":[{"label":"c"}],"label":"b"}],"info":{"owner":"ann","size":2},"label":"root"}`
+	if string(got) != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	back, err := JSONToXML(got, treeXML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantXML := `<tree label="root" owner="ann"><child label="a"><counts><x>1</x><y>2</y></counts></child>` +
+		`<child label="b"><child label="c"></child></child><size>2</size></tree>`
+	if !strings.HasSuffix(string(back), wantXML) {
+		t.Errorf("written %s\nwant     %s", back, wantXML)
+	}
+	if _, err := JSONToXML([]byte(`{"counts":{"a b":1}}`), treeXML); err == nil || err.Error() != `key "a b" cannot be written as an XML element` {
+		t.Errorf("invalid key: %v", err)
+	}
+	if _, err := XMLToJSON([]byte(`<tree><counts><x>one</x>t</counts></tree>`), treeXML); err == nil {
+		t.Error("text in a map: no error")
+	}
+	// Undeclared attributes and elements named as a property are ignored:
+	// they could not be written back.
+	if got, err := XMLToJSON([]byte(`<tree info="x" children="y"><info>z</info><size>1</size></tree>`), treeXML); err != nil || string(got) != `{"info":{"size":1}}` {
+		t.Errorf("collisions: %s %v", got, err)
+	}
+	// A map of objects, and the root itself a map.
+	m := &XMLNode{Name: "m", Type: "map", Values: &XMLNode{Type: "object", Properties: []XMLProperty{{"n", &XMLNode{Name: "n", Kind: "attribute", Type: "number"}}}}}
+	if got, err := XMLToJSON([]byte(`<m><a n="1.5"/><b/></m>`), m); err != nil || string(got) != `{"a":{"n":1.5},"b":{}}` {
+		t.Errorf("map of objects: %s %v", got, err)
+	}
+}

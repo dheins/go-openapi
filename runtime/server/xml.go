@@ -27,7 +27,8 @@ type XMLNode struct {
 	// "attribute", "text" or "cdata" (the content of the parent element).
 	Kind string
 	// Type is the JSON type: "string", "integer", "number", "boolean",
-	// "object", "array", or "any" for a value of any type.
+	// "object", "array", "map" (an object of any properties), or "any" for
+	// a value of any type.
 	Type string
 	// Wrapped means an array's items are inside an element of their own;
 	// otherwise the items are elements of the array's parent. Items
@@ -36,6 +37,17 @@ type XMLNode struct {
 	Items   *XMLNode
 	// Properties are the declared properties of an object, by JSON name.
 	Properties []XMLProperty
+	// Values describes the values of a map, each an element named by its
+	// key.
+	Values *XMLNode
+	// Inline means an object has no element of its own: its properties are
+	// attributes and elements of its parent's element (nodeType none).
+	Inline bool
+	// Ref, if set, names the shape of Shapes, on the root, this node has:
+	// its type and content, with this node's name and kind. It is how a
+	// recursive type refers to itself.
+	Ref    string
+	Shapes map[string]*XMLNode
 }
 
 // XMLProperty is a property of an object written as XML.
@@ -80,7 +92,8 @@ func XMLToJSON(data []byte, root *XMLNode) ([]byte, error) {
 	if !matches(start.Name, root) {
 		return nil, &oapi.ValidationError{Message: mismatch(root, start.Name)}
 	}
-	r := &xmlReader{dec: dec}
+	r := &xmlReader{dec: dec, shapes: root.Shapes}
+	root = resolve(root.Shapes, root)
 	var out []byte
 	if root.Type == "array" {
 		out, err = r.wrappedArray(nil, start, root, "", 0)
@@ -155,7 +168,23 @@ func matches(name xml.Name, node *XMLNode) bool {
 }
 
 type xmlReader struct {
-	dec *xml.Decoder
+	dec    *xml.Decoder
+	shapes map[string]*XMLNode
+}
+
+// resolve returns the node n stands for: n, or the shape it refers to,
+// named as n is.
+func resolve(shapes map[string]*XMLNode, n *XMLNode) *XMLNode {
+	if n == nil || n.Ref == "" {
+		return n
+	}
+	shape, ok := shapes[n.Ref]
+	if !ok {
+		return n
+	}
+	c := *shape
+	c.Name, c.Namespace, c.Prefix, c.Kind, c.Inline, c.Ref = n.Name, n.Namespace, n.Prefix, n.Kind, n.Inline, ""
+	return &c
 }
 
 // element appends the JSON of the element that start opened, as node
@@ -170,9 +199,12 @@ func (r *xmlReader) element(dst []byte, start xml.StartElement, node *XMLNode, p
 		}
 		return append(dst, "null"...), nil
 	}
+	node = resolve(r.shapes, node)
 	switch node.Type {
 	case "object":
 		return r.object(dst, start, node, path, depth)
+	case "map":
+		return r.mapElement(dst, start, node, path, depth)
 	case "array":
 		// A wrapped array as a property: start is the wrapper.
 		return r.wrappedArray(dst, start, node, path, depth)
@@ -232,11 +264,71 @@ type member struct {
 	array bool
 }
 
-func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, path string, depth int) ([]byte, error) {
-	members := map[string]*member{}
-	set := func(name string, value []byte) {
-		members[name] = &member{value: value}
+// objectState is an object being read: its members, and those of the
+// inline objects among its properties, whose attributes and elements are
+// the object's own.
+type objectState struct {
+	node    *XMLNode
+	members map[string]*member
+	inlines map[string]*objectState
+}
+
+func (r *xmlReader) newState(node *XMLNode) *objectState {
+	st := &objectState{node: node, members: map[string]*member{}, inlines: map[string]*objectState{}}
+	for _, p := range node.Properties {
+		if n := resolve(r.shapes, p.Node); n.Inline && n.Type == "object" {
+			st.inlines[p.Name] = r.newState(n)
+		}
 	}
+	return st
+}
+
+// attribute sets the property an attribute is, of the object or of one
+// of its inline objects, and reports whether there is one.
+func (st *objectState) attribute(a xml.Attr) bool {
+	if p := findProperty(st.node, a.Name, "attribute"); p != nil {
+		st.members[p.Name] = &member{value: appendScalar(nil, a.Value, p.Node.Type)}
+		return true
+	}
+	for _, sub := range st.inlines {
+		if sub.attribute(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// declares reports whether name is a property of the object or of one of
+// its inline objects, or the element one is read from: an undeclared
+// attribute or element of that name could not be written back.
+func (st *objectState) declares(name string, shapes map[string]*XMLNode) bool {
+	for _, p := range st.node.Properties {
+		n := resolve(shapes, p.Node)
+		if p.Name == name || n.Kind == "" && n.Name == name || n.Type == "array" && !n.Wrapped && n.Items != nil && n.Items.Name == name {
+			return true
+		}
+	}
+	for _, sub := range st.inlines {
+		if sub.declares(name, shapes) {
+			return true
+		}
+	}
+	return false
+}
+
+// json returns the object's members as JSON, with its inline objects as
+// properties when they have any.
+func (st *objectState) json() []byte {
+	for name, sub := range st.inlines {
+		if v := sub.json(); len(sub.members) > 0 {
+			st.members[name] = &member{value: v}
+		}
+	}
+	return appendMembers(nil, st.members)
+}
+
+func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, path string, depth int) ([]byte, error) {
+	st := r.newState(node)
 	var text *XMLProperty
 	for i, p := range node.Properties {
 		if p.Node.Kind == "text" || p.Node.Kind == "cdata" {
@@ -244,15 +336,11 @@ func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, pa
 		}
 	}
 	for _, a := range start.Attr {
-		if a.Name.Space == "xmlns" || a.Name.Local == "xmlns" || a.Name.Space == xsiNamespace {
+		if a.Name.Space == "xmlns" || a.Name.Local == "xmlns" || a.Name.Space == xsiNamespace || st.attribute(a) {
 			continue
 		}
-		if p := findProperty(node, a.Name, "attribute"); p != nil {
-			set(p.Name, appendScalar(nil, a.Value, p.Node.Type))
-			continue
-		}
-		if isXMLName(a.Name.Local) {
-			set(a.Name.Local, appendScalar(nil, a.Value, "string"))
+		if isXMLName(a.Name.Local) && !st.declares(a.Name.Local, r.shapes) {
+			st.members[a.Name.Local] = &member{value: appendScalar(nil, a.Value, "string")}
 		}
 	}
 	var chars strings.Builder
@@ -265,56 +353,78 @@ func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, pa
 		case xml.CharData:
 			chars.Write(t)
 		case xml.StartElement:
-			if err := r.child(members, t, node, path, depth); err != nil {
+			claimed, err := r.child(st, t, path, depth)
+			if err != nil {
 				return nil, err
+			}
+			switch {
+			case claimed:
+			case st.declares(t.Name.Local, r.shapes):
+				if err := r.dec.Skip(); err != nil {
+					return nil, invalidXML(err)
+				}
+			default:
+				if err := r.undeclared(st.members, t, path, depth); err != nil {
+					return nil, err
+				}
 			}
 		case xml.EndElement:
 			if text != nil {
-				set(text.Name, appendScalar(nil, chars.String(), text.Node.Type))
+				st.members[text.Name] = &member{value: appendScalar(nil, chars.String(), text.Node.Type)}
 			} else if s := strings.TrimSpace(chars.String()); s != "" {
 				return nil, &oapi.ValidationError{Path: path, Message: "unexpected text in element <" + start.Name.Local + ">"}
 			}
-			return appendMembers(dst, members), nil
+			return append(dst, st.json()...), nil
 		}
 	}
 }
 
-// child reads an element inside an object: a property, an item of an
-// array property whose items are the object's elements, or an undeclared
-// property.
-func (r *xmlReader) child(members map[string]*member, t xml.StartElement, node *XMLNode, path string, depth int) error {
-	for _, p := range node.Properties {
-		n := p.Node
-		if n.Kind != "" {
+// child reads an element inside an object that is one of its declared
+// properties, or an item of an array property whose items are the
+// object's elements, or one of an inline object's, and reports whether
+// it was.
+func (r *xmlReader) child(st *objectState, t xml.StartElement, path string, depth int) (bool, error) {
+	for _, p := range st.node.Properties {
+		n := resolve(r.shapes, p.Node)
+		if n.Kind != "" || n.Inline {
 			continue
 		}
 		if n.Type == "array" && !n.Wrapped {
 			if !matches(t.Name, n.Items) {
 				continue
 			}
-			m := members[p.Name]
+			m := st.members[p.Name]
 			if m == nil || !m.array {
 				m = &member{array: true}
-				members[p.Name] = m
+				st.members[p.Name] = m
 			}
 			item, err := r.element(nil, t, n.Items, oapi.Index(oapi.Field(path, p.Name), len(m.items)), depth+1)
 			if err != nil {
-				return err
+				return true, err
 			}
 			m.items = append(m.items, item)
-			return nil
+			return true, nil
 		}
 		if matches(t.Name, n) {
 			value, err := r.element(nil, t, n, oapi.Field(path, p.Name), depth+1)
 			if err != nil {
-				return err
+				return true, err
 			}
-			members[p.Name] = &member{value: value}
-			return nil
+			st.members[p.Name] = &member{value: value}
+			return true, nil
 		}
 	}
-	// Undeclared: repeated elements become an array. Names that could not
-	// be written back are ignored.
+	for name, sub := range st.inlines {
+		if claimed, err := r.child(sub, t, oapi.Field(path, name), depth); claimed || err != nil {
+			return claimed, err
+		}
+	}
+	return false, nil
+}
+
+// undeclared reads an element no property declares: repeated elements
+// become an array. Names that could not be written back are ignored.
+func (r *xmlReader) undeclared(members map[string]*member, t xml.StartElement, path string, depth int) error {
 	name := t.Name.Local
 	if !isXMLName(name) {
 		if err := r.dec.Skip(); err != nil {
@@ -335,6 +445,33 @@ func (r *xmlReader) child(members map[string]*member, t xml.StartElement, node *
 		members[name] = &member{array: true, items: []json.RawMessage{m.value, value}}
 	}
 	return nil
+}
+
+// mapElement reads a map: each child element is a property, named by its
+// local name, its value as node.Values describes.
+func (r *xmlReader) mapElement(dst []byte, start xml.StartElement, node *XMLNode, path string, depth int) ([]byte, error) {
+	members := map[string]*member{}
+	for {
+		tok, err := r.dec.Token()
+		if err != nil {
+			return nil, invalidXML(err)
+		}
+		switch t := tok.(type) {
+		case xml.CharData:
+			if len(bytes.TrimSpace(t)) > 0 {
+				return nil, &oapi.ValidationError{Path: path, Message: "unexpected text in element <" + start.Name.Local + ">"}
+			}
+		case xml.StartElement:
+			key := t.Name.Local
+			value, err := r.element(nil, t, node.Values, oapi.Field(path, key), depth+1)
+			if err != nil {
+				return nil, err
+			}
+			members[key] = &member{value: value}
+		case xml.EndElement:
+			return append(dst, appendMembers(nil, members)...), nil
+		}
+	}
 }
 
 func findProperty(node *XMLNode, name xml.Name, kind string) *XMLProperty {
@@ -437,7 +574,7 @@ func (r *xmlReader) anyElement(dst []byte, start xml.StartElement, path string, 
 		case xml.CharData:
 			chars.Write(t)
 		case xml.StartElement:
-			if err := r.child(members, t, &XMLNode{Type: "object"}, path, depth); err != nil {
+			if err := r.undeclared(members, t, path, depth); err != nil {
 				return nil, err
 			}
 		case xml.EndElement:
@@ -482,7 +619,7 @@ func JSONToXML(data []byte, root *XMLNode) ([]byte, error) {
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	w := &xmlWriter{}
+	w := &xmlWriter{shapes: root.Shapes}
 	w.buf.WriteString(xml.Header)
 	namespaces := map[string]string{}
 	collectPrefixes(root, namespaces, map[*XMLNode]bool{})
@@ -504,14 +641,19 @@ func collectPrefixes(n *XMLNode, out map[string]string, seen map[*XMLNode]bool) 
 		out[n.Prefix] = n.Namespace
 	}
 	collectPrefixes(n.Items, out, seen)
+	collectPrefixes(n.Values, out, seen)
 	for _, p := range n.Properties {
 		collectPrefixes(p.Node, out, seen)
+	}
+	for _, shape := range n.Shapes {
+		collectPrefixes(shape, out, seen)
 	}
 }
 
 type xmlWriter struct {
 	buf        bytes.Buffer
 	namespaces map[string]string
+	shapes     map[string]*XMLNode
 }
 
 func qualified(name string, n *XMLNode) string {
@@ -557,6 +699,7 @@ func escapeAttr(buf *bytes.Buffer, s string) {
 // element writes value as an element called name, which n describes (nil
 // for an undeclared value).
 func (w *xmlWriter) element(name string, n *XMLNode, value any, root bool) error {
+	n = resolve(w.shapes, n)
 	if value == nil {
 		w.open(name, n, root)
 		fmt.Fprintf(&w.buf, ` xmlns:xsi="%s" xsi:nil="true"/>`, xsiNamespace)
@@ -590,7 +733,31 @@ func (w *xmlWriter) element(name string, n *XMLNode, value any, root bool) error
 		w.close(name, n)
 		return nil
 	}
+	if n != nil && n.Type == "map" {
+		return w.mapElement(name, n, obj, root)
+	}
 	return w.object(name, n, obj, root)
+}
+
+// mapElement writes a map: an element per property, named by its key.
+func (w *xmlWriter) mapElement(name string, n *XMLNode, obj map[string]any, root bool) error {
+	w.open(name, n, root)
+	w.buf.WriteByte('>')
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if !isXMLName(k) {
+			return fmt.Errorf("key %q cannot be written as an XML element", k)
+		}
+		if err := w.element(k, n.Values, obj[k], false); err != nil {
+			return err
+		}
+	}
+	w.close(name, n)
+	return nil
 }
 
 // isXMLName reports whether s can name an element without a prefix:
@@ -645,6 +812,57 @@ func (w *xmlWriter) text(v any, cdata bool) {
 }
 
 func (w *xmlWriter) object(name string, n *XMLNode, obj map[string]any, root bool) error {
+	w.open(name, n, root)
+	if err := w.attributes(n, obj); err != nil {
+		return err
+	}
+	w.buf.WriteByte('>')
+	if err := w.content(n, obj); err != nil {
+		return err
+	}
+	w.close(name, n)
+	return nil
+}
+
+// attributes writes the properties of obj that n says are attributes,
+// and those of its inline objects.
+func (w *xmlWriter) attributes(n *XMLNode, obj map[string]any) error {
+	if n == nil {
+		return nil
+	}
+	for _, p := range n.Properties {
+		v, ok := obj[p.Name]
+		if !ok || v == nil {
+			continue
+		}
+		pn := resolve(w.shapes, p.Node)
+		if pn.Inline {
+			if inner, ok := v.(map[string]any); ok {
+				if err := w.attributes(pn, inner); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if pn.Kind != "attribute" {
+			continue
+		}
+		if _, isMap := v.(map[string]any); isMap || isArray(v) {
+			return errors.New("attribute " + pn.Name + " is not a simple value")
+		}
+		w.buf.WriteByte(' ')
+		w.buf.WriteString(qualified(pn.Name, pn))
+		w.buf.WriteString(`="`)
+		escapeAttr(&w.buf, scalarString(v))
+		w.buf.WriteByte('"')
+	}
+	return nil
+}
+
+// content writes the text and elements of obj, as n describes them: its
+// declared properties in order, those of inline objects in their place,
+// then undeclared ones by name.
+func (w *xmlWriter) content(n *XMLNode, obj map[string]any) error {
 	var props []XMLProperty
 	if n != nil {
 		props = n.Properties
@@ -653,42 +871,33 @@ func (w *xmlWriter) object(name string, n *XMLNode, obj map[string]any, root boo
 	for _, p := range props {
 		declared[p.Name] = true
 	}
-	w.open(name, n, root)
-	for _, p := range props {
-		v, ok := obj[p.Name]
-		if !ok || v == nil || p.Node.Kind != "attribute" {
-			continue
-		}
-		if _, isMap := v.(map[string]any); isMap || isArray(v) {
-			return errors.New("attribute " + p.Node.Name + " is not a simple value")
-		}
-		w.buf.WriteByte(' ')
-		w.buf.WriteString(qualified(p.Node.Name, p.Node))
-		w.buf.WriteString(`="`)
-		escapeAttr(&w.buf, scalarString(v))
-		w.buf.WriteByte('"')
-	}
-	w.buf.WriteByte('>')
 	for _, p := range props {
 		v, ok := obj[p.Name]
 		if !ok {
 			continue
 		}
+		pn := resolve(w.shapes, p.Node)
 		switch {
-		case p.Node.Kind == "attribute":
-		case p.Node.Kind == "text" || p.Node.Kind == "cdata":
-			if v != nil {
-				w.text(v, p.Node.Kind == "cdata")
+		case pn.Inline:
+			if inner, ok := v.(map[string]any); ok {
+				if err := w.content(pn, inner); err != nil {
+					return err
+				}
 			}
-		case p.Node.Type == "array" && !p.Node.Wrapped:
+		case pn.Kind == "attribute":
+		case pn.Kind == "text" || pn.Kind == "cdata":
+			if v != nil {
+				w.text(v, pn.Kind == "cdata")
+			}
+		case pn.Type == "array" && !pn.Wrapped:
 			items, _ := v.([]any)
 			for _, item := range items {
-				if err := w.element(p.Node.Items.Name, p.Node.Items, item, false); err != nil {
+				if err := w.element(pn.Items.Name, pn.Items, item, false); err != nil {
 					return err
 				}
 			}
 		default:
-			if err := w.element(p.Node.Name, p.Node, v, false); err != nil {
+			if err := w.element(pn.Name, pn, v, false); err != nil {
 				return err
 			}
 		}
@@ -723,6 +932,5 @@ func (w *xmlWriter) object(name string, n *XMLNode, obj map[string]any, root boo
 			return err
 		}
 	}
-	w.close(name, n)
 	return nil
 }
