@@ -34,6 +34,7 @@ type Option func(*settings)
 type settings struct {
 	server      []server.Option
 	passThrough bool
+	responses   ResponseMode
 }
 
 // WithBasePath serves the operations below prefix, such as "/v1"; by
@@ -133,7 +134,7 @@ func Validate(spec *loader.Spec, opts ...Option) (func(http.Handler) http.Handle
 	return func(next http.Handler) http.Handler {
 		mux := http.NewServeMux()
 		for _, op := range ops {
-			mux.Handle(op.method+" "+cfg.BasePath+op.route, op.handler(cfg, set, next))
+			mux.Handle(op.method+" "+cfg.BasePath+op.route, op.handler(cfg, set, s.responses, next))
 		}
 		return unmatched(cfg, mux, s.passThrough, next)
 	}, nil
@@ -194,6 +195,7 @@ type operation struct {
 	body        *body
 	security    [][]*ir.SecurityUse
 	unsupported bool
+	responses   map[string]*response
 }
 
 // segment is a path segment holding parameters: the ServeMux wildcard,
@@ -270,6 +272,7 @@ func (b *builder) operation(o *ir.Operation) (*operation, error) {
 		}
 		op.params = append(op.params, b.param(p, def))
 	}
+	op.responses = b.responses(oasOp)
 	if o.Body != nil && oasOp.RequestBody != nil {
 		rb := oasOp.RequestBody.Deref()
 		op.body = &body{required: o.Body.Required}
@@ -446,7 +449,7 @@ func xmlNode(n *ir.XMLNode) *server.XMLNode {
 }
 
 // handler checks a request of op, then hands it to next.
-func (op *operation) handler(cfg *server.Config, set *schemas.Set, next http.Handler) http.Handler {
+func (op *operation) handler(cfg *server.Config, set *schemas.Set, mode ResponseMode, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out := &Operation{ID: op.ir.ID, Method: op.ir.Method, Path: op.ir.Path}
 		if op.unsupported {
@@ -487,7 +490,12 @@ func (op *operation) handler(cfg *server.Config, set *schemas.Set, next http.Han
 			cfg.HandleError(w, r, b.Err())
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, out)))
+		r = r.WithContext(context.WithValue(r.Context(), contextKey{}, out))
+		if mode != Unchecked {
+			op.checkResponse(cfg, set, mode, w, r, next)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

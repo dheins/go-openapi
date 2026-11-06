@@ -73,6 +73,22 @@ paths:
       security: [{key: []}, {}]
       responses:
         "204": {description: ok}
+  /reply:
+    get:
+      operationId: reply
+      parameters:
+        - {name: case, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Rate: {required: true, schema: {type: integer}}
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/Reply"}}
+        "4XX":
+          description: a problem
+          content:
+            application/problem+json: {}
 components:
   securitySchemes:
     key: {type: apiKey, in: header, name: X-Key}
@@ -86,6 +102,12 @@ components:
         id: {type: integer, readOnly: true}
         name: {type: string, minLength: 1}
         age: {type: integer, minimum: 0}
+    Reply:
+      type: object
+      required: [id, secret]
+      properties:
+        id: {type: integer, minimum: 1}
+        secret: {type: string, writeOnly: true}
 `
 
 // handled records what reached the handler.
