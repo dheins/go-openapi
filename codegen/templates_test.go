@@ -1,6 +1,9 @@
 package codegen
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -123,5 +126,70 @@ func TestTemplateErrors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
 		}
+	}
+}
+
+func TestTSTemplates(t *testing.T) {
+	src, err := os.ReadFile("testdata/golden/petserver/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := buildModel(t, string(src))
+	// Interfaces as type aliases, methods with a tag, and the index with
+	// a block of its own.
+	user := fstest.MapFS{
+		"client.tmpl": {Data: []byte(`
+{{define "interface"}}export type {{name .}} = {{template "object" .}};{{end}}
+
+{{define "method"}}
+{{tsDoc "  " (print (operationDoc .Operation) "\n\n@generated") .Operation.Deprecated}}  {{.Method}}(req: {{.Operation.RequestType}}{{if .Optional}} = {}{{end}}, call?: CallOptions): Promise<{{.Operation.ResponseType}}> {
+    return send(this.#cfg, {{.Method}}Spec, req, call) as Promise<{{.Operation.ResponseType}}>;
+  }
+{{end}}
+`)},
+		"index.tmpl": {Data: []byte(`{{define "index"}}export * as models from "./models.ts";
+{{template "exports" .}}{{end}}
+
+{{define "exports"}}export { {{join .Names ", "}} } from "./runtime.ts";
+export * as runtime from "./runtime.ts";
+export * from "./models.ts";
+{{if .Client}}export * from "./client.ts";
+{{end}}{{end}}`)},
+	}
+	files, _, err := TypeScript(m, TSOptions{Templates: user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f.Name), f.Content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, want := range map[string]string{
+		"models.ts": "export type Pet = {",
+		"client.ts": "   * @generated\n   */\n  listPets(",
+		"index.ts":  "export * as models from \"./models.ts\";\nexport {",
+	} {
+		if got := file(t, files, name); !strings.Contains(got, want) {
+			t.Errorf("%s lacks %q", name, want)
+		}
+	}
+	if strings.Contains(file(t, files, "models.ts"), "export interface") {
+		t.Error("models.ts has interfaces")
+	}
+
+	if _, _, err := TypeScript(m, TSOptions{Templates: fstest.MapFS{"a.tmpl": {Data: []byte(`{{define "mehtod"}}{{end}}`)}}}); err == nil ||
+		!strings.Contains(err.Error(), `"mehtod"`) || !strings.Contains(err.Error(), "linkMethod") {
+		t.Errorf("misspelt: %v", err)
+	}
+
+	if testing.Short() {
+		return
+	}
+	tsc := tscCommand(t)
+	generated, _ := tsFiles(t, dir)
+	if out, err := exec.Command(tsc[0], append(append(tsc[1:], tscFlags...), generated...)...).CombinedOutput(); err != nil {
+		t.Errorf("tsc: %v\n%s", err, out)
 	}
 }
