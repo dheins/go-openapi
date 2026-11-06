@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { Client, InvalidRequestError, InvalidResponseError } from "./index.ts";
+import { codecs } from "./codecs.test.ts";
 
 // respond returns a client whose fetch answers with body, sent a byte at
 // a time, of the multipart type subtype, and records the request.
@@ -27,7 +28,7 @@ function respond(body: string, status = 200, subtype = "mixed", headers: Record<
     });
     return new Response(stream, { status, headers: { "Content-Type": `multipart/${subtype}; boundary="b"`, ...headers } });
   };
-  return { client: new Client({ baseUrl: "http://pets.test", fetch, validateResponses: true }), sent };
+  return { client: new Client({ baseUrl: "http://pets.test", fetch, validateResponses: true, codecs }), sent };
 }
 
 const pet = (name: string, stored = "true") => `Content-Type: application/json\r\nX-Stored: ${stored}\r\n\r\n{"id": 1, "name": "${name}"}`;

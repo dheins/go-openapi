@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { Client, InvalidRequestError, registerFormat, validate } from "./index.ts";
+import { codecs } from "./codecs.test.ts";
 
 const cases = JSON.parse(readFileSync(new URL("../../../../../oapi/testdata/formats.json", import.meta.url), "utf8")) as [string, string, boolean][];
 
@@ -28,7 +29,7 @@ test("registered formats", async () => {
     assert.deepEqual(validate({ kind: "string", format: "email" }, "not an address", "request"), []);
     // A client checks parameters and bodies before sending.
     let sent = 0;
-    const c = new Client({ baseUrl: "http://pets.test", fetch: async () => (sent++, new Response("{}")) });
+    const c = new Client({ baseUrl: "http://pets.test", codecs, fetch: async () => (sent++, new Response("{}")) });
     await assert.rejects(c.putTag({ code: "ABC-1", slug: "No", body: { code: "ABC-1", slug: "x y" } }), (e: unknown) => {
       assert.ok(e instanceof InvalidRequestError);
       assert.deepEqual(

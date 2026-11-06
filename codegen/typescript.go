@@ -136,7 +136,7 @@ var tsRuntimeExports = []struct {
 	typ  bool
 }{
 	{"ClientOptions", true}, {"CallOptions", true}, {"Credential", true}, {"BasicCredential", true},
-	{"ServerEvent", true}, {"NamedEvent", true}, {"Part", true}, {"ByteRange", true}, {"Problem", true}, {"Issue", true}, {"Schema", true}, {"FormatCheck", true},
+	{"ServerEvent", true}, {"NamedEvent", true}, {"Part", true}, {"ByteRange", true}, {"Problem", true}, {"Issue", true}, {"Schema", true}, {"FormatCheck", true}, {"Codec", true},
 	{"InvalidRequestError", false}, {"UnexpectedResponseError", false}, {"InvalidResponseError", false},
 	{"NoCredentialsError", false}, {"validate", false}, {"encode", false}, {"registerFormat", false},
 }

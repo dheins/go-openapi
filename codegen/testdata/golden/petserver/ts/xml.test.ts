@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { Client, InvalidResponseError, type Family } from "./index.ts";
+import { codecs } from "./codecs.test.ts";
 
 // answering returns a client whose fetch answers every request with the
 // XML body, and the requests it was sent.
@@ -14,7 +15,7 @@ function answering(body: string, validateResponses = false, status = 200): { cli
     sent.push(new Request(input, init));
     return new Response(status === 204 ? null : body, { status, headers: { "Content-Type": "application/xml" } });
   };
-  return { client: new Client({ baseUrl: "http://pets.test", fetch, validateResponses }), sent };
+  return { client: new Client({ baseUrl: "http://pets.test", fetch, validateResponses, codecs }), sent };
 }
 
 // What the Go server writes for family, in TestXMLShapes.

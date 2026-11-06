@@ -227,6 +227,24 @@ const echoPrefsSpec: OperationSpec = {
   responses: [{ status: "204", headers: [{ key: "xPrefs", name: "X-Prefs", content: "xml", xml: { name: "Prefs", type: "object", properties: [{ name: "theme", node: { name: "theme", type: "string" } }, { name: "compact", node: { name: "compact", type: "boolean" } }] }, schema: $ref(() => $m.PrefsSchema) }] }],
 };
 
+/** The inputs of putSize. */
+export interface PutSizeRequest {
+  body: $m.Size;
+}
+
+/** The responses of putSize. */
+export type PutSizeResponse =
+  | { status: 200; contentType: "application/json"; body: $m.Size }
+  | { status: 200; contentType: "application/x-tc2"; body: $m.Size };
+
+const putSizeSpec: OperationSpec = {
+  method: "PUT",
+  path: "/sizes",
+  params: [],
+  body: { required: true, media: [{ mediaType: "application/x-tc", kind: "codec", key: "body", schema: $ref(() => $m.SizeSchema) }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.SizeSchema), withContentType: true }, { status: "200", mediaType: "application/x-tc2", kind: "codec", schema: $ref(() => $m.SizeSchema), withContentType: true }],
+};
+
 /** The inputs of putTag. */
 export interface PutTagRequest {
   code: string;
@@ -850,7 +868,7 @@ export class Client {
   readonly #cfg: Config;
 
   constructor(options: ClientOptions & { credentials?: Credentials } = {}) {
-    this.#cfg = config(options, defaultServerUrl, options.credentials);
+    this.#cfg = config(options, defaultServerUrl, options.credentials, ["application/x-tc", "application/x-tc2"]);
   }
 
   /**
@@ -946,6 +964,15 @@ export class Client {
    */
   echoPrefs(req: EchoPrefsRequest, call?: CallOptions): Promise<EchoPrefsResponse> {
     return send(this.#cfg, echoPrefsSpec, req, call) as Promise<EchoPrefsResponse>;
+  }
+
+  /**
+   * PUT /sizes.
+   *
+   * A size in a format goapi does not know, echoed back.
+   */
+  putSize(req: PutSizeRequest, call?: CallOptions): Promise<PutSizeResponse> {
+    return send(this.#cfg, putSizeSpec, req, call) as Promise<PutSizeResponse>;
   }
 
   /**
