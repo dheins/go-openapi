@@ -30,6 +30,8 @@ test("the constraints of a pet", () => {
     '/status: must be one of "available", "pending", "sold"',
     "/weight: must be a multiple of 0.5",
     "/photoUrls: must not have duplicate items",
+    "/photoUrls/0: must be a valid uri",
+    "/photoUrls/1: must be a valid uri",
     "/owner/email: required property is missing",
     "/size: must be one of 1, 2, 3",
   ]);

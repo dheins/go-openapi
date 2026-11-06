@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -154,6 +155,25 @@ func TestChecks(t *testing.T) {
 	for _, f := range formats {
 		if err := CheckFormat(f.format, f.value); (err == nil) != f.ok {
 			t.Errorf("CheckFormat(%q, %q) = %v", f.format, f.value, err)
+		}
+	}
+}
+
+// TestFormatCases checks the cases that TypeScript clients' runtime is
+// checked against too, so that both accept the same strings.
+func TestFormatCases(t *testing.T) {
+	data, err := os.ReadFile("testdata/formats.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases [][3]any
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		format, value, ok := c[0].(string), c[1].(string), c[2].(bool)
+		if err := CheckFormat(format, value); (err == nil) != ok {
+			t.Errorf("CheckFormat(%q, %q) = %v, want ok %v", format, value, err, ok)
 		}
 	}
 }
