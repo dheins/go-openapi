@@ -693,6 +693,23 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   implement alike, so the end-to-end test crosses both runtimes.
 - *Not done*: see [features.md](../features.md).
 
+### M35 – Validating hand-written handlers ✅
+- [x] `middleware.Validate`: routing, parameters, bodies and credentials
+  checked against a document, answered as generated servers answer
+- [x] `middleware.OperationFrom`: the operation and parsed values
+- [x] Opt-in response checks: status, media type, JSON body, headers
+
+**How it went**
+- *Reuse*: the IR gives routes, styles and body kinds; `server.Param`,
+  `ObjectJSON`, `MultipartJSON` and `XMLToJSON` read values as generated
+  servers do; schemas are checked with JSON Schema, compiled where they
+  are, through `internal/schemas`, which the example checks use too.
+- *Parity*: a petserver test sends the same invalid requests to the
+  generated server and the middleware; they answer with the same status,
+  and the middleware reports what the server does (and more, since the
+  server stops at type errors).
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

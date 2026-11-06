@@ -4,6 +4,13 @@
 
 ### Added
 
+- `middleware.Validate`: checks the requests of handlers written by hand
+  against a document without generated code (routes, parameters, JSON,
+  form, multipart and XML bodies, credentials present), answering as
+  generated servers do; `OperationFrom` gives handlers the parsed values,
+  and `WithResponseValidation` checks responses.
+- `server.ValuesJSON` and `server.MultipartJSON` convert parameters and
+  multipart bodies to JSON, for servers without generated types.
 - Codecs: `goapi generate -codec` and `x-goapi-codec` declare media types
   goapi does not know whose bodies decode into their schemas' types with
   a `server.Codec` registered by `server.WithCodec` or `client.WithCodec`
