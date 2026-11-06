@@ -103,10 +103,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   as go-swagger's `--template-dir` and generator config allow. Only the
   `x-go-*` extensions and the command-line flags adjust the generated code
   today. — later
-- `goapi diff old.yaml new.yaml`: the changes between two versions of a
-  document, with the ones that break clients or servers (removed
-  operations, parameters made required, narrowed types, removed response
-  properties) reported as errors, like `swagger diff`. — later
+- `goapi diff`: callbacks, links, examples, defaults and discriminator
+  mappings are not compared; `oneOf`/`anyOf` alternatives are matched by
+  position, so reordered ones read as changed; and what breaks servers
+  implementing the old document (rather than clients) is not reported.
+  — later
 
 ## Logging and telemetry
 
@@ -121,6 +122,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi diff` and the `diff` package: the changes between two versions
+  of a document, as errors, warnings and information by what they break
+  for clients, with `-fail-on` for CI. (ceb1603, 9b77eca)
 - [x] `goapi flatten` and the `flatten` package: a document of several
   files written as one, with `-hoist` (inline types moved into
   `components.schemas` under their Go names) and `-remove-unused`.

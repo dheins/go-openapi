@@ -4,6 +4,13 @@
 
 ### Added
 
+- `goapi diff [-format text|json] [-fail-on error|warning] old new` and the
+  `diff` package (`diff.Documents`): the changes between two versions of a
+  document, from the clients' side: errors for what breaks them (removed
+  operations, new required inputs, narrowed request schemas, widened
+  response schemas, stricter security), warnings for what may (new
+  responses or enum values), information for the rest; exit status 1
+  when one reaches `-fail-on`.
 - `goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused]`
   and the `flatten` package (`flatten.Document`): a document split over
   several files written as one. `-hoist` moves the inline schemas that
