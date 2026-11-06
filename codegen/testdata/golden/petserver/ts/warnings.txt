@@ -3,3 +3,4 @@ GetContent: the TypeScript client cannot read headers with XML content yet; head
 EchoPrefs: the TypeScript client cannot send parameters with XML content yet (X-Prefs); the operation is left out
 GetCard: the TypeScript client cannot read application/xml responses yet; response 200 is unexpected to it
 PutCard: the TypeScript client cannot send application/xml bodies yet; the operation is left out
+PutFamily: the TypeScript client cannot send application/xml bodies yet; the operation is left out

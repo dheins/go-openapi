@@ -41,6 +41,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "importPet", Name: "ImportPet", Method: "POST", Path: "/pets/import"}, "/pets/import", api.HandleImportPet(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getCard", Name: "GetCard", Method: "GET", Path: "/pets/{petId}/card"}, "/pets/{p0}/card", api.HandleGetCard(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putCard", Name: "PutCard", Method: "PUT", Path: "/pets/{petId}/card"}, "/pets/{p0}/card", api.HandlePutCard(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "putFamily", Name: "PutFamily", Method: "PUT", Path: "/pets/{petId}/family"}, "/pets/{p0}/family", api.HandlePutFamily(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "batchPets", Name: "BatchPets", Method: "POST", Path: "/pets/batch"}, "/pets/batch", api.HandleBatchPets(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadBundle", Name: "UploadBundle", Method: "POST", Path: "/bundle"}, "/bundle", api.HandleUploadBundle(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putNotes", Name: "PutNotes", Method: "PUT", Path: "/memos"}, "/memos", api.HandlePutNotes(cfg, h, sec))

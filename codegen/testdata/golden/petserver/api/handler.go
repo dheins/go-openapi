@@ -82,6 +82,10 @@ type Handler interface {
 	GetCard(ctx context.Context, req *GetCardRequest) (GetCardResponse, error)
 	// PutCard handles PUT /pets/{petId}/card.
 	PutCard(ctx context.Context, req *PutCardRequest) (PutCardResponse, error)
+	// PutFamily handles PUT /pets/{petId}/family.
+	//
+	// A family tree as XML, echoed back.
+	PutFamily(ctx context.Context, req *PutFamilyRequest) (PutFamilyResponse, error)
 	// BatchPets handles POST /pets/batch.
 	//
 	// Pets as positional JSON parts.

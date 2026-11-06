@@ -56,6 +56,45 @@ export interface Card {
 /** The schema of Card, for validation and encoding. */
 export const CardSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "integer" }, required: true }, name: { schema: { kind: "string", minLength: 1 }, required: true }, nicknames: { schema: { kind: "array", items: { kind: "string" } } }, vets: { schema: { kind: "array", items: $ref(() => VetSchema) } }, note: { schema: $ref(() => NoteSchema) }, secret: { schema: { kind: "string" }, writeOnly: true } } };
 
+export interface Family {
+  name: string;
+  litters?: Family[];
+  scores?: { [key: string]: number };
+  home?: FamilyHome;
+  mark?: Mark;
+}
+
+/** The schema of Family, for validation and encoding. */
+export const FamilySchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" }, required: true }, litters: { schema: { kind: "array", items: $ref(() => FamilySchema) } }, scores: { schema: { kind: "map", values: { kind: "integer" } } }, home: { schema: $ref(() => FamilyHomeSchema) }, mark: { schema: $ref(() => MarkSchema) } } };
+
+export interface FamilyHome {
+  city?: string;
+  street?: string;
+}
+
+/** The schema of FamilyHome, for validation and encoding. */
+export const FamilyHomeSchema: $Schema = { kind: "object", properties: { city: { schema: { kind: "string" } }, street: { schema: { kind: "string" } } } };
+
+export type Mark = MarkVariant1 | MarkVariant2;
+
+/** The schema of Mark, for validation and encoding. */
+export const MarkSchema: $Schema = { kind: "union", oneOf: true, variants: [$ref(() => MarkVariant1Schema), $ref(() => MarkVariant2Schema)] };
+
+export interface MarkVariant1 {
+  chip: string;
+}
+
+/** The schema of MarkVariant1, for validation and encoding. */
+export const MarkVariant1Schema: $Schema = { kind: "object", properties: { chip: { schema: { kind: "string" }, required: true } } };
+
+export interface MarkVariant2 {
+  tattoo: string;
+  ink?: string;
+}
+
+/** The schema of MarkVariant2, for validation and encoding. */
+export const MarkVariant2Schema: $Schema = { kind: "object", properties: { tattoo: { schema: { kind: "string" }, required: true }, ink: { schema: { kind: "string" } } } };
+
 export interface Vet {
   name?: string;
   phone?: string;

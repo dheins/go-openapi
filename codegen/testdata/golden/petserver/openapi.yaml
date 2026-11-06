@@ -756,6 +756,30 @@ paths:
       responses:
         "204":
           description: Stored.
+  /pets/{petId}/family:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: putFamily
+      description: A family tree as XML, echoed back.
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/Family"
+      responses:
+        "200":
+          description: The tree stored.
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Family"
   /pets/batch:
     post:
       operationId: batchPets
@@ -1321,6 +1345,55 @@ components:
         secret:
           type: string
           writeOnly: true
+    Family:
+      type: object
+      required: [name]
+      xml:
+        name: family
+      properties:
+        name:
+          type: string
+          xml:
+            nodeType: attribute
+        litters:
+          type: array
+          xml:
+            nodeType: none
+          items:
+            $ref: "#/components/schemas/Family"
+        scores:
+          type: object
+          additionalProperties:
+            type: integer
+        home:
+          type: object
+          xml:
+            nodeType: none
+          properties:
+            city:
+              type: string
+              xml:
+                nodeType: attribute
+            street:
+              type: string
+        mark:
+          $ref: "#/components/schemas/Mark"
+    Mark:
+      oneOf:
+        - type: object
+          required: [chip]
+          properties:
+            chip:
+              type: string
+        - type: object
+          required: [tattoo]
+          properties:
+            tattoo:
+              type: string
+            ink:
+              type: string
+              xml:
+                nodeType: attribute
     Vet:
       type: object
       xml:

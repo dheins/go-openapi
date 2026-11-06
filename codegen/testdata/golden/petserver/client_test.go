@@ -247,6 +247,15 @@ func TestClientResponses(t *testing.T) {
 		t.Errorf("XML card = %+v", r.Body)
 	}
 
+	family := model.Family{Name: "Rex", Litters: oapi.Some([]model.Family{{Name: "Pup", Scores: oapi.Some(map[string]int64{"speed": 3})}}),
+		Home: oapi.Some(model.FamilyHome{City: oapi.Some("Oslo")}),
+		Mark: oapi.Some(model.NewMark(model.MarkVariant2{Tattoo: "R", Ink: oapi.Some("blue")}))}
+	f := as[api.PutFamily200XMLResponse](t)(c.PutFamily(ctx, &api.PutFamilyRequest{PetID: 1, Body: family}))
+	if mark, ok := f.Body.Mark.Value.Value().(model.MarkVariant2); f.Body.Litters.Value[0].Scores.Value["speed"] != 3 ||
+		f.Body.Home.Value.City.Value != "Oslo" || !ok || mark.Ink.Value != "blue" {
+		t.Errorf("family = %+v", f.Body)
+	}
+
 	if r := as[api.GetPhoto200ImageResponse](t)(c.GetPhoto(ctx, &api.GetPhotoRequest{PetID: 1})); r.ContentType != "image/png" || string(r.Body) != "PNGDATA" {
 		t.Errorf("photo = %q %q", r.ContentType, r.Body)
 	}

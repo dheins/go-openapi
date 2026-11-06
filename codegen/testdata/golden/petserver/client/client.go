@@ -520,6 +520,25 @@ func (c *Client) PutCard(ctx context.Context, req *api.PutCardRequest) (api.PutC
 	return api.ReadPutCardResponse(c.cfg, resp)
 }
 
+// PutFamily calls PUT /pets/{petId}/family. A nil req sends no parameters
+// or body.
+//
+// A family tree as XML, echoed back.
+func (c *Client) PutFamily(ctx context.Context, req *api.PutFamilyRequest) (api.PutFamilyResponse, error) {
+	if req == nil {
+		req = &api.PutFamilyRequest{}
+	}
+	hreq, err := api.NewPutFamilyRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutFamilyResponse(c.cfg, resp)
+}
+
 // BatchPets calls POST /pets/batch. A nil req sends no parameters or body.
 //
 // Pets as positional JSON parts.
