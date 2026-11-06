@@ -299,10 +299,18 @@ requests. Decode and encode with a direction to apply that:
 
 ```go
 oapi.DecodeRequest(body, &pet)  // read-only properties are ignored and not required; defaults are applied
-oapi.DecodeResponse(body, &pet) // write-only properties are not required
-oapi.EncodeResponse(pet)        // write-only properties are left out
+oapi.DecodeResponse(body, &pet) // write-only properties are not required; defaults are applied
+oapi.EncodeResponse(pet)        // write-only properties are left out; defaults are written
 oapi.EncodeRequest(pet)         // read-only properties are left out
 ```
+
+A property with a `default` that is absent gets it when a request or a
+response is decoded (read-only ones only in responses, write-only ones
+only in requests), and a response a server encodes has the default of
+each such property the handler left unset, so every client sees it.
+Requests are sent as they are: the server applies their defaults.
+`json.Unmarshal`, which has no direction, applies none. A TypeScript
+client fills the defaults of the responses it reads too, at any depth.
 
 Plain `json.Marshal` and `json.Unmarshal` use no direction: every property
 is written, and required read-only and write-only properties may be absent.

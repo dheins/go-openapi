@@ -27,9 +27,6 @@ shipped in.
   `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
   `additionalProperties` or property counts of a struct; these keywords on
   enums and unions. — later
-- Applying `default` values inside responses and to nested objects of
-  parameters (defaults are applied to absent request properties and
-  parameters today). — later
 
 ## Server
 
@@ -120,6 +117,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Defaults in responses: servers write the default of a property the
+  handler left unset, and Go and TypeScript clients fill absent ones
+  when reading, as servers do for requests (and did for the properties of
+  object parameters already). (825b483, 7b51838)
 - [x] Object headers (response and part headers, in the simple style),
   headers with content of any media type, as text, and `contentEncoding`
   (`[]byte`) parts sent and read by their `Content-Transfer-Encoding`, in

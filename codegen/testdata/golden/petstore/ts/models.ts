@@ -157,7 +157,7 @@ export interface Account {
 }
 
 /** The schema of Account, for validation and encoding. */
-export const AccountSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "integer" }, required: true, readOnly: true }, username: { schema: { kind: "string" }, required: true }, password: { schema: { kind: "string" }, required: true, writeOnly: true }, role: { schema: { kind: "string" } }, limit: { schema: { kind: "integer" } } }, minProperties: 3, maxProperties: 4 };
+export const AccountSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "integer" }, required: true, readOnly: true }, username: { schema: { kind: "string" }, required: true }, password: { schema: { kind: "string" }, required: true, writeOnly: true }, role: { schema: { kind: "string" }, default: "user" }, limit: { schema: { kind: "integer" }, default: 10 } }, minProperties: 3, maxProperties: 4 };
 
 export type Vehicle = VehicleBase | Car | Bike;
 

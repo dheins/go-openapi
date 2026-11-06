@@ -95,12 +95,12 @@ func (m *Account) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) erro
 	}
 	if seen[3] {
 		errs.Nested("/role", problems[3])
-	} else if dir == oapi.Request {
+	} else if dir != oapi.AnyDirection {
 		errs.Nested("/role", oapi.DecodeField([]byte("\"user\""), &v.Role, false, dir))
 	}
 	if seen[4] {
 		errs.Nested("/limit", problems[4])
-	} else if dir == oapi.Request {
+	} else if dir != oapi.AnyDirection {
 		errs.Nested("/limit", oapi.DecodeField([]byte("10"), &v.Limit, false, dir))
 	}
 	if err := errs.Err(); err != nil {
@@ -143,10 +143,16 @@ func (m Account) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 		dst = oapi.AppendString(dst, m.Role.Value)
 		dst = append(dst, ',')
 	}
+	if dir == oapi.Response && !(m.Role.Set) {
+		dst = append(dst, "\"role\":\"user\","...)
+	}
 	if m.Limit.Set {
 		dst = append(dst, "\"limit\":"...)
 		dst = strconv.AppendInt(dst, m.Limit.Value, 10)
 		dst = append(dst, ',')
+	}
+	if dir == oapi.Response && !(m.Limit.Set) {
+		dst = append(dst, "\"limit\":10,"...)
 	}
 	return oapi.EndObject(dst, start), nil
 }

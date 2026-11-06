@@ -208,6 +208,41 @@ const getContentSpec: OperationSpec = {
   responses: [{ status: "204", headers: [{ key: "xCode", name: "X-Code", content: "text", schema: { kind: "integer" } }, { key: "xWhere", name: "X-Where", content: "form", schema: $ref(() => $m.FilterSchema) }] }],
 };
 
+/** The inputs of getSettings. */
+export interface GetSettingsRequest {
+  petId: number;
+  view?: $m.GetSettingsView;
+}
+
+/** The responses of getSettings. */
+export type GetSettingsResponse =
+  | { status: 200; body: $m.Settings };
+
+const getSettingsSpec: OperationSpec = {
+  method: "GET",
+  path: "/pets/{petId}/settings",
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "view", name: "view", in: "query", style: "deepObject", explode: true, shape: "object", schema: $ref(() => $m.GetSettingsViewSchema) }],
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.SettingsSchema) }],
+};
+
+/** The inputs of putSettings. */
+export interface PutSettingsRequest {
+  petId: number;
+  body: $m.Settings;
+}
+
+/** The responses of putSettings. */
+export type PutSettingsResponse =
+  | { status: 200; body: $m.Settings };
+
+const putSettingsSpec: OperationSpec = {
+  method: "PUT",
+  path: "/pets/{petId}/settings",
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "body", schema: $ref(() => $m.SettingsSchema) }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.SettingsSchema) }],
+};
+
 /** The inputs of attach. */
 export interface AttachRequest {
   petId: number;
@@ -827,6 +862,20 @@ export class Client {
    */
   getContent(req: GetContentRequest, call?: CallOptions): Promise<GetContentResponse> {
     return send(this.#cfg, getContentSpec, req, call) as Promise<GetContentResponse>;
+  }
+
+  /**
+   * GET /pets/{petId}/settings.
+   *
+   * The pet's settings, with defaults for what is not set.
+   */
+  getSettings(req: GetSettingsRequest, call?: CallOptions): Promise<GetSettingsResponse> {
+    return send(this.#cfg, getSettingsSpec, req, call) as Promise<GetSettingsResponse>;
+  }
+
+  /** PUT /pets/{petId}/settings. */
+  putSettings(req: PutSettingsRequest, call?: CallOptions): Promise<PutSettingsResponse> {
+    return send(this.#cfg, putSettingsSpec, req, call) as Promise<PutSettingsResponse>;
   }
 
   /**

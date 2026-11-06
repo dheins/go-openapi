@@ -195,6 +195,18 @@ func (s *store) Attach(_ context.Context, req *api.AttachRequest) (api.AttachRes
 	return api.Attach200MixedResponse{Body: files, XRate: model.Attach200XRate{Limit: 10, Remaining: oapi.Some(int64(10 - len(files)))}, XSig: oapi.Some("abc.def")}, nil
 }
 
+// GetSettings sets nothing: the defaults are sent.
+func (s *store) GetSettings(_ context.Context, req *api.GetSettingsRequest) (api.GetSettingsResponse, error) {
+	s.seen["GetSettings"] = req
+	return api.GetSettings200JSONResponse{Body: model.Settings{}}, nil
+}
+
+// PutSettings echoes the settings, as decoded.
+func (s *store) PutSettings(_ context.Context, req *api.PutSettingsRequest) (api.PutSettingsResponse, error) {
+	s.seen["PutSettings"] = req
+	return api.PutSettings200JSONResponse{Body: req.Body}, nil
+}
+
 func (s *store) UploadRecords(_ context.Context, req *api.UploadRecordsRequest) (api.UploadRecordsResponse, error) {
 	s.seen["UploadRecords"] = req
 	return api.UploadRecords204Response{}, nil
@@ -1481,6 +1493,35 @@ func TestBase64PartsAndObjectHeaders(t *testing.T) {
 		if got := strings.Join(problemErrors(t, r), "\n"); !strings.HasPrefix(got, tc.want) {
 			t.Errorf("%s %q: %s", tc.size, tc.data, got)
 		}
+	}
+}
+
+func TestDefaults(t *testing.T) {
+	s, h := newTestServer()
+	// A response has the defaults of what the handler left unset, but for
+	// write-only properties.
+	r := do(t, h, "GET", "/pets/1/settings", "", "")
+	if r.status != 200 || strings.TrimSpace(r.body) != `{"theme":"light","notify":true,"version":1}` {
+		t.Errorf("%d %s", r.status, r.body)
+	}
+	// An object parameter's properties have their defaults; an absent one
+	// stays absent.
+	if s.seen["GetSettings"].(*api.GetSettingsRequest).View.Set {
+		t.Error("an absent view is set")
+	}
+	do(t, h, "GET", "/pets/1/settings?view[depth]=2", "", "")
+	if v := s.seen["GetSettings"].(*api.GetSettingsRequest).View.Value; v.Mode.Value != "full" || v.Depth.Value != 2 {
+		t.Errorf("view = %+v", v)
+	}
+	// A request has the defaults of what the client left out, but for
+	// read-only properties, which the response has.
+	r = do(t, h, "PUT", "/pets/1/settings", "application/json", `{"theme":"dark"}`)
+	got := s.seen["PutSettings"].(*api.PutSettingsRequest).Body
+	if got.Theme.Value != "dark" || got.Notify.Value != true || got.Pin.Value != "0000" || got.Version.Set {
+		t.Errorf("request %+v", got)
+	}
+	if strings.TrimSpace(r.body) != `{"theme":"dark","notify":true,"version":1}` {
+		t.Errorf("echo %s", r.body)
 	}
 }
 

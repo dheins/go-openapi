@@ -608,6 +608,20 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   mime/multipart gives an empty slice.
 - *Not done*: see [features.md](../features.md).
 
+### M30 – Defaults in responses ✅
+- [x] Generated encoders write the defaults of unset properties in
+  responses, and decoders apply them to responses as to requests
+- [x] TypeScript clients fill the defaults of the responses they read
+
+**How it went**
+- *Both ends*: servers write defaults so every client sees them, and
+  clients fill them too, for servers that do not.
+- *Directions*: a read-only property gets its default in responses only
+  and a write-only one in requests only, as they are only sent there.
+- *Parameters had them*: the properties of object parameters are decoded
+  as a request, so they got their defaults already; a test says so now.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

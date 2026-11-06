@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -61,6 +62,17 @@ func (f *fileGen) appendStmts(t *ir.Type) string {
 		}
 		if len(conds) > 0 {
 			w(1, "}")
+		}
+		// A response has a property's default when the handler left the
+		// property unset, so that every client sees it.
+		if set := presence(fd, "m"); fd.Default != "" && !fd.WriteOnly && set != "" {
+			var lit bytes.Buffer
+			if err := json.Compact(&lit, []byte(fd.Default)); err == nil {
+				name, _ := json.Marshal(fd.JSONName)
+				w(1, "if dir == oapi.Response && !(%s) {", set)
+				w(2, "dst = append(dst, %s...)", strconv.Quote(string(name)+":"+lit.String()+","))
+				w(1, "}")
+			}
 		}
 	}
 	for _, iu := range t.InlineUnions {
