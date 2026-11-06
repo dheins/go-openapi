@@ -99,6 +99,20 @@ to a single `type` when the document is loaded, so the generated type is
 `oapi.Nullable[T]`, TypeScript has `T | null`, and examples may be null.
 A schema with no type, or a type list, is left as it is.
 
+## `x-goapi-codec`
+
+On a media type object, `true`: its bodies are encoded and decoded with a
+codec registered at run time (`server.WithCodec`, `client.WithCodec`,
+or a TypeScript client's `codecs` option), as `goapi generate -codec`
+declares one. See the guide's [codecs](guide.md#codecs).
+
+```yaml
+content:
+  application/msgpack:
+    x-goapi-codec: true
+    schema: {$ref: "#/components/schemas/Pet"}
+```
+
 ## `x-enum-varnames`
 
 On a string or integer enum: names for the constants, in the order of

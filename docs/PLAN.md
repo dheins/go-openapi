@@ -675,6 +675,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   sources) and every generator agree.
 - *Not done*: see [features.md](../features.md).
 
+### M34 – Codecs ✅
+- [x] `server.Codec`, `server.WithCodec` and `client.WithCodec`: bodies of
+  media types goapi does not know, encoded and decoded into the
+  generated types
+- [x] `goapi generate -codec` and `x-goapi-codec` declare them; servers
+  and clients check at start that each has a codec
+- [x] TypeScript clients' `codecs` option
+
+**How it went**
+- *Direct marshal*: a codec is a library's Marshal and Unmarshal as they
+  are, so the JSON decoder's rules (required, direction, defaults,
+  pointers) do not apply; `Validate` still checks the constraints.
+- *Fail at start*: generated constructors list the codecs their
+  operations need, so a missing registration is not found by a request.
+- *Shared fixture codec*: "TC" and JSON, which Go and TypeScript tests
+  implement alike, so the end-to-end test crosses both runtimes.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
