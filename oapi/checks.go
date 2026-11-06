@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -93,9 +94,32 @@ var (
 	hostnamePattern = regexp.MustCompile(`^(?i:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.(?i:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?))*\.?$`)
 )
 
-// CheckFormat checks s against a JSON Schema or OpenAPI format. Unknown
-// formats are accepted, as the specification requires.
+// formats are the checks RegisterFormat registers, by format.
+var formats sync.Map
+
+// RegisterFormat makes CheckFormat check strings of a format with check,
+// which returns why a string is not of the format. It replaces the
+// built-in check of a format, and an earlier registration. It is safe to
+// call concurrently, but usually called from an init function, before
+// any value is checked.
+func RegisterFormat(format string, check func(string) error) {
+	if check == nil {
+		formats.Delete(format)
+		return
+	}
+	formats.Store(format, check)
+}
+
+// CheckFormat checks s against a JSON Schema or OpenAPI format, with the
+// check RegisterFormat registered for it, if any. Unknown formats are
+// accepted, as the specification requires.
 func CheckFormat(format, s string) error {
+	if check, ok := formats.Load(format); ok {
+		if err := check.(func(string) error)(s); err != nil {
+			return fmt.Errorf("must be a valid %s: %w", format, err)
+		}
+		return nil
+	}
 	ok := true
 	switch format {
 	case "date-time":

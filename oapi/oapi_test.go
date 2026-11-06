@@ -3,8 +3,11 @@ package oapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -340,4 +343,48 @@ func TestEncodeDirection(t *testing.T) {
 	if got, err := EncodeValue([]byte("hi"), Response); err != nil || string(got) != `"aGk="` {
 		t.Errorf("bytes = %s, %v", got, err)
 	}
+}
+
+func TestRegisterFormat(t *testing.T) {
+	errNotMAC := errors.New("not six hex pairs")
+	RegisterFormat("test-mac", func(s string) error {
+		if _, err := net.ParseMAC(s); err != nil || len(s) != 17 {
+			return errNotMAC
+		}
+		return nil
+	})
+	// A registered check replaces a built-in one.
+	RegisterFormat("email", func(s string) error { return nil })
+	t.Cleanup(func() {
+		RegisterFormat("test-mac", nil)
+		RegisterFormat("email", nil)
+	})
+	if err := CheckFormat("test-mac", "00:1a:2b:3c:4d:5e"); err != nil {
+		t.Errorf("valid: %v", err)
+	}
+	err := CheckFormat("test-mac", "00:1a")
+	if !errors.Is(err, errNotMAC) || err.Error() != "must be a valid test-mac: not six hex pairs" {
+		t.Errorf("invalid: %v", err)
+	}
+	if err := CheckFormat("email", "not an address"); err != nil {
+		t.Errorf("replaced built-in: %v", err)
+	}
+	RegisterFormat("email", nil)
+	if err := CheckFormat("email", "not an address"); err == nil {
+		t.Error("the built-in check is not back after removing the registration")
+	}
+
+	// Registrations and checks may run at once.
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			name := fmt.Sprintf("test-%d", i)
+			RegisterFormat(name, func(string) error { return errNotMAC })
+			if err := CheckFormat(name, "x"); !errors.Is(err, errNotMAC) {
+				t.Errorf("%s: %v", name, err)
+			}
+			RegisterFormat(name, nil)
+		})
+	}
+	wg.Wait()
 }
