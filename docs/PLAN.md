@@ -641,6 +641,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   Go server does.
 - *Not done*: see [features.md](../features.md).
 
+### M32 – Formats of your own ✅
+- [x] `oapi.RegisterFormat`, which `oapi.CheckFormat` and so every
+  generated `Validate` uses, for any format without a Go type
+- [x] Go types of formats: `ir.Options.Formats` (`-format-type`) and
+  `x-go-formats`, over the built-in types; their values can be parameters
+- [x] TypeScript clients check formats, built-in and registered
+
+**How it went**
+- *Two halves*: a type checks its values as it decodes them, and a
+  registered check covers formats that stay strings, so either alone is
+  enough for a format.
+- *Every format checked*: generated code calls `oapi.CheckFormat` for any
+  format, which accepts the unknown ones, so a registration applies
+  without regenerating.
+- *One set of cases*: `oapi/testdata/formats.json` is checked by the Go
+  and TypeScript tests, which keeps the two runtimes in agreement.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

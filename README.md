@@ -145,7 +145,7 @@ metrics.
 ## Documentation
 
 - [Guide](docs/guide.md): validation, models, servers, clients (Go and TypeScript), webhooks and callbacks, documents from Go code, security, options
-- [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-enum-varnames`, `x-enum-descriptions`
+- [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-go-formats`, `x-enum-varnames`, `x-enum-descriptions`
 - [Example](examples/petstore): a complete server (`go run ./examples/petstore -key secret`)
 - [Benchmarks](docs/benchmarks.md)
 - [Changelog](CHANGELOG.md), [known bugs](bugs.md), [planned work](features.md)

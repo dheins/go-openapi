@@ -27,10 +27,6 @@ shipped in.
   `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
   `additionalProperties` or property counts of a struct; these keywords on
   enums and unions. — later
-- String formats of your own: a way to register a format's check (and
-  its Go type), as go-swagger's `strfmt` registry allows. The formats
-  checked or typed are fixed today; `x-go-type` is the only way to use
-  another type. — later
 - go-swagger's model extensions: `x-omitempty`, `x-go-custom-tag` (struct
   tags of other packages, such as `db:` or `yaml:`), `x-order`,
   `x-isnullable` and `x-go-json-string`, so that documents tuned for
@@ -151,6 +147,12 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] String formats of your own: a format's Go type, by
+  `goapi generate -format-type` or `x-go-formats`, over the built-in
+  ones, and checks registered with `oapi.RegisterFormat` (Go) and
+  `registerFormat` (TypeScript, which now checks the built-in formats
+  too), as go-swagger's `strfmt` registry allows. (67c2b8a, 05bc9dc,
+  9c47f6d)
 - [x] XML for maps (an element per key), unions (one object with the
   properties of all their variants), recursive types and `nodeType: none`
   on objects; and XML in TypeScript clients: bodies, responses, and
