@@ -345,6 +345,78 @@ paths:
                 application/xml:
                   schema:
                     $ref: "#/components/schemas/Prefs"
+  /pets/{petId}/attachments:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: attach
+      description: Files as base64 parts, echoed, with object headers.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [thumb]
+              properties:
+                name:
+                  type: string
+                thumb:
+                  type: string
+                  contentEncoding: base64
+                  maxLength: 64
+            encoding:
+              thumb:
+                headers:
+                  X-Size:
+                    explode: true
+                    schema:
+                      $ref: "#/components/schemas/Size"
+          multipart/mixed:
+            schema:
+              type: array
+              items:
+                type: string
+                contentEncoding: base64
+            itemEncoding:
+              headers:
+                X-Size:
+                  schema:
+                    $ref: "#/components/schemas/Size"
+      responses:
+        "200":
+          description: The files, echoed.
+          headers:
+            X-Rate:
+              required: true
+              explode: true
+              schema:
+                type: object
+                required: [limit]
+                properties:
+                  limit:
+                    type: integer
+                    minimum: 1
+                  remaining:
+                    type: integer
+            X-Sig:
+              content:
+                application/jose:
+                  schema:
+                    type: string
+                    pattern: "^[A-Za-z0-9._-]+$"
+          content:
+            multipart/mixed:
+              schema:
+                type: array
+                items:
+                  type: string
+                  contentEncoding: base64
   /pets/{petId}/photo:
     parameters:
       - name: petId
@@ -1252,6 +1324,15 @@ components:
           type: object
           additionalProperties:
             type: integer
+    Size:
+      type: object
+      properties:
+        w:
+          type: integer
+          minimum: 1
+        h:
+          type: integer
+          minimum: 1
     Prefs:
       type: object
       properties:

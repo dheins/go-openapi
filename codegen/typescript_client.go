@@ -311,6 +311,12 @@ func (g *tsGen) partsSpec(value *ir.Ref, p *ir.Parts) string {
 				if h.Array {
 					hdr += ", array: true"
 				}
+				if h.Object {
+					hdr += ", object: true"
+				}
+				if h.Explode {
+					hdr += ", explode: true"
+				}
 				schema := g.schema(h.Type)
 				switch h.ContentKind {
 				case "":
@@ -592,6 +598,12 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 				}
 				if h.Array {
 					hdr += ", array: true"
+				}
+				if h.Object {
+					hdr += ", object: true"
+				}
+				if h.Explode {
+					hdr += ", explode: true"
 				}
 				if h.Content != "" {
 					hdr += fmt.Sprintf(", content: %q", h.ContentKind)

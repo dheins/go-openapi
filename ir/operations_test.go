@@ -942,3 +942,65 @@ paths:
 		t.Errorf("warnings = %+v", m.Warnings)
 	}
 }
+
+func TestHeaderObjectsAndBytes(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+paths:
+  /t:
+    post:
+      operationId: send
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                doc: {type: string, contentEncoding: base64}
+                docs: {type: array, items: {type: string, contentEncoding: base64}}
+          multipart/mixed:
+            schema: {type: array, items: {type: string, contentEncoding: base64}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Rate: {explode: true, schema: {type: object, properties: {limit: {type: integer}}}}
+            X-Plain: {schema: {type: object, properties: {a: {type: string}}}}
+            X-Nested: {schema: {type: object, properties: {a: {type: array, items: {type: string}}}}}
+            X-Sig: {content: {application/jose: {schema: {type: string}}}}
+            X-Num: {content: {application/x-num: {schema: {type: integer}}}}
+`, Options{Operations: true})
+	o := operationNamed(t, m, "Send")
+	props := o.Body.Media[0].Properties
+	if props[0].Type != "bytes" || props[1].Type != "bytes" || !props[1].Array {
+		t.Errorf("form properties %+v", props)
+	}
+	if p := o.Body.Media[1].Parts; p.Item != "bytes" {
+		t.Errorf("parts %+v", p)
+	}
+	headers := map[string]*Header{}
+	for _, h := range o.Responses[0].Headers {
+		headers[h.Name] = h
+	}
+	if h := headers["X-Rate"]; h == nil || !h.Object || !h.Explode || h.Fields.Properties[0].Name != "limit" {
+		t.Errorf("X-Rate = %+v", h)
+	}
+	if h := headers["X-Plain"]; h == nil || !h.Object || h.Explode {
+		t.Errorf("X-Plain = %+v", h)
+	}
+	// An object of arrays, and another media type of a number, are not.
+	if h := headers["X-Nested"]; h != nil {
+		t.Errorf("X-Nested = %+v", h)
+	}
+	if h := headers["X-Num"]; h != nil {
+		t.Errorf("X-Num = %+v", h)
+	}
+	if h := headers["X-Sig"]; h == nil || h.ContentKind != "text" || h.Content != "application/jose" {
+		t.Errorf("X-Sig = %+v", h)
+	}
+	for _, want := range []string{"header \"X-Nested\" is not a primitive value, an array of them, or an object of them", "with content of type application/x-num is not a string"} {
+		if !slices.ContainsFunc(m.Warnings, func(w Warning) bool { return strings.Contains(w.Message, want) }) {
+			t.Errorf("no warning %q in %+v", want, m.Warnings)
+		}
+	}
+}

@@ -116,6 +116,36 @@ func FormatArray[T any](vs []T) (string, error) {
 	return strings.Join(items, ","), nil
 }
 
+// FormatObject writes v, an object of primitive values, as the value of a
+// header in the simple style, encoded in direction dir: name=value pairs
+// with explode, else name,value pairs, comma-separated, with items that
+// hold a comma or a quote quoted.
+func FormatObject(v any, explode bool, dir oapi.Direction) (string, error) {
+	fields, err := ObjectFields(v, false, dir)
+	if err != nil {
+		return "", fmt.Errorf("formatting header value: %w", err)
+	}
+	var items []string
+	for _, f := range fields {
+		val := strings.Join(f.Values, ",")
+		if explode {
+			items = append(items, quoteHeaderItem(f.Name()+"="+val))
+		} else {
+			items = append(items, quoteHeaderItem(f.Name()), quoteHeaderItem(val))
+		}
+	}
+	return strings.Join(items, ","), nil
+}
+
+// quoteHeaderItem quotes an item of a header list that would not read back
+// as one item: one with a comma or a quote, or spaces around it.
+func quoteHeaderItem(s string) string {
+	if !strings.ContainsAny(s, `",`) && strings.TrimSpace(s) == s {
+		return s
+	}
+	return strconv.Quote(s)
+}
+
 // EncodeFormContent writes v, an object, as the text of a parameter or
 // header serialized as application/x-www-form-urlencoded, encoded in
 // direction dir: nested objects as a[b] fields, arrays as repeated ones.

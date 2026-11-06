@@ -245,6 +245,20 @@ func TestBodiesRoundTrip(t *testing.T) {
 		t.Errorf("multipart = %+v", got)
 	}
 
+	// Bytes, sent base64 with their transfer encoding.
+	type doc struct {
+		Data []byte `json:"data"`
+	}
+	dprops := server.Property{Type: "object", Properties: map[string]server.Property{"data": {Type: "bytes"}}}
+	r = NewRequest("POST")
+	r.MultipartBody(doc{Data: []byte{0, 0xff, 'x'}}, dprops)
+	if !bytes.Contains(r.body, []byte("Content-Transfer-Encoding: base64")) {
+		t.Errorf("bytes part: %q", r.body)
+	}
+	if got, err := server.DecodeMultipart[doc](r.body, r.contentType, dprops); err != nil || string(got.Data) != "\x00\xffx" {
+		t.Errorf("bytes = %q, %v", got.Data, err)
+	}
+
 	// Positional parts, as JSON items.
 	r = NewRequest("POST")
 	parts := server.Parts{Item: "json"}

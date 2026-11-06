@@ -208,6 +208,28 @@ const getContentSpec: OperationSpec = {
   responses: [{ status: "204", headers: [{ key: "xCode", name: "X-Code", content: "text", schema: { kind: "integer" } }, { key: "xWhere", name: "X-Where", content: "form", schema: $ref(() => $m.FilterSchema) }] }],
 };
 
+/** The inputs of attach. */
+export interface AttachRequest {
+  petId: number;
+  body?: $m.AttachRequestBody;
+  mixedBody?: Part<string>[];
+  /** The media type to send the body as; by default the first of the
+   * property that is set. */
+  contentType?: "multipart/form-data" | "multipart/mixed";
+}
+
+/** The responses of attach. */
+export type AttachResponse =
+  | { status: 200; body: string[]; headers: { xRate: $m.Attach200XRate; xSig?: string } };
+
+const attachSpec: OperationSpec = {
+  method: "POST",
+  path: "/pets/{petId}/attachments",
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  body: { required: true, media: [{ mediaType: "multipart/form-data", kind: "multipart", key: "body", schema: $ref(() => $m.AttachRequestBodySchema) }, { mediaType: "multipart/mixed", kind: "parts", key: "mixedBody", schema: { kind: "any" }, parts: { item: { kind: "bytes", schema: { kind: "string", format: "byte" }, part: true }, encoding: { headers: [{ name: "X-Size", object: true, schema: $ref(() => $m.SizeSchema) }] } } }] },
+  responses: [{ status: "200", mediaType: "multipart/mixed", kind: "parts", parts: { item: { kind: "bytes", schema: { kind: "string", format: "byte" } } }, headers: [{ key: "xRate", name: "X-Rate", required: true, object: true, explode: true, schema: $ref(() => $m.Attach200XRateSchema) }, { key: "xSig", name: "X-Sig", content: "text", schema: { kind: "string", pattern: "^[A-Za-z0-9._-]+$" } }] }],
+};
+
 /** The inputs of getPhoto. */
 export interface GetPhotoRequest {
   petId: number;
@@ -805,6 +827,15 @@ export class Client {
    */
   getContent(req: GetContentRequest, call?: CallOptions): Promise<GetContentResponse> {
     return send(this.#cfg, getContentSpec, req, call) as Promise<GetContentResponse>;
+  }
+
+  /**
+   * POST /pets/{petId}/attachments.
+   *
+   * Files as base64 parts, echoed, with object headers.
+   */
+  attach(req: AttachRequest, call?: CallOptions): Promise<AttachResponse> {
+    return send(this.#cfg, attachSpec, req, call) as Promise<AttachResponse>;
   }
 
   /** GET /pets/{petId}/photo. */

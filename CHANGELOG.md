@@ -4,6 +4,17 @@
 
 ### Added
 
+- Response and multipart part headers whose schemas are objects of
+  primitive values, in the simple style (`a,1,b,2`, or `a=1,b=2` with
+  `explode`): servers write and check them, Go and TypeScript clients
+  read them (`server.FormatObject`, `server.ParseObjectHeader`). Headers
+  with `content` of a media type other than JSON, text, form or XML are
+  their text, for a string schema.
+- `contentEncoding: base64` (`[]byte`) parts, in `multipart/form-data`
+  bodies (answered with 415 before) and as positional parts: sent base64
+  with `Content-Transfer-Encoding: base64`, and read as each part's own
+  transfer encoding says. TypeScript clients send form fields of them as
+  their bytes, which `FormData` cannot label.
 - Custom templates (experimental): `goapi generate model|server|client|ts-client
   -templates dir` (`codegen.Options.Templates`, `TSOptions.Templates`)
   replaces the blocks of the built-in templates its `*.tmpl` files define,

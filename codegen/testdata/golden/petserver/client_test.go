@@ -547,6 +547,35 @@ func TestClientRanges(t *testing.T) {
 	as[api.DownloadPhoto416Response](t)(c.DownloadPhoto(ctx, &api.DownloadPhotoRequest{PetID: 1, Range: oapi.Some("bytes=50-")}))
 }
 
+func TestClientBase64PartsAndObjectHeaders(t *testing.T) {
+	ctx := context.Background()
+	s, c := newTestClient(t, petclient.Credentials{})
+	binary := []byte{0, 0xff, 'P'}
+	r := as[api.Attach200MixedResponse](t)(c.Attach(ctx, &api.AttachRequest{PetID: 1, Body: model.AttachRequestBody{Thumb: binary}}))
+	if len(r.Body) != 1 || string(r.Body[0]) != string(binary) || r.XRate.Limit != 10 || r.XRate.Remaining.Value != 9 || r.XSig.Value != "abc.def" {
+		t.Errorf("response %+v", r)
+	}
+	if got := s.seen["Attach"].(*api.AttachRequest).Body.Thumb; string(got) != string(binary) {
+		t.Errorf("sent %q", got)
+	}
+	size, err := server.FormatObject(model.Size{W: oapi.Some(int64(4)), H: oapi.Some(int64(5))}, false, oapi.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := []oapi.Part[[]byte]{{Header: textproto.MIMEHeader{"X-Size": {size}}, Value: binary}, {Value: []byte("x")}}
+	r = as[api.Attach200MixedResponse](t)(c.Attach(ctx, &api.AttachRequest{PetID: 1, MixedBody: oapi.Some(parts), ContentType: "multipart/mixed"}))
+	if len(r.Body) != 2 || string(r.Body[1]) != "x" || r.XRate.Remaining.Value != 8 {
+		t.Errorf("parts response %+v", r)
+	}
+	// Part headers are checked before sending.
+	var invalid *client.InvalidRequest
+	parts[0].Header.Set("X-Size", "w,0,h,1")
+	if _, err := c.Attach(ctx, &api.AttachRequest{PetID: 1, MixedBody: oapi.Some(parts), ContentType: "multipart/mixed"}); !errors.As(err, &invalid) ||
+		!strings.Contains(invalid.Problem.Errors[0].Detail, "must be at least 1") {
+		t.Errorf("invalid header: %v", err)
+	}
+}
+
 func TestClientTupleParts(t *testing.T) {
 	ctx := context.Background()
 	s, c := newTestClient(t, petclient.Credentials{})

@@ -451,8 +451,13 @@ func writeValue(mw *multipart.Writer, name string, v reflect.Value, prop server.
 		if len(item) > 0 && item[0] == '{' {
 			ct = "application/json"
 		}
-		ct = declaredType(prop, ct)
 		h := textproto.MIMEHeader{}
+		if prop.Type == "bytes" {
+			// The value is the base64 of the bytes, as JSON has them.
+			ct = "application/octet-stream"
+			h.Set("Content-Transfer-Encoding", "base64")
+		}
+		ct = declaredType(prop, ct)
 		h.Set("Content-Disposition", fmt.Sprintf("form-data; name=%q", name))
 		h.Set("Content-Type", ct)
 		pw, err := mw.CreatePart(h)

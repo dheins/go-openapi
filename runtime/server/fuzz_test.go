@@ -87,6 +87,20 @@ func FuzzMultipart(f *testing.F) {
 		rules.Item = "text"
 		_, _ = DecodeParts[string](bytes.Clone(body), ct, rules)
 		_, _ = DecodeParts[oapi.Part[string]](bytes.Clone(body), ct, rules)
+		// As bytes, by each part's transfer encoding, which read back as
+		// they were written.
+		rules.Item = "bytes"
+		if raw, err := DecodeParts[[]byte](bytes.Clone(body), ct, rules); err == nil && len(raw) > 0 {
+			plain := Parts{Item: "bytes"}
+			again, ct2, err := EncodeParts(raw, "multipart/mixed", plain, oapi.Request)
+			if err != nil {
+				t.Fatalf("encoding %q: %v", raw, err)
+			}
+			back, err := DecodeParts[[]byte](again, ct2, plain)
+			if err != nil || !reflect.DeepEqual(back, raw) {
+				t.Fatalf("%q read back as %q, %v", raw, back, err)
+			}
+		}
 		rules.Item = "file"
 		files, err := DecodeParts[oapi.File](bytes.Clone(body), ct, rules)
 		// Read as a stream, the parts are the same, unless they end at

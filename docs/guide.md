@@ -553,11 +553,18 @@ name. The `encoding` object is applied to multipart parts: a part that
 declares a content type must match `contentType` (a list of media types or
 ranges), and the `required` part headers must be present. A part header's
 value is parsed by its schema, as a header parameter's is (a primitive
-value, an array of them in the simple style, or with `content` in any of
-the media types above), and
+value, an array of them or an object of them in the simple style, or with
+`content` in any of the media types above, another media type's being
+its text), and
 validated: a bad value is a 400 at the part
 (`body /report: part header "X-Checksum": must match the pattern ...`).
 A header of another schema is only checked to be present, with a warning.
+A part whose schema is `type: string, contentEncoding: base64` is a
+`[]byte`, in a multipart body or as positional parts: it is sent base64,
+with `Content-Transfer-Encoding: base64`, and read as the part's own
+`Content-Transfer-Encoding` says (base64, quoted-printable, or its bytes
+as they are without one); data that does not decode is a 400 at the
+part.
 With request validation on, a generated Go client checks the headers of
 file parts (`oapi.File.Header`) before sending. In a JSON
 body, an `oapi.File` is a string: its data must be UTF-8, or encoding fails
@@ -808,7 +815,12 @@ return api.CreatePet4XXJSONResponse{StatusCode: 409, Body: problem}, nil // rang
 
 Response headers are fields of the response type; a header with
 `content` holds its schema's type and is written in its media type, as
-parameters are (JSON, text, a form or XML). Media types
+parameters are (JSON, text, a form or XML; another media type's value is
+its text, for a string schema). A header whose schema is an object of
+primitive values is a struct, written in the simple style:
+`limit,100,remaining,5`, or `limit=100,remaining=5` with `explode: true`
+(`server.FormatObject` writes one, `server.ParseObjectHeader` reads one,
+for part headers a client sets). Media types
 become
 separate types: `...JSONResponse`, `...XMLResponse`, `...TextResponse`, binary ones named
 after the subtype (`...PNGResponse`; `image/*` adds a `ContentType` field),
@@ -1201,6 +1213,7 @@ if (resp.status === 200) {
 - **Requests:**
   - Request properties are named after the parameters, in camel case (`petId`, `xRequestID`), plus `body` (or one property per body type) and `contentType`.
   - The runtime writes every parameter style the Go client does, and JSON, form, multipart (`FormData`, with `Blob`s or `File`s as files) and text or binary bodies.
+  - A `[]byte` (`contentEncoding: base64`) is a base64 string. As a positional part it is sent base64 with its `Content-Transfer-Encoding`; as a `multipart/form-data` field, as its bytes, since `FormData` cannot set that header. Object headers are read in the simple style.
   - Positional multipart bodies (`multipart/mixed` and the like) are arrays of their items, or for `prefixItems` an object with a property per position and `rest`. A file is a `Blob`; an item whose encoding declares headers is a `Part<T>`, `{ header: Headers; value: T }`, files too. The runtime writes them itself, with each part's headers and length, and reads them as they arrive.
   - JSON Lines, server-sent event and streamed multipart bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.

@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -69,6 +70,14 @@ func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, e
 		}
 		_, declared := obj.Properties[name]
 		switch {
+		case prop.Type == "bytes":
+			raw, err := transferDecoded(part.Header, data)
+			if err != nil {
+				errs.Add(oapi.Field("", name), err.Error())
+				continue
+			}
+			// As JSON has bytes: base64.
+			fields[name] = append(fields[name], base64.StdEncoding.EncodeToString(raw))
 		case prop.Type == "file":
 			files[name] = append(files[name], oapi.File{Name: part.FileName(), ContentType: part.Header.Get("Content-Type"), Header: part.Header, Data: data})
 			// A placeholder, so that decoding sees the property as present.

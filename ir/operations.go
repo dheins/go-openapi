@@ -281,8 +281,12 @@ type Header struct {
 	ContentKind string
 	Fields      *ParamProperty
 	XML         *XMLNode
-	Elem        *Ref
-	Type        *Ref
+	// Object says the value is an object of primitive values, in the
+	// simple style: its Fields as name,value pairs, or name=value ones if
+	// Explode.
+	Object, Explode bool
+	Elem            *Ref
+	Type            *Ref
 }
 
 // reservedServerNames are exported identifiers the generated server
@@ -701,6 +705,8 @@ func valueShape(r *Ref, files bool, seen map[*Type]*bool) (ParamProperty, bool) 
 	switch {
 	case files && isFile(r):
 		prop.Type = "file"
+	case files && isBytes(r):
+		prop.Type = "bytes"
 	case jsonType(r) != "":
 		prop.Type = jsonType(r)
 	case r.Kind == Any:
@@ -714,6 +720,14 @@ func valueShape(r *Ref, files bool, seen map[*Type]*bool) (ParamProperty, bool) 
 		prop = obj
 	}
 	return prop, true
+}
+
+// isBytes reports whether r is []byte (contentEncoding), or a type of it.
+func isBytes(r *Ref) bool {
+	for r.Kind == Named && (r.Type.Kind == Alias || r.Type.Kind == Defined) {
+		r = r.Type.Underlying
+	}
+	return r.Kind == Builtin && r.Name == "[]byte"
 }
 
 // isFile reports whether r is oapi.File or an alias of it.
@@ -1262,6 +1276,8 @@ func partKind(r *Ref) string {
 	switch {
 	case isFile(r):
 		return "file"
+	case isBytes(r):
+		return "bytes"
 	case jsonType(r) == "string":
 		return "text"
 	}
@@ -1618,12 +1634,16 @@ func (b *builder) typedHeader(name string, h *oas.Header, hint string) (*Header,
 		header.Content, schema = strings.ToLower(mt), m.Deref().Schema
 		break
 	}
+	ref := stripNullable(b.use(schema, hint, nil))
 	if header.Content != "" {
 		if header.ContentKind = contentKind(header.Content); header.ContentKind == "" {
-			return nil, fmt.Sprintf("with content of type %s is not supported yet", header.Content)
+			// Another media type's value is taken as its text.
+			if jsonType(ref) != "string" {
+				return nil, fmt.Sprintf("with content of type %s is not a string, which it is read as", header.Content)
+			}
+			header.ContentKind = "text"
 		}
 	}
-	ref := stripNullable(b.use(schema, hint, nil))
 	switch header.ContentKind {
 	case "text":
 		if !isScalar(ref) {
@@ -1655,9 +1675,30 @@ func (b *builder) typedHeader(name string, h *oas.Header, hint string) (*Header,
 		header.Elem = stripNullable(ref.Elem)
 		header.Type = &Ref{Kind: Slice, Elem: header.Elem}
 	default:
-		return nil, "is not a primitive value or an array of them"
+		obj, ok := objectProperties(ref, false)
+		if !ok || !flatObject(obj) {
+			return nil, "is not a primitive value, an array of them, or an object of them"
+		}
+		header.Object, header.Fields = true, &obj
+		header.Explode = h.Explode != nil && *h.Explode
+		header.Elem = ref
+		header.Type = ref
 	}
 	return header, ""
+}
+
+// flatObject reports whether the properties of obj are primitive values,
+// as an object in the simple style holds them.
+func flatObject(obj ParamProperty) bool {
+	if obj.Ref != "" || obj.Shape != "" || obj.Additional != nil {
+		return false
+	}
+	for _, p := range obj.Properties {
+		if p.Array || p.Type == "object" || p.Type == "any" || p.Ref != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // contentKind classifies the media type of a parameter or header with

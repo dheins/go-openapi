@@ -264,6 +264,29 @@ func DecodeFields[T any](fields map[string][]string, obj Property) (T, error) {
 	return v, err
 }
 
+// ParseObjectHeader parses the values of a header holding an object in the
+// simple style, as a response or part header: its properties as name=value
+// pairs with explode, else as name,value pairs, in a comma-separated list
+// (quoted items unquoted), whose values are converted as obj says, in
+// direction dir.
+func ParseObjectHeader[T any](vals []string, explode bool, obj Property, dir oapi.Direction) (T, error) {
+	var v T
+	var items []string
+	for _, s := range vals {
+		items = append(items, splitHeaderList(s)...)
+	}
+	parsed, err := Param{Style: "simple", Explode: explode, Shape: Object}.fromParts(items, explode)
+	if err != nil {
+		return v, err
+	}
+	data, err := ObjectJSON(parsed.Fields, obj)
+	if err != nil {
+		return v, err
+	}
+	err = oapi.DecodeValue(data, &v, dir)
+	return v, err
+}
+
 // DecodeContent decodes a parameter serialized as JSON.
 func DecodeContent[T any](raw string) (T, error) {
 	var v T

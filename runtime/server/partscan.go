@@ -127,7 +127,8 @@ func (s *partScanner) next() (textproto.MIMEHeader, []byte, error) {
 
 // untilDelimiter reads the data of a part up to the delimiter after it.
 func (s *partScanner) untilDelimiter() ([]byte, error) {
-	var data []byte
+	// Empty, not nil, for a part without data, as mime/multipart has it.
+	data := []byte{}
 	for {
 		line, err := s.line()
 		// The line end before a delimiter belongs to it; one may also

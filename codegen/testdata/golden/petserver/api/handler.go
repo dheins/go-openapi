@@ -44,6 +44,10 @@ type Handler interface {
 	//
 	// A header parameter serialized as XML.
 	EchoPrefs(ctx context.Context, req *EchoPrefsRequest) (EchoPrefsResponse, error)
+	// Attach handles POST /pets/{petId}/attachments.
+	//
+	// Files as base64 parts, echoed, with object headers.
+	Attach(ctx context.Context, req *AttachRequest) (AttachResponse, error)
 	// GetPhoto handles GET /pets/{petId}/photo.
 	GetPhoto(ctx context.Context, req *GetPhotoRequest) (GetPhotoResponse, error)
 	// UploadPhoto handles PUT /pets/{petId}/photo.

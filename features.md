@@ -41,9 +41,9 @@ shipped in.
   (a stream is sent once today). — later
 - XML for unions, maps, recursive types and `nodeType: none` on objects
   (answered with 415 today). — later
-- Multipart part headers whose schemas are objects, or whose `content` is
-  not JSON, text, a form or XML (only their presence is checked), and
-  `contentEncoding` (`[]byte`) parts. — later
+- Headers (response and part headers) whose objects hold arrays or other
+  objects, which the simple style cannot write; only their presence is
+  checked. — later
 - Arrays of arrays in form and multipart bodies and object parameters
   (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects
   (indices are read and written). — later
@@ -76,7 +76,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   request still streams (`duplex: "half"` sends the request first). — later
 - TypeScript clients: XML bodies and responses, parameters and response
   headers with XML `content`, headers of `multipart/form-data` parts
-  (`FormData` cannot set them), quoted-printable parts, and `int64`
+  (`FormData` cannot set them), quoted-printable parts (base64 `[]byte`
+  ones included), and `int64`
   values beyond 2^53 (they are `number`s). Cookie parameters cannot be
   sent from browsers, which do not let scripts set `Cookie`. — later
 
@@ -119,6 +120,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Object headers (response and part headers, in the simple style),
+  headers with content of any media type, as text, and `contentEncoding`
+  (`[]byte`) parts sent and read by their `Content-Transfer-Encoding`, in
+  servers and Go and TypeScript clients. (95cf03c, ea58207, 3637815)
 - [x] Custom templates: `-templates dir` on every `goapi generate`
   command replaces blocks of the Go and TypeScript templates by name, and
   `goapi templates` writes the built-in ones. (7f45686, f0b37f0, ddd127a)

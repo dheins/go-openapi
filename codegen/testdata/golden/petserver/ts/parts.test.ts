@@ -10,7 +10,7 @@ import { Client, InvalidRequestError, InvalidResponseError } from "./index.ts";
 
 // respond returns a client whose fetch answers with body, sent a byte at
 // a time, of the multipart type subtype, and records the request.
-function respond(body: string, status = 200, subtype = "mixed"): { client: Client; sent: { init?: RequestInit | undefined } } {
+function respond(body: string, status = 200, subtype = "mixed", headers: Record<string, string> = {}): { client: Client; sent: { init?: RequestInit | undefined } } {
   const sent: { init?: RequestInit | undefined } = {};
   const fetch = async (_: RequestInfo | URL, init?: RequestInit) => {
     sent.init = init;
@@ -25,7 +25,7 @@ function respond(body: string, status = 200, subtype = "mixed"): { client: Clien
         }
       },
     });
-    return new Response(stream, { status, headers: { "Content-Type": `multipart/${subtype}; boundary="b"` } });
+    return new Response(stream, { status, headers: { "Content-Type": `multipart/${subtype}; boundary="b"`, ...headers } });
   };
   return { client: new Client({ baseUrl: "http://pets.test", fetch, validateResponses: true }), sent };
 }
@@ -106,4 +106,22 @@ test("byte ranges are read from their Content-Range", async () => {
     const { client } = respond(body, 206, "byteranges");
     await assert.rejects(client.downloadPhoto({ petId: 1, range: "bytes=0-1" }), (e: unknown) => e instanceof InvalidResponseError && message.test(e.message));
   }
+});
+
+test("base64 parts are read by their transfer encoding", async () => {
+  const rate = { "X-Rate": 'limit=3,"remaining=1"' };
+  const { client } = respond(`--b\r\n\r\nraw\r\n--b\r\nContent-Transfer-Encoding: base64\r\n\r\nAP9Q\r\n--b--\r\n`, 200, "mixed", rate);
+  const got = await client.attach({ petId: 1, body: { thumb: "AA==" } });
+  // Without one, the bytes; with base64, its text; the object header's
+  // quoted item unquoted, and its values converted.
+  assert.deepEqual(got, { status: 200, body: ["cmF3", "AP9Q"], headers: { xRate: { limit: 3, remaining: 1 } } });
+  for (const [part, message] of [
+    ["Content-Transfer-Encoding: base64\r\n\r\n!!", /invalid base64 data/],
+    ["Content-Transfer-Encoding: x-gzip\r\n\r\nx", /"x-gzip" is not supported/],
+  ] as const) {
+    const { client } = respond(`--b\r\n${part}\r\n--b--\r\n`, 200, "mixed", rate);
+    await assert.rejects(client.attach({ petId: 1, body: { thumb: "AA==" } }), (e: unknown) => e instanceof InvalidResponseError && message.test(e.message));
+  }
+  const { client: bad } = respond(`--b--\r\n`, 200, "mixed", { "X-Rate": "limit" });
+  await assert.rejects(bad.attach({ petId: 1, body: { thumb: "AA==" } }), /header X-Rate/);
 });
