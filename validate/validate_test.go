@@ -398,5 +398,7 @@ func TestExampleSchemas(t *testing.T) {
 		{RuleExampleSchema, 58, "/: missing properties 'name', 'secret'"},
 		{RuleExampleSchema, 58, "/: missing property 'name'"},
 		{RuleExampleSchema, 68, "/name: minLength: got 0, want 1"},
+		// x-isnullable allows null; x-nullable: false does not.
+		{RuleExampleSchema, 78, "/: got null, want string"},
 	})
 }

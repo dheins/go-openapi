@@ -250,7 +250,7 @@ func TestClientResponses(t *testing.T) {
 
 	tag := as[api.PutTag200JSONResponse](t)(c.PutTag(ctx, &api.PutTagRequest{Code: "ABC-1", Slug: oapi.Some("a-b"),
 		Body: model.Tag{Code: "ABC-1", Color: oapi.Some(formats.Color{G: 0x10})}}))
-	if tag.Body.Code != "ABC-1" || tag.Body.Color.Value != (formats.Color{G: 0x10}) {
+	if tag.Body.Code != "ABC-1" || tag.Body.Color.Value != (formats.Color{G: 0x10}) || tag.Body.Note != "" || tag.Body.Labels == nil {
 		t.Errorf("tag = %+v", tag.Body)
 	}
 	// The client checks the registered format before sending.

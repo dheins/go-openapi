@@ -126,7 +126,7 @@ conversion does:
 | `collectionFormat` csv, ssv, pipes, multi | `style` and `explode` (csv, the 2.0 default, is `explode: false` in a query) |
 | response `schema` and `examples` | `content` per `produces`, with the examples |
 | `basic`, `apiKey`, `oauth2` flows | `http` basic, `apiKey`, `oauth2` `flows` (`application` → `clientCredentials`, `accessCode` → `authorizationCode`) |
-| `x-nullable`, `discriminator: name`, `type: file`, `example` | `null` in `type`, `discriminator.propertyName`, a binary string, `examples` |
+| `x-nullable`, `x-isnullable`, `discriminator: name`, `type: file`, `example` | `null` in `type`, `discriminator.propertyName`, a binary string, `examples` |
 
 Some 2.0 features have no OpenAPI 3 equivalent. The conversion reports
 them as `conversion` warnings and does the closest thing:

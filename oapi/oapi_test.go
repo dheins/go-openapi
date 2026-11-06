@@ -408,3 +408,9 @@ func TestRegisterFormat(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestIsZero(t *testing.T) {
+	if !IsZero("") || IsZero("a") || !IsZero([]int(nil)) || IsZero([]int{}) || !IsZero(struct{ A int }{}) || !IsZero(Nullable[int]{}) {
+		t.Error("IsZero")
+	}
+}

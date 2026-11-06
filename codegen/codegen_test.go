@@ -34,6 +34,7 @@ func TestTag(t *testing.T) {
 		{ir.Field{JSONName: "a", Type: &ir.Ref{Kind: ir.Optional, Elem: str}}, "`json:\"a,omitzero\"`"},
 		{ir.Field{JSONName: "a", Type: &ir.Ref{Kind: ir.Pointer, Elem: str}}, "`json:\"a,omitempty\"`"},
 		{ir.Field{JSONName: `we"ird`, Required: true, Type: str}, "`json:\"we\\\"ird\"`"},
+		{ir.Field{JSONName: "a", Required: true, Type: str, Tags: `db:"a" yaml:"a,omitempty"`}, "`json:\"a\" db:\"a\" yaml:\"a,omitempty\"`"},
 	}
 	for _, tt := range tests {
 		if got := tag(&tt.field); got != tt.want {

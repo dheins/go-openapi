@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/dheins/go-openapi/loader"
@@ -392,6 +393,13 @@ func (b *builder) fillStruct(t *Type) {
 		}
 		if p.schema != nil {
 			f.Doc = describeSchema(p.schema)
+			if tags := extensionString(p.schema, "x-go-custom-tag"); tags != "" {
+				if why := checkStructTags(tags); why != "" {
+					b.warn(p.schema, []string{"x-go-custom-tag"}, why+"; the tags are not added")
+				} else {
+					f.Tags = strings.TrimSpace(tags)
+				}
+			}
 			f.Deprecated = p.schema.Deprecated
 			f.ReadOnly = p.schema.ReadOnly
 			f.WriteOnly = p.schema.WriteOnly
@@ -399,7 +407,8 @@ func (b *builder) fillStruct(t *Type) {
 				f.Default = defaultLiteral(p.schema)
 			}
 		}
-		if !f.Required {
+		f.AlwaysWrite = !f.Required && extensionFalse(p.schema, "x-omitempty")
+		if !f.Required && !f.AlwaysWrite {
 			r = b.optional(r)
 		}
 		f.Type = r
@@ -1042,6 +1051,56 @@ func wrapNullable(r *Ref) *Ref {
 		return r
 	}
 	return &Ref{Kind: Nullable, Elem: r}
+}
+
+// checkStructTags returns why tags, of x-go-custom-tag, are not struct
+// tags to add after a json tag (key:"value" pairs separated by spaces,
+// as reflect.StructTag reads them, none of them json), or "".
+func checkStructTags(tags string) string {
+	if strings.Contains(tags, "`") {
+		// The tags are written in a raw string literal.
+		return "x-go-custom-tag cannot contain a backquote"
+	}
+	s := strings.TrimSpace(tags)
+	seen := map[string]bool{}
+	for s != "" {
+		i := 0
+		for i < len(s) && s[i] > ' ' && s[i] != ':' && s[i] != '"' && s[i] != 0x7f {
+			i++
+		}
+		if i == 0 || i+1 >= len(s) || s[i] != ':' || s[i+1] != '"' {
+			return fmt.Sprintf("%q is not key:\"value\" struct tags", tags)
+		}
+		key := s[:i]
+		s = s[i+1:]
+		// The quoted value ends at the first unescaped quote.
+		j := 1
+		for j < len(s) && s[j] != '"' {
+			if s[j] == '\\' {
+				j++
+			}
+			j++
+		}
+		if j >= len(s) {
+			return fmt.Sprintf("%q is not key:\"value\" struct tags", tags)
+		}
+		if _, err := strconv.Unquote(s[:j+1]); err != nil {
+			return fmt.Sprintf("%q is not key:\"value\" struct tags", tags)
+		}
+		switch {
+		case key == "json":
+			return "x-go-custom-tag cannot set the json tag, which goapi writes"
+		case seen[key]:
+			return fmt.Sprintf("x-go-custom-tag sets the %s tag twice", key)
+		}
+		seen[key] = true
+		s = s[j+1:]
+		if s != "" && s[0] != ' ' {
+			return fmt.Sprintf("%q is not key:\"value\" struct tags", tags)
+		}
+		s = strings.TrimLeft(s, " ")
+	}
+	return ""
 }
 
 // goTypeOverride returns the type named by an x-go-type extension: a
@@ -1940,6 +1999,16 @@ func extensionString(s *oas.Schema, key string) string {
 		return ""
 	}
 	return v
+}
+
+// extensionFalse reports whether the extension key of s is false.
+func extensionFalse(s *oas.Schema, key string) bool {
+	if s == nil {
+		return false
+	}
+	raw, ok := s.Extra.Get(key)
+	var v bool
+	return ok && json.Unmarshal(raw, &v) == nil && !v
 }
 
 func extensionStrings(s *oas.Schema, key string) []string {

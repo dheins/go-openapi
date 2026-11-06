@@ -840,3 +840,28 @@ paths: {}
 		t.Errorf("referenced file: %v", err)
 	}
 }
+
+func TestNullableExtensions(t *testing.T) {
+	for _, head := range []string{"swagger: \"2.0\"\ninfo: {title: t, version: v}\npaths: {}\ndefinitions:\n", "openapi: 3.0.3\ninfo: {title: t, version: v}\npaths: {}\ncomponents:\n  schemas:\n", "openapi: 3.1.0\ninfo: {title: t, version: v}\npaths: {}\ncomponents:\n  schemas:\n"} {
+		indent := "  "
+		if !strings.HasPrefix(head, "swagger") {
+			indent = "    "
+		}
+		doc := head + indent + "A:\n" + indent + "  type: object\n" + indent + "  properties:\n" +
+			indent + "    a: {type: string, x-nullable: true}\n" +
+			indent + "    b: {type: integer, x-isnullable: true}\n" +
+			indent + "    c: {type: string, x-isnullable: false}\n" +
+			indent + "    d: {x-isnullable: true}\n"
+		spec, err := LoadBytes([]byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, _ := spec.Document.Components.Schemas.Get("A")
+		for name, want := range map[string]oas.Types{"a": {"string", "null"}, "b": {"integer", "null"}, "c": {"string"}, "d": nil} {
+			p, _ := a.Properties.Get(name)
+			if !reflect.DeepEqual(p.Type, want) {
+				t.Errorf("%s%s: type %v, want %v", head[:13], name, p.Type, want)
+			}
+		}
+	}
+}

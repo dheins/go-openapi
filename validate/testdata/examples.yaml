@@ -66,3 +66,13 @@ components:
         secret: {type: string, writeOnly: true}
       examples:
         - {id: 1, name: ""}
+    # go-swagger's x-isnullable allows null, as type null does; x-nullable
+    # too.
+    Nick:
+      type: string
+      x-isnullable: true
+      examples: [null, "rex"]
+    Wrong:
+      type: string
+      x-nullable: false
+      examples: [null]

@@ -274,6 +274,7 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 		// components added would be neither 2.0 nor 3.x.
 		r.converter().document(src.root, src.URI())
 	}
+	nullableExtensions(src.root)
 	var doc oas.Document
 	if err := decodeNode(src.root, &doc); err != nil {
 		return nil, &Error{Location: Location{URI: src.URI()}, Err: err}

@@ -499,6 +499,7 @@ func (r *resolver) decode(loc Location, typ reflect.Type) (any, error) {
 			return nil, err
 		}
 	}
+	nullableExtensions(n)
 	if err := decodeNode(n, obj); err != nil {
 		return nil, fmt.Errorf("decoding %s as %s: %w", loc, typeName(typ), err)
 	}

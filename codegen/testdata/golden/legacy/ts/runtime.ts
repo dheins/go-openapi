@@ -71,6 +71,9 @@ export interface Property {
   readonly writeOnly?: boolean;
   /** The value of an absent property, which responses read get. */
   readonly default?: unknown;
+  /** Written even when unset (x-omitempty: false), as its zero value,
+   * which stands for an absent property and is not checked. */
+  readonly zeroIsAbsent?: boolean;
 }
 
 export interface UnionSchema {
@@ -277,6 +280,9 @@ function check(schema: Schema, v: unknown, dir: Direction, at: string, out: Issu
           }
           continue;
         }
+        if (p.zeroIsAbsent && isZeroValue(value)) {
+          continue;
+        }
         check(p.schema, value, dir, child(at, name), out);
       }
       for (const [name, value] of Object.entries(v)) {
@@ -408,6 +414,12 @@ function formatIssue(format: string, s: string): string | undefined {
   }
   const builtin = builtinFormats[format];
   return builtin === undefined || builtin(s) ? undefined : `must be a valid ${format}`;
+}
+
+// isZeroValue reports whether v is what a Go server writes for an unset
+// property: "", 0, false, an empty array or object, or null.
+function isZeroValue(v: unknown): boolean {
+  return v === "" || v === 0 || v === false || v === null || (Array.isArray(v) ? v.length === 0 : isObject(v) && Object.keys(v).length === 0);
 }
 
 function countProperties(n: number, schema: { minProperties?: number; maxProperties?: number }, add: (m: string) => void): void {

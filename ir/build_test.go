@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -766,6 +767,94 @@ func TestValidGoType(t *testing.T) {
 	} {
 		if got := ValidGoType(v); got != want {
 			t.Errorf("ValidGoType(%q) = %q, want %q", v, got, want)
+		}
+	}
+}
+
+func TestCustomTags(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Row:
+      type: object
+      properties:
+        id: {type: integer, x-go-custom-tag: 'db:"id" yaml:"id"'}
+        name: {type: string, x-go-custom-tag: '  db:"name,omitempty"  '}
+        bad: {type: string, x-go-custom-tag: 'db:name'}
+        mine: {type: string, x-go-custom-tag: 'json:"other"'}
+`, Options{})
+	row := typeNamed(t, m, "Row")
+	for name, want := range map[string]string{"ID": `db:"id" yaml:"id"`, "Name": `db:"name,omitempty"`, "Bad": "", "Mine": ""} {
+		if got := fieldNamed(t, row, name).Tags; got != want {
+			t.Errorf("%s tags = %q, want %q", name, got, want)
+		}
+	}
+	var got []string
+	for _, w := range m.Warnings {
+		got = append(got, w.Location.Pointer+": "+w.Message)
+	}
+	want := []string{
+		`/components/schemas/Row/properties/bad/x-go-custom-tag: "db:name" is not key:"value" struct tags; the tags are not added`,
+		`/components/schemas/Row/properties/mine/x-go-custom-tag: x-go-custom-tag cannot set the json tag, which goapi writes; the tags are not added`,
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("warnings:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+func TestCheckStructTags(t *testing.T) {
+	for tags, want := range map[string]string{
+		`db:"a"`:                 "",
+		`db:"a" yaml:"b"`:        "",
+		`db:"a\"b"`:              "",
+		`validate:"min=1,max=5"`: "",
+		`db:"a"yaml:"b"`:         `"db:\"a\"yaml:\"b\"" is not key:"value" struct tags`,
+		`db:"a`:                  `"db:\"a" is not key:"value" struct tags`,
+		`:"a"`:                   `":\"a\"" is not key:"value" struct tags`,
+		`db:"a" db:"b"`:          "x-go-custom-tag sets the db tag twice",
+		"db:\"a`b\"":             "x-go-custom-tag cannot contain a backquote",
+		`yaml:"x" json:"y"`:      "x-go-custom-tag cannot set the json tag, which goapi writes",
+	} {
+		if got := checkStructTags(tags); got != want {
+			t.Errorf("checkStructTags(%q) = %q, want %q", tags, got, want)
+		}
+	}
+}
+
+func TestOmitEmptyFalse(t *testing.T) {
+	doc := `openapi: 3.1.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Row:
+      type: object
+      required: [id]
+      properties:
+        id: {type: integer, x-omitempty: false}
+        note: {type: string, x-omitempty: false}
+        tags: {type: array, items: {type: string}, x-omitempty: false}
+        kept: {type: string, x-omitempty: true}
+        plain: {type: string}
+`
+	for _, pointers := range []bool{false, true} {
+		row := typeNamed(t, build(t, doc, Options{OptionalPointers: pointers}), "Row")
+		for name, want := range map[string]struct {
+			always bool
+			kind   RefKind
+		}{
+			"ID":    {false, Builtin}, // required: written anyway
+			"Note":  {true, Builtin},
+			"Tags":  {true, Slice},
+			"Kept":  {false, map[bool]RefKind{false: Optional, true: Pointer}[pointers]},
+			"Plain": {false, map[bool]RefKind{false: Optional, true: Pointer}[pointers]},
+		} {
+			f := fieldNamed(t, row, name)
+			if f.AlwaysWrite != want.always || f.Type.Kind != want.kind {
+				t.Errorf("pointers %v, %s: AlwaysWrite %v, kind %v; want %v, %v", pointers, name, f.AlwaysWrite, f.Type.Kind, want.always, want.kind)
+			}
 		}
 	}
 }

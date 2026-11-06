@@ -134,10 +134,13 @@ export interface Tag {
   code: string;
   color?: string;
   slug?: string;
+  note?: string;
+  labels?: string[];
+  alias?: string | null;
 }
 
 /** The schema of Tag, for validation and encoding. */
-export const TagSchema: $Schema = { kind: "object", properties: { code: { schema: { kind: "string", format: "pet-code" }, required: true }, color: { schema: { kind: "string", format: "color" } }, slug: { schema: { kind: "string", minLength: 2, format: "slug" } } } };
+export const TagSchema: $Schema = { kind: "object", properties: { code: { schema: { kind: "string", format: "pet-code" }, required: true }, color: { schema: { kind: "string", format: "color" } }, slug: { schema: { kind: "string", minLength: 2, format: "slug" } }, note: { schema: { kind: "string", minLength: 2 }, zeroIsAbsent: true }, labels: { schema: { kind: "array", items: { kind: "string" } }, zeroIsAbsent: true }, alias: { schema: { kind: "nullable", of: { kind: "string" } } } } };
 
 export interface Settings {
   theme?: SettingsTheme;

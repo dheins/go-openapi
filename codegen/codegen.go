@@ -484,13 +484,17 @@ func comment(indent string, lines []string) string {
 func tag(fd *ir.Field) string {
 	opt := ""
 	switch {
-	case fd.Required:
+	case fd.Required || fd.AlwaysWrite:
 	case fd.Type.Kind == ir.Optional:
 		opt = ",omitzero"
 	default:
 		opt = ",omitempty"
 	}
-	return "`json:" + strconv.Quote(fd.JSONName+opt) + "`"
+	tags := "json:" + strconv.Quote(fd.JSONName+opt)
+	if fd.Tags != "" {
+		tags += " " + fd.Tags
+	}
+	return "`" + tags + "`"
 }
 
 func enumMessage(t *ir.Type) string {

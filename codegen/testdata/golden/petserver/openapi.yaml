@@ -1492,6 +1492,18 @@ components:
           type: string
           format: slug
           minLength: 2
+        note:
+          type: string
+          minLength: 2
+          x-omitempty: false
+        labels:
+          type: array
+          items:
+            type: string
+          x-omitempty: false
+        alias:
+          type: string
+          x-isnullable: true
     Settings:
       type: object
       properties:
@@ -1499,6 +1511,7 @@ components:
           type: string
           enum: [light, dark]
           default: light
+          x-go-custom-tag: 'db:"theme" yaml:"theme,omitempty"'
         notify:
           type: boolean
           default: true

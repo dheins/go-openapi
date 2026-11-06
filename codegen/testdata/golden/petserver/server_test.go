@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -1027,17 +1028,36 @@ func init() {
 	})
 }
 
+// TestCustomTags checks the struct tags of x-go-custom-tag, after the
+// json tag.
+func TestCustomTags(t *testing.T) {
+	f, _ := reflect.TypeFor[model.Settings]().FieldByName("Theme")
+	if f.Tag.Get("json") != "theme,omitzero" || f.Tag.Get("db") != "theme" || f.Tag.Get("yaml") != "theme,omitempty" {
+		t.Errorf("tag = %s", f.Tag)
+	}
+}
+
 // TestFormats covers formats mapped to Go types (pet-code by x-go-formats,
 // color by the Formats option over it) and a registered check (slug).
 func TestFormats(t *testing.T) {
 	s, h := newTestServer()
 	r := do(t, h, "PUT", "/tags/ABC-12?slug=big-dog", "application/json", `{"code":"ABC-12","color":"#ff0080","slug":"a-b"}`)
-	if r.status != 200 || r.body != `{"code":"ABC-12","color":"#ff0080","slug":"a-b"}` {
+	// note and labels (x-omitempty: false) are written even when unset.
+	if r.status != 200 || r.body != `{"code":"ABC-12","color":"#ff0080","slug":"a-b","note":"","labels":[]}` {
 		t.Errorf("echo: %d %s", r.status, r.body)
 	}
 	got := s.seen["PutTag"].(*api.PutTagRequest)
 	if got.Code != "ABC-12" || got.Slug.Value != "big-dog" || got.Body.Color.Value != (formats.Color{R: 0xff, B: 0x80}) {
 		t.Errorf("request = %+v", got)
+	}
+	r = do(t, h, "PUT", "/tags/ABC-12", "application/json", `{"code":"ABC-12","note":"hi","labels":["a"]}`)
+	if r.status != 200 || r.body != `{"code":"ABC-12","note":"hi","labels":["a"]}` {
+		t.Errorf("echo with note: %d %s", r.status, r.body)
+	}
+	// alias (x-isnullable) may be null.
+	r = do(t, h, "PUT", "/tags/ABC-12", "application/json", `{"code":"ABC-12","alias":null}`)
+	if r.status != 200 || r.body != `{"code":"ABC-12","note":"","labels":[],"alias":null}` {
+		t.Errorf("echo with null alias: %d %s", r.status, r.body)
 	}
 	for _, tt := range []struct {
 		target, body string
@@ -1047,6 +1067,8 @@ func TestFormats(t *testing.T) {
 		{"/tags/ABC-1?slug=Big%20Dog", `{"code":"ABC-1"}`, []string{"query slug: must be a valid slug: lower-case words joined by dashes"}},
 		{"/tags/ABC-1", `{"code":"x","color":"red"}`, []string{"body /code: must be three capital letters, a dash and digits", "body /color: must be #rrggbb"}},
 		{"/tags/ABC-1", `{"code":"ABC-1","slug":"X"}`, []string{"body /slug: length must be at least 2", "body /slug: must be a valid slug: lower-case words joined by dashes"}},
+		// A value that is set is checked; only the zero value is not.
+		{"/tags/ABC-1", `{"code":"ABC-1","note":"x"}`, []string{"body /note: length must be at least 2"}},
 	} {
 		r := do(t, h, "PUT", tt.target, "application/json", tt.body)
 		if got := problemErrors(t, r); r.status != 400 || !slices.Equal(got, tt.want) {
