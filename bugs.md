@@ -39,6 +39,12 @@ checked off under [Fixed](#fixed), by the release they shipped in.
 
 ## Models (ir / codegen / oapi)
 
+- **`xml` next to a `$ref` is ignored.** A property's schema is taken
+  from what its `$ref` points to (`ir/build.go`, `Field.source`), so an
+  `xml` object beside the `$ref`, which 3.1 and 3.2 allow, does not
+  rename it or set its node type. *Workaround:* put the `xml` object on
+  the referenced schema.
+
 - **`allOf` members that give a property different types keep the first.**
   When several `allOf` members define the same property, their constraints
   are all checked, unless a later one has a different type or structure of

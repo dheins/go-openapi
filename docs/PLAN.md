@@ -622,6 +622,25 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   as a request, so they got their defaults already; a test says so now.
 - *Not done*: see [features.md](../features.md).
 
+### M31 – XML shapes ✅
+- [x] Maps, unions, recursive types and inline objects (`nodeType: none`)
+  read and written as XML (`server.XMLNode`: `Values`, `Ref` and
+  `Shapes`, `Inline`)
+- [x] TypeScript clients send and read XML bodies, responses, parameters
+  and headers
+
+**How it went**
+- *Shapes by reference*: a recursive type's node refers to its shape in
+  a table on the root, so generated literals stay finite.
+- *Unions merged*: a union is one object of its variants' properties, so
+  reading needs no variant guess; the decoder picks it, as for JSON.
+- *Round trips*: fuzzing found undeclared names that collided with
+  declared ones and could not be written back; they are ignored now.
+- *Own reader*: Node has no DOM parser, so the TypeScript runtime has a
+  small XML reader, which writes and reads documents byte for byte as the
+  Go server does.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
