@@ -43,6 +43,9 @@ type Config struct {
 	ValidateRequests, ValidateResponses bool
 	// MaxResponseBytes bounds the response bodies read whole.
 	MaxResponseBytes int64
+	// Codecs encode and decode the bodies of media types goapi does not
+	// know, by server.CodecKey; see WithCodec.
+	Codecs map[string]Codec
 
 	middleware []func(Doer) Doer
 	err        error

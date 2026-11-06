@@ -55,6 +55,9 @@ type Config struct {
 	DocumentPage   string
 	DocumentUI     UI
 	DocumentAssets string
+	// Codecs encode and decode the bodies of media types goapi does not
+	// know, by CodecKey; see WithCodec.
+	Codecs map[string]Codec
 }
 
 // Operation identifies the operation a handler serves, for middleware.
