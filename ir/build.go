@@ -407,7 +407,8 @@ func (b *builder) fillStruct(t *Type) {
 				f.Default = defaultLiteral(p.schema)
 			}
 		}
-		if !f.Required {
+		f.AlwaysWrite = !f.Required && extensionFalse(p.schema, "x-omitempty")
+		if !f.Required && !f.AlwaysWrite {
 			r = b.optional(r)
 		}
 		f.Type = r
@@ -1998,6 +1999,16 @@ func extensionString(s *oas.Schema, key string) string {
 		return ""
 	}
 	return v
+}
+
+// extensionFalse reports whether the extension key of s is false.
+func extensionFalse(s *oas.Schema, key string) bool {
+	if s == nil {
+		return false
+	}
+	raw, ok := s.Extra.Get(key)
+	var v bool
+	return ok && json.Unmarshal(raw, &v) == nil && !v
 }
 
 func extensionStrings(s *oas.Schema, key string) []string {

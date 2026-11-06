@@ -405,6 +405,9 @@ func (g *tsGen) objectSchema(t *ir.Type) string {
 		if f.WriteOnly {
 			p += ", writeOnly: true"
 		}
+		if f.AlwaysWrite {
+			p += ", zeroIsAbsent: true"
+		}
 		if f.Default != "" {
 			var lit bytes.Buffer
 			if json.Compact(&lit, []byte(f.Default)) == nil {

@@ -441,7 +441,11 @@ test("formats", { skip }, async () => {
   // pet-code and color have Go types on the server; slug is checked by
   // what is registered, on both sides.
   const tag = { code: "ABC-12", color: "#ff0080", slug: "big-dog" };
-  assert.deepEqual(await client({ validateResponses: true }).putTag({ code: "ABC-12", slug: "a-b", body: tag }), { status: 200, body: tag });
+  // note and labels (x-omitempty: false) are written even when unset.
+  assert.deepEqual(await client({ validateResponses: true }).putTag({ code: "ABC-12", slug: "a-b", body: tag }), {
+    status: 200,
+    body: { ...tag, note: "", labels: [] },
+  });
   const bad = await rejects(client({ validateRequests: false }).putTag({ code: "abc", body: { code: "x" } }), UnexpectedResponseError);
   assert.equal(bad.status, 400);
 });

@@ -8,11 +8,19 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sync"
 	"time"
 	"unicode/utf8"
 )
+
+// IsZero reports whether v is its type's zero value. Validate methods
+// skip the zero values of properties written even when unset
+// (x-omitempty: false), which stand for absent ones.
+func IsZero[T any](v T) bool {
+	return reflect.ValueOf(&v).Elem().IsZero()
+}
 
 // HasKey reports whether m has the key k.
 func HasKey[K ~string, V any](m map[K]V, k K) bool {

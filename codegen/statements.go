@@ -154,7 +154,7 @@ func encodeConditions(fd *ir.Field, discriminator bool) []string {
 	case fd.WriteOnly:
 		conds = append(conds, "dir != oapi.Response")
 	}
-	if !fd.Required {
+	if !fd.Required && !fd.AlwaysWrite {
 		switch fd.Type.Kind {
 		case ir.Optional:
 			conds = append(conds, "m."+fd.Name+".Set")
@@ -256,6 +256,20 @@ func (f *fileGen) validateStmts(t *ir.Type) string {
 				// Checked by the alternatives that define it.
 				continue
 			}
+			if fd.AlwaysWrite {
+				// The zero value stands for an absent property.
+				inner := v.sub()
+				inner.ref("m."+fd.Name, pointerLiteral(fd.JSONName), fd.Type, fd.Name, 2)
+				for _, extra := range fd.Extra {
+					inner.ref("m."+fd.Name, pointerLiteral(fd.JSONName), extra, fd.Name, 2)
+				}
+				if inner.b.Len() > 0 {
+					v.line(1, "if !oapi.IsZero(m.%s) {", fd.Name)
+					v.b.WriteString(inner.b.String())
+					v.line(1, "}")
+				}
+				continue
+			}
 			v.ref("m."+fd.Name, pointerLiteral(fd.JSONName), fd.Type, fd.Name, 1)
 			for _, extra := range fd.Extra {
 				v.ref("m."+fd.Name, pointerLiteral(fd.JSONName), extra, fd.Name, 1)
@@ -322,7 +336,7 @@ func (v *validator) mapDependencies(expr, path string, deps []ir.Dependency, dep
 // presence returns the condition under which a value, recv, has the
 // property of field fd, or "" if it always has it.
 func presence(fd *ir.Field, recv string) string {
-	if fd.Required {
+	if fd.Required || fd.AlwaysWrite {
 		return ""
 	}
 	switch fd.Type.Kind {

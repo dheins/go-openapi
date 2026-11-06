@@ -1492,6 +1492,15 @@ components:
           type: string
           format: slug
           minLength: 2
+        note:
+          type: string
+          minLength: 2
+          x-omitempty: false
+        labels:
+          type: array
+          items:
+            type: string
+          x-omitempty: false
     Settings:
       type: object
       properties:

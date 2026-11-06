@@ -12,9 +12,11 @@ import (
 
 // Tag is generated from the schema at /components/schemas/Tag.
 type Tag struct {
-	Code  formats.PetCode              `json:"code"`
-	Color oapi.Optional[formats.Color] `json:"color,omitzero"`
-	Slug  oapi.Optional[string]        `json:"slug,omitzero"`
+	Code   formats.PetCode              `json:"code"`
+	Color  oapi.Optional[formats.Color] `json:"color,omitzero"`
+	Slug   oapi.Optional[string]        `json:"slug,omitzero"`
+	Note   string                       `json:"note"`
+	Labels []string                     `json:"labels"`
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -44,8 +46,8 @@ func (m *Tag) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 func (m *Tag) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	obj := oapi.BeginObject(dec)
 	var v Tag
-	var seen [3]bool
-	var problems [3]error
+	var seen [5]bool
+	var problems [5]error
 	for obj.Next() {
 		switch obj.Name() {
 		case "code":
@@ -57,6 +59,12 @@ func (m *Tag) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 		case "slug":
 			seen[2] = true
 			problems[2] = obj.Decode(&v.Slug, false, dir)
+		case "note":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Note, false, dir)
+		case "labels":
+			seen[4] = true
+			problems[4] = obj.Decode(&v.Labels, false, dir)
 		default:
 			obj.Skip()
 		}
@@ -75,6 +83,12 @@ func (m *Tag) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	}
 	if seen[2] {
 		errs.Nested("/slug", problems[2])
+	}
+	if seen[3] {
+		errs.Nested("/note", problems[3])
+	}
+	if seen[4] {
+		errs.Nested("/labels", problems[4])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -116,6 +130,18 @@ func (m Tag) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 		dst = oapi.AppendString(dst, m.Slug.Value)
 		dst = append(dst, ',')
 	}
+	dst = append(dst, "\"note\":"...)
+	dst = oapi.AppendString(dst, m.Note)
+	dst = append(dst, ',')
+	dst = append(dst, "\"labels\":"...)
+	if m.Labels == nil {
+		dst = append(dst, "[]"...)
+	} else {
+		if dst, err = oapi.AppendValue(dst, m.Labels, dir); err != nil {
+			return nil, fmt.Errorf("labels: %w", err)
+		}
+	}
+	dst = append(dst, ',')
 	return oapi.EndObject(dst, start), nil
 }
 
@@ -128,6 +154,11 @@ func (m Tag) Validate() error {
 		}
 		if err := oapi.CheckFormat("slug", m.Slug.Value); err != nil {
 			errs.Add("/slug", err.Error())
+		}
+	}
+	if !oapi.IsZero(m.Note) {
+		if oapi.StringLength(m.Note) < 2 {
+			errs.Add("/note", "length must be at least 2")
 		}
 	}
 	return errs.Err()

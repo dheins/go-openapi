@@ -53,8 +53,20 @@ func (f *fileGen) appendStmts(t *ir.Type) string {
 			// The condition checked Set.
 			value, r = value+".Value", r.Elem
 		}
+		empty := map[ir.RefKind]string{ir.Slice: "[]", ir.Map: "{}"}[r.Kind]
+		if fd.AlwaysWrite && empty != "" {
+			// An unset array or map is written empty: null is not one.
+			w(depth, "if %s == nil {", value)
+			w(depth+1, "dst = append(dst, %q...)", empty)
+			w(depth, "} else {")
+			depth++
+		}
 		if f.appendValue(w, depth, value, r, fd.JSONName) {
 			fallible = true
+		}
+		if fd.AlwaysWrite && empty != "" {
+			depth--
+			w(depth, "}")
 		}
 		w(depth, "dst = append(dst, ',')")
 		if discriminator {

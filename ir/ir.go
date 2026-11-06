@@ -220,6 +220,11 @@ type Field struct {
 	// CyclePointer means Type was made a pointer because the field's type
 	// contains the struct itself.
 	CyclePointer bool
+	// AlwaysWrite means an optional property is written even when unset,
+	// as its zero value (x-omitempty: false): its field is not wrapped in
+	// oapi.Optional or a pointer, and an absent property decodes to the
+	// zero value, which Validate does not check.
+	AlwaysWrite bool
 	// Tags are struct tags to add after the json tag, from
 	// x-go-custom-tag (`db:"name" yaml:"name"`), or "".
 	Tags string

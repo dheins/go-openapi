@@ -484,7 +484,7 @@ func comment(indent string, lines []string) string {
 func tag(fd *ir.Field) string {
 	opt := ""
 	switch {
-	case fd.Required:
+	case fd.Required || fd.AlwaysWrite:
 	case fd.Type.Kind == ir.Optional:
 		opt = ",omitzero"
 	default:

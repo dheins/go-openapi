@@ -822,3 +822,39 @@ func TestCheckStructTags(t *testing.T) {
 		}
 	}
 }
+
+func TestOmitEmptyFalse(t *testing.T) {
+	doc := `openapi: 3.1.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Row:
+      type: object
+      required: [id]
+      properties:
+        id: {type: integer, x-omitempty: false}
+        note: {type: string, x-omitempty: false}
+        tags: {type: array, items: {type: string}, x-omitempty: false}
+        kept: {type: string, x-omitempty: true}
+        plain: {type: string}
+`
+	for _, pointers := range []bool{false, true} {
+		row := typeNamed(t, build(t, doc, Options{OptionalPointers: pointers}), "Row")
+		for name, want := range map[string]struct {
+			always bool
+			kind   RefKind
+		}{
+			"ID":    {false, Builtin}, // required: written anyway
+			"Note":  {true, Builtin},
+			"Tags":  {true, Slice},
+			"Kept":  {false, map[bool]RefKind{false: Optional, true: Pointer}[pointers]},
+			"Plain": {false, map[bool]RefKind{false: Optional, true: Pointer}[pointers]},
+		} {
+			f := fieldNamed(t, row, name)
+			if f.AlwaysWrite != want.always || f.Type.Kind != want.kind {
+				t.Errorf("pointers %v, %s: AlwaysWrite %v, kind %v; want %v, %v", pointers, name, f.AlwaysWrite, f.Type.Kind, want.always, want.kind)
+			}
+		}
+	}
+}
