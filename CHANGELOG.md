@@ -4,6 +4,9 @@
 
 ### Added
 
+- TypeScript clients fill the defaults of absent properties in the
+  responses they read (JSON bodies, stream items, JSON parts), at any
+  depth; schema descriptors carry `default`.
 - Response and multipart part headers whose schemas are objects of
   primitive values, in the simple style (`a,1,b,2`, or `a=1,b=2` with
   `explode`): servers write and check them, Go and TypeScript clients
@@ -432,6 +435,11 @@
 
 ### Changed
 
+- Defaults apply to responses: a generated server writes the default of a
+  property the handler left unset (but for write-only ones), and
+  decoding a response (`oapi.DecodeResponse`, Go clients) fills absent
+  properties with their defaults, as decoding a request did. Read-only
+  properties get theirs in responses, write-only ones in requests.
 - Positional parts are written with a `Content-Length` header, so that a
   reader can take each one as soon as it has arrived; the files of parts
   read from goapi senders have it in their `oapi.File.Header`.
