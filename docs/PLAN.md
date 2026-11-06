@@ -590,6 +590,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   the same code, which keeps `goapi templates` usable as a start.
 - *Not done*: see [features.md](../features.md).
 
+### M29 – Object headers and base64 parts ✅
+- [x] `server.ParseObjectHeader` and `FormatObject`; object response and
+  part headers in servers and Go and TypeScript clients
+- [x] Headers with content of any other media type, as text
+- [x] `bytes` parts and form fields: base64 with a
+  `Content-Transfer-Encoding`, read by the part's own
+
+**How it went**
+- *Parameters had it*: object headers in the simple style were parsed
+  for header parameters already; response and part headers reuse it.
+- *Transfer encodings*: OpenAPI 3.2 has `contentEncoding` stand for a
+  part's Content-Transfer-Encoding, so a part says how to read it, and
+  raw bytes without one keep TypeScript's FormData, which cannot set it,
+  working.
+- *The fuzzer again*: the stream reader gave an empty part nil data where
+  mime/multipart gives an empty slice.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
