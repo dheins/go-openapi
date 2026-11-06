@@ -5,6 +5,7 @@ HTTP handler) go to the operations' package; "server" (NewServer, which
 routes to the handlers) to the server package, which may be the same.
 */ -}}
 
+{{/* "server" gets *ir.Model, with Document (the document is embedded) and Interfaces (Handler goes in this package). */}}
 {{define "server"}}
 {{- if .Interfaces}}
 {{template "interfaces" .}}
@@ -40,6 +41,7 @@ var openAPIDocument []byte
 {{- end}}
 {{- end}}
 
+{{/* "interfaces" gets *ir.Model. */}}
 {{define "interfaces"}}
 // Handler is implemented by the application, with one method per
 // operation. The server decodes and validates each request before calling
@@ -75,6 +77,7 @@ type SecurityHandler interface {
 {{- end}}
 {{- end}}
 
+{{/* "operation" gets *ir.Operation. */}}
 {{define "operation"}}
 {{- tupleDecls .}}
 // {{.RequestType}} holds the decoded and validated inputs of {{.Name}}.
@@ -145,6 +148,7 @@ func (r {{.TypeName}}) write{{$.ResponseType}}(w http.ResponseWriter, req *http.
 {{end}}
 {{- end}}
 
+{{/* "handler" gets *ir.Operation, with SecurityType (the security handler's type, "" for none) and Interface (the handler interface it calls). */}}
 {{define "handler"}}
 {{- if ne .Interface "Handler"}}
 // {{.Name}}Operation identifies {{opLabel .Operation}} to

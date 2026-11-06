@@ -193,3 +193,46 @@ export * from "./models.ts";
 		t.Errorf("tsc: %v\n%s", err, out)
 	}
 }
+
+// TestBuiltinTemplates checks that the built-in templates, given as user
+// ones, as goapi templates writes them, generate what they do anyway.
+func TestBuiltinTemplates(t *testing.T) {
+	src, err := os.ReadFile("testdata/golden/petserver/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := buildModel(t, string(src))
+	same := func(what string, want, got []File) {
+		t.Helper()
+		if len(want) != len(got) {
+			t.Fatalf("%s: %d files, want %d", what, len(got), len(want))
+		}
+		for i := range want {
+			if want[i].Name != got[i].Name || string(want[i].Content) != string(got[i].Content) {
+				t.Errorf("%s: %s differs", what, want[i].Name)
+			}
+		}
+	}
+	for name, gen := range map[string]func(*ir.Model, Options) ([]File, error){"models": Models, "server": Server, "client": Client} {
+		opts := Options{Package: "gen", OperationsPackage: "api", OperationsImport: "example.com/gen/api", ModelsPackage: "model", ModelsImport: "example.com/gen/model"}
+		want, err := gen(m, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts.Templates = GoTemplates()
+		got, err := gen(m, opts)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		same(name, want, got)
+	}
+	want, _, err := TypeScript(m, TSOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := TypeScript(m, TSOptions{Templates: TSTemplates()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("typescript", want, got)
+}

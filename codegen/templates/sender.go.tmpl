@@ -3,6 +3,7 @@ Template for the sender of webhooks and callbacks: "sender" (Sender, with
 a method per webhook and callback) goes to the server package.
 */ -}}
 
+{{/* "sender" gets Ops ([]*ir.Operation) the server sends, and Schemes ([]*ir.SecurityScheme) of their targets. */}}
 {{define "sender"}}
 {{- if .Schemes}}
 // SenderCredentials are the credentials the sender sends, one per security

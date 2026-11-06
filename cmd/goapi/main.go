@@ -12,6 +12,7 @@
 //	goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused] file
 //	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
 //	goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
+//	goapi templates [-out dir] [-target go|ts]
 //	goapi version
 package main
 
@@ -58,6 +59,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runScan(args[1:], stdout, stderr)
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
+	case "templates":
+		return runTemplates(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
 		fmt.Fprintln(stdout, "goapi", version())
 		return exitOK
@@ -94,6 +97,7 @@ Usage:
   goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused] file
   goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
   goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
+  goapi templates [-out dir] [-target go|ts]
   goapi version
 
 Commands:
@@ -107,6 +111,7 @@ Commands:
   flatten           write a document split over several files as one
   scan              write the document that goapi directives in Go code describe
   serve             serve a document and a page rendering it, with Swagger UI or Redoc
+  templates         write the built-in templates, to start custom ones from
   version           print the version of goapi
 `)
 }

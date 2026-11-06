@@ -33,6 +33,28 @@ func goapiVersion() string {
 	return "(devel)"
 }
 
+// GoTemplates returns the built-in templates of the Go generators: the
+// *.tmpl files whose blocks Options.Templates replaces.
+func GoTemplates() fs.FS {
+	sub, err := fs.Sub(templateFiles, "templates")
+	if err != nil {
+		// The directory is embedded.
+		panic(err)
+	}
+	return sub
+}
+
+// TSTemplates returns the built-in templates of the TypeScript client:
+// the *.tmpl files whose blocks TSOptions.Templates replaces.
+func TSTemplates() fs.FS {
+	sub, err := fs.Sub(tsTemplateFiles, "ts")
+	if err != nil {
+		// The directory is embedded.
+		panic(err)
+	}
+	return sub
+}
+
 // userTemplates are the files of fsys that override built-in blocks: its
 // *.tmpl files, in the order fs.Glob returns them.
 func userTemplates(fsys fs.FS) ([]string, error) {

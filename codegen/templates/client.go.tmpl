@@ -5,10 +5,12 @@ client; "client" (Client, its Credentials and a method per operation) to
 the client package.
 */ -}}
 
+{{/* "clientops" gets *ir.Operation. */}}
 {{define "clientops"}}
 {{clientOps .}}
 {{- end}}
 
+{{/* "client" gets *ir.Model. */}}
 {{define "client"}}
 {{- if .ServerURL}}
 // DefaultServerURL is the URL of the document's first server. New sends

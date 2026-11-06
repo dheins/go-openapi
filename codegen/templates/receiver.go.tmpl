@@ -4,6 +4,7 @@ WebhookHandler and CallbackHandler interfaces) goes to the operations'
 package, by both the server and the client.
 */ -}}
 
+{{/* "receivers" gets Webhooks and Callbacks ([]*ir.Operation) a server receives, and Schemes ([]*ir.SecurityScheme). */}}
 {{define "receivers"}}
 {{- if .Webhooks}}
 // WebhookHandler is implemented by a receiver of the document's webhooks,
