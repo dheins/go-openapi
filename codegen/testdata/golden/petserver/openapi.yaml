@@ -349,6 +349,27 @@ paths:
                 application/xml:
                   schema:
                     $ref: "#/components/schemas/Prefs"
+  /sizes:
+    put:
+      operationId: putSize
+      description: A size in a format goapi does not know, echoed back.
+      requestBody:
+        required: true
+        content:
+          application/x-tc:
+            x-goapi-codec: true
+            schema:
+              $ref: "#/components/schemas/Size"
+      responses:
+        "200":
+          description: The size, as JSON or in the codecs' formats.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Size"
+            application/x-tc2:
+              schema:
+                $ref: "#/components/schemas/Size"
   /tags/{code}:
     parameters:
       - name: code

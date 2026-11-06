@@ -44,6 +44,9 @@ func New(creds Credentials, opts ...client.Option) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.RequireCodecs("application/x-tc", "application/x-tc2"); err != nil {
+		return nil, err
+	}
 	return &Client{cfg: cfg, creds: creds}, nil
 }
 
@@ -301,6 +304,24 @@ func (c *Client) EchoPrefs(ctx context.Context, req *api.EchoPrefsRequest) (api.
 		return nil, err
 	}
 	return api.ReadEchoPrefsResponse(c.cfg, resp)
+}
+
+// PutSize calls PUT /sizes. A nil req sends no parameters or body.
+//
+// A size in a format goapi does not know, echoed back.
+func (c *Client) PutSize(ctx context.Context, req *api.PutSizeRequest) (api.PutSizeResponse, error) {
+	if req == nil {
+		req = &api.PutSizeRequest{}
+	}
+	hreq, err := api.NewPutSizeRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutSizeResponse(c.cfg, resp)
 }
 
 // PutTag calls PUT /tags/{code}. A nil req sends no parameters or body.

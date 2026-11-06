@@ -241,6 +241,14 @@ func (s *store) PutCard(_ context.Context, req *api.PutCardRequest) (api.PutCard
 	return api.PutCard204Response{}, nil
 }
 
+func (s *store) PutSize(ctx context.Context, req *api.PutSizeRequest) (api.PutSizeResponse, error) {
+	r, _ := server.HTTPRequest(ctx)
+	if server.Negotiate(r, "application/json", "application/x-tc2") == "application/x-tc2" {
+		return api.PutSize200XTc2Response{Body: req.Body}, nil
+	}
+	return api.PutSize200JSONResponse{Body: req.Body}, nil
+}
+
 func (s *store) PutTag(_ context.Context, req *api.PutTagRequest) (api.PutTagResponse, error) {
 	s.seen["PutTag"] = req
 	return api.PutTag200JSONResponse{Body: req.Body}, nil
@@ -517,7 +525,30 @@ func (auth) BasicAuth(ctx context.Context, username, password string, _ []string
 
 func newTestServer() (*store, http.Handler) {
 	s := newStore()
-	return s, NewServer(s, auth{}, server.WithLogger(slog.New(slog.DiscardHandler)))
+	return s, newServer(s, server.WithLogger(slog.New(slog.DiscardHandler)))
+}
+
+// tcCodec is the codec of the fixture's application/x-tc and
+// application/x-tc2, formats goapi does not know: "TC" and the JSON of
+// the value.
+type tcCodec struct{}
+
+func (tcCodec) Marshal(v any) ([]byte, error) {
+	data, err := json.Marshal(v)
+	return append([]byte("TC"), data...), err
+}
+
+func (tcCodec) Unmarshal(data []byte, v any) error {
+	rest, ok := bytes.CutPrefix(data, []byte("TC"))
+	if !ok {
+		return errors.New("no TC header")
+	}
+	return json.Unmarshal(rest, v)
+}
+
+// newServer is NewServer with the fixture's codecs, which it requires.
+func newServer(h api.Handler, opts ...server.Option) http.Handler {
+	return NewServer(h, auth{}, append([]server.Option{server.WithCodec("application/x-tc", tcCodec{}), server.WithCodec("application/x-tc2", tcCodec{})}, opts...)...)
 }
 
 func TestListPets(t *testing.T) {
@@ -548,7 +579,7 @@ func TestMiddlewareAndDocument(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	h := NewServer(s, auth{}, server.WithMiddleware(logOps), server.WithDocument("/openapi.json"),
+	h := newServer(s, server.WithMiddleware(logOps), server.WithDocument("/openapi.json"),
 		server.WithLogger(slog.New(slog.DiscardHandler)))
 	do(t, h, "GET", "/pets/1", "", "")
 	do(t, h, "GET", "/secure", "", "")
@@ -567,7 +598,7 @@ func TestMiddlewareAndDocument(t *testing.T) {
 
 	// The documentation page loads the document, which it implies, below
 	// the base path.
-	docs := NewServer(s, auth{}, server.WithDocumentPage("/docs", server.Redoc), server.WithLogger(slog.New(slog.DiscardHandler)))
+	docs := newServer(s, server.WithDocumentPage("/docs", server.Redoc), server.WithLogger(slog.New(slog.DiscardHandler)))
 	if r := do(t, docs, "GET", "/docs", "", ""); r.status != 200 || !strings.Contains(r.body, `{"url":"/v1/openapi.json"}`) ||
 		!strings.Contains(r.body, "<title>Pet server</title>") || r.header.Get("Content-Security-Policy") == "" {
 		t.Errorf("page: %d %v\n%s", r.status, r.header, r.body)
@@ -590,7 +621,7 @@ func TestBasePathAndUnknownRoutes(t *testing.T) {
 	}
 	// The base path can be changed.
 	s := newStore()
-	h = NewServer(s, auth{}, server.WithBasePath(""), server.WithLogger(slog.New(slog.DiscardHandler)))
+	h = newServer(s, server.WithBasePath(""), server.WithLogger(slog.New(slog.DiscardHandler)))
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/pets", nil))
 	if rec.Code != 200 {
@@ -620,7 +651,7 @@ func TestReadOnlyAndWriteOnlyOverHTTP(t *testing.T) {
 func TestResponseValidation(t *testing.T) {
 	s := newStore()
 	s.pets = append(s.pets, model.Pet{ID: 7, Name: ""})
-	h := NewServer(s, auth{}, server.WithResponseValidation(), server.WithLogger(slog.New(slog.DiscardHandler)))
+	h := newServer(s, server.WithResponseValidation(), server.WithLogger(slog.New(slog.DiscardHandler)))
 	if r := do(t, h, "GET", "/pets/7", "", ""); r.status != 500 {
 		t.Errorf("invalid response sent: %d %s", r.status, r.body)
 	}
@@ -1028,6 +1059,37 @@ func init() {
 	})
 }
 
+// TestCodecs covers media types goapi does not know, with codecs:
+// application/x-tc (x-goapi-codec) and application/x-tc2 (the Codecs
+// option).
+func TestCodecs(t *testing.T) {
+	_, h := newTestServer()
+	r := do(t, h, "PUT", "/sizes", "application/x-tc", `TC{"w":2,"h":3}`, "Accept", "application/x-tc2")
+	if r.status != 200 || r.header.Get("Content-Type") != "application/x-tc2" || r.body != `TC{"w":2,"h":3}` {
+		t.Errorf("codec response: %d %s %s", r.status, r.header.Get("Content-Type"), r.body)
+	}
+	r = do(t, h, "PUT", "/sizes", "application/x-tc", `TC{"w":2}`)
+	if r.status != 200 || r.header.Get("Content-Type") != "application/json" || r.body != `{"w":2}` {
+		t.Errorf("JSON response: %d %s %s", r.status, r.header.Get("Content-Type"), r.body)
+	}
+	for body, want := range map[string]string{
+		`{"w":2}`:   "body: invalid application/x-tc: no TC header",
+		`TC{"w":0}`: "body /w: must be at least 1",
+	} {
+		r := do(t, h, "PUT", "/sizes", "application/x-tc", body)
+		if got := problemErrors(t, r); r.status != 400 || !slices.Equal(got, []string{want}) {
+			t.Errorf("%s: %d %q, want %q", body, r.status, got, want)
+		}
+	}
+	// A server without the codecs it declares is not built.
+	defer func() {
+		if p := recover(); p != "server: no codec for application/x-tc2; register one with server.WithCodec" {
+			t.Errorf("recovered %v", p)
+		}
+	}()
+	NewServer(newStore(), auth{}, server.WithCodec("application/x-tc", tcCodec{}))
+}
+
 // TestCustomTags checks the struct tags of x-go-custom-tag, after the
 // json tag.
 func TestCustomTags(t *testing.T) {
@@ -1405,7 +1467,7 @@ func TestCustomBadRequestFormat(t *testing.T) {
 		}
 		problem.Write(w, p)
 	}
-	h := NewServer(newStore(), auth{}, server.WithErrorHandler(errorHandler), server.WithLogger(slog.New(slog.DiscardHandler)))
+	h := newServer(newStore(), server.WithErrorHandler(errorHandler), server.WithLogger(slog.New(slog.DiscardHandler)))
 	r := do(t, h, "GET", "/pets?limit=500", "", "")
 	if r.status != 400 || r.header.Get("Content-Type") != "application/json" || !strings.Contains(r.body, `"message":"must be at most 100"`) {
 		t.Errorf("bind error: %d %s %s", r.status, r.header.Get("Content-Type"), r.body)
@@ -1465,7 +1527,7 @@ func TestHandlerLogs(t *testing.T) {
 	// Generated handlers log each request at Debug, and the runtime logs
 	// how it ended, all tagged with the operation.
 	var out strings.Builder
-	h := NewServer(newStore(), auth{}, server.WithLogger(slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+	h := newServer(newStore(), server.WithLogger(slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))))
 	do(t, h, "GET", "/pets/1", "", "")
 	do(t, h, "GET", "/pets/abc", "", "")
 

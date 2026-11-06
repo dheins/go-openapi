@@ -52,6 +52,11 @@ func New({{if .SecuritySchemes}}creds Credentials, {{end}}opts ...client.Option)
 	if err != nil {
 		return nil, err
 	}
+{{- with codecs .Operations}}
+	if err := cfg.RequireCodecs({{.}}); err != nil {
+		return nil, err
+	}
+{{- end}}
 	return &Client{cfg: cfg{{if .SecuritySchemes}}, creds: creds{{end}}}, nil
 }
 {{- range .Operations}}

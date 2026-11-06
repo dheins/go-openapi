@@ -35,13 +35,19 @@ func token(s string) func(context.Context) (string, error) {
 func newTestClient(t *testing.T, creds petclient.Credentials, opts ...client.Option) (*store, *petclient.Client) {
 	t.Helper()
 	s := newStore()
-	srv := httptest.NewServer(NewServer(s, auth{}, server.WithLogger(slog.New(slog.DiscardHandler))))
+	srv := httptest.NewServer(newServer(s, server.WithLogger(slog.New(slog.DiscardHandler))))
 	t.Cleanup(srv.Close)
-	c, err := petclient.New(creds, append([]client.Option{client.WithBaseURL(srv.URL + "/v1")}, opts...)...)
+	c, err := newClient(creds, append([]client.Option{client.WithBaseURL(srv.URL + "/v1")}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s, c
+}
+
+// newClient is petclient.New with the fixture's codecs, which it
+// requires.
+func newClient(creds petclient.Credentials, opts ...client.Option) (*petclient.Client, error) {
+	return petclient.New(creds, append([]client.Option{client.WithCodec("application/x-tc", tcCodec{}), client.WithCodec("application/x-tc2", tcCodec{})}, opts...)...)
 }
 
 // accept makes a client ask for mediaType only.
@@ -260,6 +266,16 @@ func TestClientResponses(t *testing.T) {
 		t.Errorf("invalid slug: %v", err)
 	}
 
+	// Codecs encode the request and decode the response.
+	_, tc := newTestClient(t, petclient.Credentials{}, accept("application/x-tc2"))
+	size := as[api.PutSize200XTc2Response](t)(tc.PutSize(ctx, &api.PutSizeRequest{Body: model.Size{W: oapi.Some(int64(2)), H: oapi.Some(int64(3))}}))
+	if size.Body.W.Value != 2 || size.Body.H.Value != 3 {
+		t.Errorf("size = %+v", size.Body)
+	}
+	if _, err := petclient.New(petclient.Credentials{}); err == nil || err.Error() != "client: no codec for application/x-tc, application/x-tc2; register one with client.WithCodec" {
+		t.Errorf("no codecs: %v", err)
+	}
+
 	family := model.Family{Name: "Rex", Litters: oapi.Some([]model.Family{{Name: "Pup", Scores: oapi.Some(map[string]int64{"speed": 3})}}),
 		Home: oapi.Some(model.FamilyHome{City: oapi.Some("Oslo")}),
 		Mark: oapi.Some(model.NewMark(model.MarkVariant2{Tattoo: "R", Ink: oapi.Some("blue")}))}
@@ -341,12 +357,12 @@ func TestClientErrors(t *testing.T) {
 
 	// Responses are validated on request.
 	json := http.Header{"Content-Type": {"application/json"}}
-	bad, err := petclient.New(petclient.Credentials{}, respond(200, json, `{"id":1,"name":""}`))
+	bad, err := newClient(petclient.Credentials{}, respond(200, json, `{"id":1,"name":""}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	as[api.GetPet200JSONResponse](t)(bad.GetPet(ctx, &api.GetPetRequest{PetID: 1}))
-	strict, err := petclient.New(petclient.Credentials{}, respond(200, json, `{"id":1,"name":""}`), client.WithResponseValidation())
+	strict, err := newClient(petclient.Credentials{}, respond(200, json, `{"id":1,"name":""}`), client.WithResponseValidation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +370,7 @@ func TestClientErrors(t *testing.T) {
 	if _, err := strict.GetPet(ctx, &api.GetPetRequest{PetID: 1}); !errors.As(err, &invalidResp) || invalidResp.StatusCode != 200 {
 		t.Errorf("invalid response: %v", err)
 	}
-	noTotal, err := petclient.New(petclient.Credentials{}, respond(200, json, `[]`), client.WithResponseValidation())
+	noTotal, err := newClient(petclient.Credentials{}, respond(200, json, `[]`), client.WithResponseValidation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +379,7 @@ func TestClientErrors(t *testing.T) {
 	}
 	// A body that does not decode is invalid whether or not validation is
 	// on.
-	broken, err := petclient.New(petclient.Credentials{}, respond(200, json, `{"id":"one"}`))
+	broken, err := newClient(petclient.Credentials{}, respond(200, json, `{"id":"one"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +387,7 @@ func TestClientErrors(t *testing.T) {
 		t.Errorf("undecodable response: %v", err)
 	}
 	// A declared status in an undeclared media type is unexpected too.
-	teapot, err := petclient.New(petclient.Credentials{}, respond(200, http.Header{"Content-Type": {"text/html"}}, "<p>"))
+	teapot, err := newClient(petclient.Credentials{}, respond(200, http.Header{"Content-Type": {"text/html"}}, "<p>"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,10 +437,10 @@ func TestClientSecurity(t *testing.T) {
 	_, err = c.Secure(ctx, nil)
 	unexpected(t, err, 401)
 
-	if _, err := petclient.New(petclient.Credentials{}, client.WithBaseURL("relative")); err == nil {
+	if _, err := newClient(petclient.Credentials{}, client.WithBaseURL("relative")); err == nil {
 		t.Error("a relative base URL")
 	}
-	if c, err := petclient.New(petclient.Credentials{}); err != nil || c == nil {
+	if c, err := newClient(petclient.Credentials{}); err != nil || c == nil {
 		t.Errorf("default server URL: %v", err)
 	}
 }

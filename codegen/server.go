@@ -234,6 +234,7 @@ func (f *fileGen) serverFuncs() map[string]any {
 	return map[string]any{
 		"quote":       strconv.Quote,
 		"opInfo":      opInfo,
+		"codecs":      codecs,
 		"handlerDoc":  handlerDoc,
 		"paramDoc":    paramDoc,
 		"bodyDoc":     bodyDoc,
@@ -247,6 +248,43 @@ func (f *fileGen) serverFuncs() map[string]any {
 		"securityStmts":  f.securityStmts,
 		"writeStmts":     f.writeStmts,
 	}
+}
+
+// codecs returns the media types of codecMediaTypes quoted and joined as
+// arguments, or "".
+func codecs(ops []*ir.Operation) string {
+	var out []string
+	for _, mt := range codecMediaTypes(ops) {
+		out = append(out, strconv.Quote(mt))
+	}
+	return strings.Join(out, ", ")
+}
+
+// codecMediaTypes returns the media types the bodies and responses of ops
+// (those generated) encode and decode with codecs, as server.CodecKey has
+// them, in the order they are first used.
+func codecMediaTypes(ops []*ir.Operation) []string {
+	var out []string
+	add := func(kind, mt string) {
+		base, _, _ := strings.Cut(mt, ";")
+		if key := strings.ToLower(strings.TrimSpace(base)); kind == "codec" && !slices.Contains(out, key) {
+			out = append(out, key)
+		}
+	}
+	for _, o := range ops {
+		if o.Unsupported != "" {
+			continue
+		}
+		if o.Body != nil {
+			for _, m := range o.Body.Media {
+				add(m.Kind, m.MediaType)
+			}
+		}
+		for _, r := range o.Responses {
+			add(r.Kind, r.MediaType)
+		}
+	}
+	return out
 }
 
 // opInfo renders the server.Operation literal identifying o.
@@ -564,6 +602,13 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			pw(3, "} else {")
 			// v is a []T; the field may hold a named slice type.
 			pw(4, "%s = %s", field, wrapValue(f, m.Field.Type, f.goType(m.Field.Value)+"(v)"))
+			validate(4)
+			pw(3, "}")
+		case "codec":
+			pw(3, "if v, err := server.DecodeCodec[%s](c, %q, body); err != nil {", elem(), m.MediaType)
+			pw(4, "b.Body(err)")
+			pw(3, "} else {")
+			pw(4, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
 			validate(4)
 			pw(3, "}")
 		case "xml":
@@ -1191,7 +1236,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(2, "return err")
 		w(1, "}")
 	}
-	if r.Kind == "json" || r.Kind == "xml" || r.Kind == "parts" {
+	if r.Kind == "json" || r.Kind == "xml" || r.Kind == "codec" || r.Kind == "parts" {
 		stmts := f.validation("r.Body", r.Body, 2)
 		if r.Kind == "parts" && r.Parts.HasHeaders() {
 			// Reading the parts checks their headers; writing them does not.
@@ -1270,6 +1315,8 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "xml":
 		shape := f.declareVar(lowerFirst(r.TypeName)+"XMLShape", xmlNodeLiteral(r.XML))
 		w(1, "return c.WriteXML(w, %s, %s, r.Body, %s, %s)", status, contentType, shape, header)
+	case "codec":
+		w(1, "return c.WriteCodec(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "text":
 		w(1, "return server.WriteText(w, %s, %s, string(r.Body), %s)", status, contentType, header)
 	case "binary":

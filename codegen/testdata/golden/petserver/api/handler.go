@@ -44,6 +44,10 @@ type Handler interface {
 	//
 	// A header parameter serialized as XML.
 	EchoPrefs(ctx context.Context, req *EchoPrefsRequest) (EchoPrefsResponse, error)
+	// PutSize handles PUT /sizes.
+	//
+	// A size in a format goapi does not know, echoed back.
+	PutSize(ctx context.Context, req *PutSizeRequest) (PutSizeResponse, error)
 	// PutTag handles PUT /tags/{code}.
 	//
 	// A tag, with formats of the fixture's own, echoed back.

@@ -862,7 +862,35 @@ func bodyKind(mt string, schema *oas.Schema) string {
 
 // structured reports whether a body kind decodes into a schema's type.
 func structured(kind string) bool {
-	return kind == "json" || kind == "xml" || kind == "form" || kind == "multipart"
+	return kind == "json" || kind == "xml" || kind == "form" || kind == "multipart" || kind == "codec"
+}
+
+// codecKind returns "codec" when a body of media type mt decodes with a
+// codec, by Options.Codecs or x-goapi-codec on its media type object m,
+// and kind otherwise. A wildcard cannot have a codec, which is
+// registered for one media type.
+func (b *builder) codecKind(kind, mt string, m *oas.MediaType) string {
+	declared := slices.ContainsFunc(b.opts.Codecs, func(c string) bool { return mediaBase(c) == mediaBase(mt) })
+	if !declared && m != nil && m.Extensions != nil {
+		if raw, ok := m.Extensions.Get("x-goapi-codec"); ok {
+			var v bool
+			declared = json.Unmarshal(raw, &v) == nil && v
+		}
+	}
+	if !declared {
+		return kind
+	}
+	if strings.Contains(mt, "*") {
+		b.warnAt(m, nil, fmt.Sprintf("%s is a wildcard and cannot have a codec, which is registered for one media type", mt))
+		return kind
+	}
+	return "codec"
+}
+
+// mediaBase returns a media type in lower case without parameters.
+func mediaBase(mt string) string {
+	base, _, _ := strings.Cut(mt, ";")
+	return strings.ToLower(strings.TrimSpace(base))
 }
 
 func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fields namespace) *Body {
@@ -878,7 +906,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 	var rejected []string
 	for mt, m := range rb.Content.All() {
 		schema := m.Deref().Schema
-		kind := b.partsKind(bodyKind(mt, schema), m)
+		kind := b.codecKind(b.partsKind(bodyKind(mt, schema), m), mt, m.Deref())
 		var events *EventStream
 		switch kind {
 		case "jsonl":
@@ -1144,7 +1172,7 @@ func sameSchema(a, b *oas.Schema) bool {
 // cannot be decoded into Body: after its kind, or after the media type if
 // another field has that name. The caller claims it once the field is used.
 func bodyFieldName(fields namespace, kind, mediaType string) string {
-	name := map[string]string{"json": "JSON", "xml": "XML", "form": "Form", "multipart": "Multipart", "text": "Text", "binary": "Binary", "jsonl": "JSONLines", "sse": "Events"}[kind] + "Body"
+	name := map[string]string{"json": "JSON", "xml": "XML", "form": "Form", "multipart": "Multipart", "codec": "Codec", "text": "Text", "binary": "Binary", "jsonl": "JSONLines", "sse": "Events"}[kind] + "Body"
 	if kind == "parts" || kind == "partstream" {
 		// MixedBody, RelatedBody, ...
 		mt, _, _ := strings.Cut(mediaType, ";")
@@ -1533,7 +1561,7 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 	seen := map[string]bool{}
 	for mt, m := range r.Content.All() {
 		media := m.Deref()
-		kind := b.partsKind(bodyKind(mt, media.Schema), m)
+		kind := b.codecKind(b.partsKind(bodyKind(mt, media.Schema), m), mt, media)
 		v := &Response{Status: status, Code: code, Doc: doc, Headers: headers, MediaType: mt, Kind: kind}
 		var suffix string
 		switch kind {
@@ -1543,6 +1571,10 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 				v.MediaType = "application/json"
 			}
 			suffix = "JSON"
+		case "codec":
+			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
+			_, sub, _ := strings.Cut(mediaBase(mt), "/")
+			suffix = GoName(sub)
 		case "xml":
 			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
 			node, why := b.xmlRoot(v.Body, media.Schema)

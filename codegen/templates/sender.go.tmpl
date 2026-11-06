@@ -40,6 +40,11 @@ func NewSender({{if .Schemes}}creds SenderCredentials, {{end}}opts ...client.Opt
 	if err != nil {
 		return nil, err
 	}
+{{- with codecs .Ops}}
+	if err := cfg.RequireCodecs({{.}}); err != nil {
+		return nil, err
+	}
+{{- end}}
 	return &Sender{cfg: cfg{{if .Schemes}}, creds: creds{{end}}}, nil
 }
 {{- range .Schemes}}

@@ -121,6 +121,32 @@ components:
 	}
 }
 
+func TestGenerateCodecs(t *testing.T) {
+	dir := t.TempDir()
+	doc := filepath.Join(dir, "openapi.yaml")
+	writeFile(t, doc, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /a:
+    put:
+      operationId: a
+      requestBody:
+        content:
+          application/msgpack: {schema: {type: object, properties: {n: {type: integer}}}}
+      responses:
+        "204": {description: ok}
+`)
+	var stdout, stderr bytes.Buffer
+	out := filepath.Join(dir, "gen")
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/codecs\n")
+	if code := run([]string{"generate", "server", "-out", out, "-codec", "application/msgpack", doc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	if s := readFile(t, filepath.Join(out, "server.go")); !strings.Contains(s, `cfg.RequireCodecs("application/msgpack")`) {
+		t.Errorf("server.go:\n%s", s)
+	}
+}
+
 func TestGenerateReportsWarnings(t *testing.T) {
 	dir := t.TempDir()
 	doc := filepath.Join(dir, "openapi.yaml")
@@ -148,6 +174,8 @@ func TestGenerateModelErrors(t *testing.T) {
 		{"bad optional style", []string{"generate", "model", "-optional", "maybe", "x.yaml"}, exitFailure},
 		{"bad format type", []string{"generate", "model", "-format-type", "uuid", "x.yaml"}, exitFailure},
 		{"bad format Go type", []string{"generate", "model", "-format-type", "uuid=a b", "x.yaml"}, exitFailure},
+		{"bad codec", []string{"generate", "server", "-codec", "application/*", "x.yaml"}, exitFailure},
+		{"codec of models", []string{"generate", "model", "-codec", "application/msgpack", "x.yaml"}, exitFailure},
 		{"unknown target", []string{"generate", "client", "x.yaml"}, exitFailure},
 		{"no document", []string{"generate", "model"}, exitFailure},
 	}

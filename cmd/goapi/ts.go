@@ -29,6 +29,8 @@ func runGenerateTS(args []string, stdout, stderr io.Writer) int {
 	excludePaths := fs.String("exclude-paths", "", "comma-separated path patterns of operations to leave out")
 	excludeTags := fs.String("exclude-tags", "", "comma-separated tags of operations to leave out")
 	templates := fs.String("templates", "", "directory of *.tmpl files whose blocks replace the built-in ones (experimental)")
+	var codecs codecFlag
+	fs.Var(&codecs, "codec", "a media type whose bodies are encoded and decoded with a codec the client is given, such as application/msgpack (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -57,7 +59,7 @@ func runGenerateTS(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	opts := ir.Options{Operations: true}
+	opts := ir.Options{Operations: true, Codecs: codecs}
 	sel := &ir.Selection{Paths: splitList(*paths), Tags: splitList(*tags), ExcludePaths: splitList(*excludePaths), ExcludeTags: splitList(*excludeTags)}
 	if len(sel.Paths)+len(sel.Tags)+len(sel.ExcludePaths)+len(sel.ExcludeTags) > 0 {
 		opts.Select = sel
