@@ -4,6 +4,13 @@
 
 ### Added
 
+- XML for maps (an element per key), unions (one object with the
+  properties of all their variants), recursive types and `nodeType: none`
+  on objects, in servers and Go clients; `server.XMLNode` gains `Values`,
+  `Inline`, `Ref` and `Shapes`.
+- TypeScript clients send and read XML: bodies, responses, and parameters
+  and response headers with XML `content` (operations with them were left
+  out, or the headers were).
 - TypeScript clients fill the defaults of absent properties in the
   responses they read (JSON bodies, stream items, JSON parts), at any
   depth; schema descriptors carry `default`.
@@ -435,6 +442,10 @@
 
 ### Changed
 
+- Reading XML ignores undeclared attributes and elements named like a
+  declared property or one of its elements, which could not be written
+  back. A schema made only of `oneOf`, `anyOf` or `allOf` is an XML body
+  of its type, no longer bytes.
 - Defaults apply to responses: a generated server writes the default of a
   property the handler left unset (but for write-only ones), and
   decoding a response (`oapi.DecodeResponse`, Go clients) fills absent

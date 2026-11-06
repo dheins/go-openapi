@@ -200,25 +200,30 @@ func FuzzObjectJSON(f *testing.F) {
 
 // FuzzXMLToJSON checks that converting XML never panics, gives valid
 // JSON, and that what it gives is written back as XML that reads the
-// same.
+// same, for documents with maps, shape references and inline objects
+// too.
 func FuzzXMLToJSON(f *testing.F) {
 	f.Add([]byte(`<p:pet xmlns:p="urn:pets" id="7"><p:name>Rex</p:name><photoUrls><photoUrl>a</photoUrl></photoUrls><tag><name>x</name></tag><category><id>1</id>Dogs</category></p:pet>`))
 	f.Add([]byte(`<p:pet xmlns:p="urn:pets"><extra a="1"><b>2</b><b>3</b>t</extra><vip xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:nil="true"/></p:pet>`))
+	f.Add([]byte(`<tree label="r" owner="o"><size>2</size><child><counts><x>1</x></counts></child><child label="b"><child/></child></tree>`))
+	f.Add([]byte(`<tree info="x" children="y"><info>z</info><counts/><p:pet xmlns:p="urn:pets" photoUrls="a" tags="b"/></tree>`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		out, err := XMLToJSON(data, petXML)
-		if err != nil {
-			return
-		}
-		if !json.Valid(out) {
-			t.Fatalf("invalid JSON %s from %q", out, data)
-		}
-		doc, err := JSONToXML(out, petXML)
-		if err != nil {
-			t.Fatalf("writing %s: %v", out, err)
-		}
-		back, err := XMLToJSON(doc, petXML)
-		if err != nil || string(back) != string(out) {
-			t.Fatalf("%q\n-> %s\n-> %s\n-> %s (%v)", data, out, doc, back, err)
+		for _, root := range []*XMLNode{petXML, treeXML} {
+			out, err := XMLToJSON(data, root)
+			if err != nil {
+				continue
+			}
+			if !json.Valid(out) {
+				t.Fatalf("invalid JSON %s from %q", out, data)
+			}
+			doc, err := JSONToXML(out, root)
+			if err != nil {
+				t.Fatalf("writing %s: %v", out, err)
+			}
+			back, err := XMLToJSON(doc, root)
+			if err != nil || string(back) != string(out) {
+				t.Fatalf("%q\n-> %s\n-> %s\n-> %s (%v)", data, out, doc, back, err)
+			}
 		}
 	})
 }

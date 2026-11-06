@@ -360,12 +360,13 @@ func TestGenerateTSClient(t *testing.T) {
 			t.Errorf("%s not generated: %v", name, err)
 		}
 	}
-	// What the TypeScript runtime cannot send is said.
-	if !strings.Contains(stderr.String(), "PutCard: the TypeScript client cannot send application/xml bodies yet; the operation is left out") {
+	// The TypeScript runtime sends and reads everything the document has,
+	// XML included.
+	if stderr.Len() > 0 {
 		t.Errorf("stderr = %s", &stderr)
 	}
 	c := readFile(t, filepath.Join(out, "client.ts"))
-	if !strings.Contains(c, "  listPets(req: ListPetsRequest = {}, call?: CallOptions): Promise<ListPetsResponse> {") || strings.Contains(c, "  putCard(") {
+	if !strings.Contains(c, "  listPets(req: ListPetsRequest = {}, call?: CallOptions): Promise<ListPetsResponse> {") || !strings.Contains(c, "  putCard(") {
 		t.Errorf("client.ts:\n%.2000s", c)
 	}
 

@@ -44,6 +44,9 @@ const followListPetsAllLink: LinkSpec = { name: "All", responses: [{ status: "20
 /** The inputs of createPet. */
 export interface CreatePetRequest {
   body: $m.Pet;
+  /** The media type to send the body as; by default the first of the
+   * property that is set. */
+  contentType?: "application/json" | "application/xml";
 }
 
 /** The responses of createPet. */
@@ -55,7 +58,7 @@ const createPetSpec: OperationSpec = {
   method: "POST",
   path: "/pets",
   params: [],
-  body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "body", schema: $ref(() => $m.PetSchema) }] },
+  body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "body", schema: $ref(() => $m.PetSchema) }, { mediaType: "application/xml", kind: "xml", key: "body", schema: $ref(() => $m.PetSchema), xml: { name: "Pet", type: "object", properties: [{ name: "id", node: { name: "id", type: "integer" } }, { name: "name", node: { name: "name", type: "string" } }, { name: "tag", node: { name: "tag", type: "string" } }, { name: "secret", node: { name: "secret", type: "string" } }] } }] },
   responses: [{ status: "201", mediaType: "application/json", kind: "json", schema: $ref(() => $m.PetSchema) }, { status: "4XX", mediaType: "application/json", kind: "json", schema: $ref(() => $m.ErrorSchema) }],
 };
 
@@ -199,13 +202,29 @@ export interface GetContentRequest {
 
 /** The responses of getContent. */
 export type GetContentResponse =
-  | { status: 204; headers: { xCode?: number; xWhere?: $m.Filter } };
+  | { status: 204; headers: { xCode?: number; xWhere?: $m.Filter; xPrefs?: $m.Prefs } };
 
 const getContentSpec: OperationSpec = {
   method: "GET",
   path: "/content/{code}",
   params: [{ key: "code", name: "code", in: "path", style: "", explode: false, shape: "scalar", content: "text", required: true, schema: { kind: "integer", minimum: 1 } }, { key: "where", name: "where", in: "query", style: "", explode: false, shape: "object", content: "form", schema: $ref(() => $m.FilterSchema) }, { key: "xNote", name: "X-Note", in: "header", style: "", explode: false, shape: "scalar", content: "text", schema: { kind: "string", maxLength: 20 } }, { key: "session", name: "session", in: "cookie", style: "", explode: false, shape: "scalar", content: "json", schema: $ref(() => $m.PrefsSchema) }, { key: "label", name: "label", in: "cookie", style: "", explode: false, shape: "scalar", content: "text", schema: { kind: "string" } }],
-  responses: [{ status: "204", headers: [{ key: "xCode", name: "X-Code", content: "text", schema: { kind: "integer" } }, { key: "xWhere", name: "X-Where", content: "form", schema: $ref(() => $m.FilterSchema) }] }],
+  responses: [{ status: "204", headers: [{ key: "xCode", name: "X-Code", content: "text", schema: { kind: "integer" } }, { key: "xWhere", name: "X-Where", content: "form", schema: $ref(() => $m.FilterSchema) }, { key: "xPrefs", name: "X-Prefs", content: "xml", xml: { name: "Prefs", type: "object", properties: [{ name: "theme", node: { name: "theme", type: "string" } }, { name: "compact", node: { name: "compact", type: "boolean" } }] }, schema: $ref(() => $m.PrefsSchema) }] }],
+};
+
+/** The inputs of echoPrefs. */
+export interface EchoPrefsRequest {
+  xPrefs: $m.Prefs;
+}
+
+/** The responses of echoPrefs. */
+export type EchoPrefsResponse =
+  | { status: 204; headers: { xPrefs?: $m.Prefs } };
+
+const echoPrefsSpec: OperationSpec = {
+  method: "GET",
+  path: "/prefs",
+  params: [{ key: "xPrefs", name: "X-Prefs", in: "header", style: "", explode: false, shape: "scalar", content: "xml", xml: { name: "Prefs", type: "object", properties: [{ name: "theme", node: { name: "theme", type: "string" } }, { name: "compact", node: { name: "compact", type: "boolean" } }] }, required: true, schema: $ref(() => $m.PrefsSchema) }],
+  responses: [{ status: "204", headers: [{ key: "xPrefs", name: "X-Prefs", content: "xml", xml: { name: "Prefs", type: "object", properties: [{ name: "theme", node: { name: "theme", type: "string" } }, { name: "compact", node: { name: "compact", type: "boolean" } }] }, schema: $ref(() => $m.PrefsSchema) }] }],
 };
 
 /** The inputs of getSettings. */
@@ -404,13 +423,50 @@ export interface GetCardRequest {
 
 /** The responses of getCard. */
 export type GetCardResponse =
-  | { status: 200; body: $m.Card };
+  | { status: 200; contentType: "application/json"; body: $m.Card }
+  | { status: 200; contentType: "application/xml"; body: $m.Card };
 
 const getCardSpec: OperationSpec = {
   method: "GET",
   path: "/pets/{petId}/card",
   params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
-  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.CardSchema) }],
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.CardSchema), withContentType: true }, { status: "200", mediaType: "application/xml", kind: "xml", schema: $ref(() => $m.CardSchema), xml: { name: "card", namespace: "urn:example:pets", prefix: "p", type: "object", properties: [{ name: "id", node: { name: "id", kind: "attribute", type: "integer" } }, { name: "name", node: { name: "name", namespace: "urn:example:pets", prefix: "p", type: "string" } }, { name: "nicknames", node: { name: "nicknames", type: "array", wrapped: true, items: { name: "nickname", type: "string" } } }, { name: "vets", node: { name: "vets", type: "array", items: { name: "vet", type: "object", properties: [{ name: "name", node: { name: "name", kind: "text", type: "string" } }, { name: "phone", node: { name: "phone", kind: "attribute", type: "string" } }] } } }, { name: "note", node: { name: "remark", type: "object", properties: [{ name: "lang", node: { name: "lang", kind: "attribute", type: "string" } }, { name: "text", node: { name: "text", kind: "cdata", type: "string" } }] } }, { name: "secret", node: { name: "secret", type: "string" } }] }, withContentType: true }],
+};
+
+/** The inputs of putCard. */
+export interface PutCardRequest {
+  petId: number;
+  body: $m.Card;
+}
+
+/** The responses of putCard. */
+export type PutCardResponse =
+  | { status: 204 };
+
+const putCardSpec: OperationSpec = {
+  method: "PUT",
+  path: "/pets/{petId}/card",
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  body: { required: true, media: [{ mediaType: "application/xml", kind: "xml", key: "body", schema: $ref(() => $m.CardSchema), xml: { name: "card", namespace: "urn:example:pets", prefix: "p", type: "object", properties: [{ name: "id", node: { name: "id", kind: "attribute", type: "integer" } }, { name: "name", node: { name: "name", namespace: "urn:example:pets", prefix: "p", type: "string" } }, { name: "nicknames", node: { name: "nicknames", type: "array", wrapped: true, items: { name: "nickname", type: "string" } } }, { name: "vets", node: { name: "vets", type: "array", items: { name: "vet", type: "object", properties: [{ name: "name", node: { name: "name", kind: "text", type: "string" } }, { name: "phone", node: { name: "phone", kind: "attribute", type: "string" } }] } } }, { name: "note", node: { name: "remark", type: "object", properties: [{ name: "lang", node: { name: "lang", kind: "attribute", type: "string" } }, { name: "text", node: { name: "text", kind: "cdata", type: "string" } }] } }, { name: "secret", node: { name: "secret", type: "string" } }] } }] },
+  responses: [{ status: "204" }],
+};
+
+/** The inputs of putFamily. */
+export interface PutFamilyRequest {
+  petId: number;
+  body: $m.Family;
+}
+
+/** The responses of putFamily. */
+export type PutFamilyResponse =
+  | { status: 200; body: $m.Family };
+
+const putFamilySpec: OperationSpec = {
+  method: "PUT",
+  path: "/pets/{petId}/family",
+  params: [{ key: "petId", name: "petId", in: "path", style: "simple", explode: false, shape: "scalar", required: true, schema: { kind: "integer" } }],
+  body: { required: true, media: [{ mediaType: "application/xml", kind: "xml", key: "body", schema: $ref(() => $m.FamilySchema), xml: { name: "family", type: "object", ref: "Family", shapes: { "Family": { type: "object", properties: [{ name: "name", node: { name: "name", kind: "attribute", type: "string" } }, { name: "litters", node: { name: "litters", type: "array", items: { name: "family", type: "object", ref: "Family" } } }, { name: "scores", node: { name: "scores", type: "map", values: { type: "integer" } } }, { name: "home", node: { name: "home", type: "object", properties: [{ name: "city", node: { name: "city", kind: "attribute", type: "string" } }, { name: "street", node: { name: "street", type: "string" } }], inline: true } }, { name: "mark", node: { name: "mark", type: "object", properties: [{ name: "chip", node: { name: "chip", type: "string" } }, { name: "tattoo", node: { name: "tattoo", type: "string" } }, { name: "ink", node: { name: "ink", kind: "attribute", type: "string" } }] } }] } } } }] },
+  responses: [{ status: "200", mediaType: "application/xml", kind: "xml", schema: $ref(() => $m.FamilySchema), xml: { name: "family", type: "object", ref: "Family", shapes: { "Family": { type: "object", properties: [{ name: "name", node: { name: "name", kind: "attribute", type: "string" } }, { name: "litters", node: { name: "litters", type: "array", items: { name: "family", type: "object", ref: "Family" } } }, { name: "scores", node: { name: "scores", type: "map", values: { type: "integer" } } }, { name: "home", node: { name: "home", type: "object", properties: [{ name: "city", node: { name: "city", kind: "attribute", type: "string" } }, { name: "street", node: { name: "street", type: "string" } }], inline: true } }, { name: "mark", node: { name: "mark", type: "object", properties: [{ name: "chip", node: { name: "chip", type: "string" } }, { name: "tattoo", node: { name: "tattoo", type: "string" } }, { name: "ink", node: { name: "ink", kind: "attribute", type: "string" } }] } }] } } } }],
 };
 
 /** The inputs of batchPets. */
@@ -865,6 +921,15 @@ export class Client {
   }
 
   /**
+   * GET /prefs.
+   *
+   * A header parameter serialized as XML.
+   */
+  echoPrefs(req: EchoPrefsRequest, call?: CallOptions): Promise<EchoPrefsResponse> {
+    return send(this.#cfg, echoPrefsSpec, req, call) as Promise<EchoPrefsResponse>;
+  }
+
+  /**
    * GET /pets/{petId}/settings.
    *
    * The pet's settings, with defaults for what is not set.
@@ -945,6 +1010,20 @@ export class Client {
   /** GET /pets/{petId}/card. */
   getCard(req: GetCardRequest, call?: CallOptions): Promise<GetCardResponse> {
     return send(this.#cfg, getCardSpec, req, call) as Promise<GetCardResponse>;
+  }
+
+  /** PUT /pets/{petId}/card. */
+  putCard(req: PutCardRequest, call?: CallOptions): Promise<PutCardResponse> {
+    return send(this.#cfg, putCardSpec, req, call) as Promise<PutCardResponse>;
+  }
+
+  /**
+   * PUT /pets/{petId}/family.
+   *
+   * A family tree as XML, echoed back.
+   */
+  putFamily(req: PutFamilyRequest, call?: CallOptions): Promise<PutFamilyResponse> {
+    return send(this.#cfg, putFamilySpec, req, call) as Promise<PutFamilyResponse>;
   }
 
   /**

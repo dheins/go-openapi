@@ -584,14 +584,14 @@ paths:
       operationId: bad
       requestBody:
         content:
-          application/xml: {schema: {type: object, additionalProperties: {type: integer}}}
-          application/json: {schema: {type: object, additionalProperties: {type: integer}}}
+          application/xml: {schema: {type: object, additionalProperties: {type: array, items: {type: integer}}}}
+          application/json: {schema: {type: object, additionalProperties: {type: array, items: {type: integer}}}}
       responses:
         "200":
           description: ok
           content:
-            application/xml: {schema: {$ref: "#/components/schemas/Node"}}
-            application/json: {schema: {$ref: "#/components/schemas/Node"}}
+            application/xml: {schema: {$ref: "#/components/schemas/Value"}}
+            application/json: {schema: {$ref: "#/components/schemas/Value"}}
 components:
   schemas:
     Book:
@@ -599,10 +599,8 @@ components:
       properties:
         isbn: {type: string, xml: {attribute: true}}
         authors: {type: array, items: {type: string, xml: {name: author}}, xml: {wrapped: true}}
-    Node:
-      type: object
-      properties:
-        next: {$ref: "#/components/schemas/Node"}
+    Value:
+      oneOf: [{type: string}, {$ref: "#/components/schemas/Book"}]
 `, Options{Operations: true})
 	ok := operationNamed(t, m, "Ok")
 	book := ok.Body.Media[0].XML
@@ -630,11 +628,97 @@ components:
 	for _, w := range m.Warnings {
 		all += w.Message + "\n"
 	}
-	for _, want := range []string{"a map cannot be written as XML yet; application/xml is answered with 415",
-		"Node refers to itself, which cannot be written as XML yet; response 200 of type application/xml cannot be returned"} {
+	for _, want := range []string{"maps of arrays cannot be written as XML; application/xml is answered with 415",
+		"Value has a variant that is not an object of its own, or contains the union inside itself, which cannot be written as XML; response 200 of type application/xml cannot be returned"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no warning %q in:\n%s", want, all)
 		}
+	}
+}
+
+func TestXMLShapes(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /tree:
+    post:
+      operationId: tree
+      requestBody:
+        content:
+          application/xml: {schema: {$ref: "#/components/schemas/Tree"}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/xml: {schema: {$ref: "#/components/schemas/Shape"}}
+  /loop:
+    post:
+      operationId: loop
+      requestBody:
+        content:
+          application/xml: {schema: {$ref: "#/components/schemas/Loop"}}
+      responses:
+        "204": {description: ok}
+components:
+  schemas:
+    Tree:
+      type: object
+      properties:
+        label: {type: string, xml: {nodeType: attribute}}
+        children: {type: array, items: {$ref: "#/components/schemas/Tree"}, xml: {nodeType: none}}
+        counts: {type: object, additionalProperties: {type: integer}}
+        info:
+          type: object
+          xml: {nodeType: none}
+          properties:
+            owner: {type: string, xml: {nodeType: attribute}}
+    Shape:
+      oneOf:
+        - {type: object, properties: {kind: {type: string}, radius: {type: number}}, required: [kind]}
+        - {type: object, properties: {kind: {type: string}, side: {type: number}}, required: [kind]}
+    Loop:
+      type: object
+      properties:
+        again: {$ref: "#/components/schemas/Again"}
+    Again:
+      type: object
+      xml: {nodeType: none}
+      properties:
+        again: {$ref: "#/components/schemas/Again"}
+`, Options{Operations: true})
+	tree := operationNamed(t, m, "Tree")
+	n := tree.Body.Media[0].XML
+	if n == nil {
+		t.Fatalf("no Tree shape: %+v", m.Warnings)
+	}
+	// The root is a Tree, so it refers to the shape too.
+	shapeTree := n.Shapes["Tree"]
+	if n.Ref != "Tree" || n.Name != "Tree" || shapeTree == nil || shapeTree.Name != "" || len(shapeTree.Properties) != 4 {
+		t.Fatalf("root %+v, shapes %+v", n, n.Shapes)
+	}
+	children, counts, info := shapeTree.Properties[1].Node, shapeTree.Properties[2].Node, shapeTree.Properties[3].Node
+	switch {
+	case children.Wrapped || children.Items.Ref != "Tree" || children.Items.Name != "children":
+		t.Errorf("children = %+v, items %+v", children, children.Items)
+	case counts.Type != "map" || counts.Values.Type != "integer" || counts.Values.Name != "":
+		t.Errorf("counts = %+v", counts)
+	case !info.Inline || info.Properties[0].Node.Kind != "attribute":
+		t.Errorf("info = %+v", info)
+	}
+	shape := tree.Responses[0].XML
+	var names []string
+	for _, p := range shape.Properties {
+		names = append(names, p.Name)
+	}
+	if shape.Type != "object" || strings.Join(names, " ") != "kind radius side" {
+		t.Errorf("merged union = %+v", shape)
+	}
+	all := ""
+	for _, w := range m.Warnings {
+		all += w.Message + "\n"
+	}
+	if want := "Again contains itself with the XML node type none, which has no end"; !strings.Contains(all, want) {
+		t.Errorf("no warning %q in:\n%s", want, all)
 	}
 }
 

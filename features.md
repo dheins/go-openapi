@@ -27,6 +27,15 @@ shipped in.
   `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
   `additionalProperties` or property counts of a struct; these keywords on
   enums and unions. — later
+- String formats of your own: a way to register a format's check (and
+  its Go type), as go-swagger's `strfmt` registry allows. The formats
+  checked or typed are fixed today; `x-go-type` is the only way to use
+  another type. — later
+- go-swagger's model extensions: `x-omitempty`, `x-go-custom-tag` (struct
+  tags of other packages, such as `db:` or `yaml:`), `x-order`,
+  `x-isnullable` and `x-go-json-string`, so that documents tuned for
+  go-swagger generate the same shapes (only `x-nullable` is read, by the
+  2.0 conversion). — later
 
 ## Server
 
@@ -36,8 +45,9 @@ shipped in.
   types than JSON and text. — later
 - Streamed request bodies that can be sent again, for retry middleware
   (a stream is sent once today). — later
-- XML for unions, maps, recursive types and `nodeType: none` on objects
-  (answered with 415 today). — later
+- XML for maps of arrays, unions of non-object variants, and objects with
+  typed `additionalProperties` next to their properties (answered with
+  415 today). — later
 - Headers (response and part headers) whose objects hold arrays or other
   objects, which the simple style cannot write; only their presence is
   checked. — later
@@ -61,6 +71,14 @@ shipped in.
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
+- Bodies of media types goapi does not know (msgpack, protobuf, CBOR and
+  other formats): a codec the application registers for a media type,
+  used by servers and Go clients, as go-swagger's consumers and producers
+  are. An operation with only such bodies is not generated today, with a
+  warning. — later
+- Validating requests against a document without generated code: a
+  middleware in front of handlers written by hand, as go-swagger's
+  `middleware` and `untyped` packages offer. — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -71,8 +89,7 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   (`client.WithMiddleware`). — not planned
 - TypeScript clients: full duplex, reading a streamed response while the
   request still streams (`duplex: "half"` sends the request first). — later
-- TypeScript clients: XML bodies and responses, parameters and response
-  headers with XML `content`, headers of `multipart/form-data` parts
+- TypeScript clients: headers of `multipart/form-data` parts
   (`FormData` cannot set them), quoted-printable parts (base64 `[]byte`
   ones included), and `int64`
   values beyond 2^53 (they are `number`s). Cookie parameters cannot be
@@ -98,6 +115,23 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - Custom templates: a block that only adds to a built-in one, without
   copying it (a way to call the block it replaces), and `runtime.ts` as a
   template. — later
+- Custom templates that add files or targets: a template file of your own
+  written once per model, operation or document, and a layout of the
+  generated packages other than `-operations` and `-models`, as
+  go-swagger's generator config file allows. Only blocks of the built-in
+  files can be replaced today. — later
+- `goapi generate cli`: a command-line client with a command per
+  operation and a flag per parameter, as `swagger generate cli` writes.
+  — later
+- `goapi generate markdown`: reference documentation as Markdown files to
+  commit, as `swagger generate markdown` writes; `server.WithDocumentPage`
+  only renders it while serving. — later
+- `goapi mixin`: documents merged into one (their paths, components and
+  tags, with conflicts reported), as `swagger mixin` does; `goapi flatten`
+  only bundles the files one document refers to. — later
+- `goapi flatten -expand`: every `$ref` replaced by what it points to
+  (recursive schemas kept as references), as `swagger expand` does.
+  — later
 - `goapi diff`: callbacks, links, examples, defaults and discriminator
   mappings are not compared; `oneOf`/`anyOf` alternatives are matched by
   position, so reordered ones read as changed; and what breaks servers
@@ -117,6 +151,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] XML for maps (an element per key), unions (one object with the
+  properties of all their variants), recursive types and `nodeType: none`
+  on objects; and XML in TypeScript clients: bodies, responses, and
+  parameters and headers with XML `content`. (925101a, f33728c, f62e03a)
 - [x] Defaults in responses: servers write the default of a property the
   handler left unset, and Go and TypeScript clients fill absent ones
   when reading, as servers do for requests (and did for the properties of

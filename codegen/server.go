@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strconv"
@@ -841,6 +842,22 @@ func xmlNodeLiteral(n *ir.XMLNode) string {
 			props[i] = fmt.Sprintf("{Name: %q, Node: %s}", p.Name, xmlNodeLiteral(p.Node))
 		}
 		add("Properties", "[]server.XMLProperty{"+strings.Join(props, ", ")+"}")
+	}
+	if n.Values != nil {
+		add("Values", xmlNodeLiteral(n.Values))
+	}
+	if n.Inline {
+		add("Inline", "true")
+	}
+	if n.Ref != "" {
+		add("Ref", strconv.Quote(n.Ref))
+	}
+	if len(n.Shapes) > 0 {
+		shapes := make([]string, 0, len(n.Shapes))
+		for _, name := range slices.Sorted(maps.Keys(n.Shapes)) {
+			shapes = append(shapes, strconv.Quote(name)+": "+xmlNodeLiteral(n.Shapes[name]))
+		}
+		add("Shapes", "map[string]*server.XMLNode{"+strings.Join(shapes, ", ")+"}")
 	}
 	b.WriteString(strings.Join(fields, ", "))
 	b.WriteString("}")

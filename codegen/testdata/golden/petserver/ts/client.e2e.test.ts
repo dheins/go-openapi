@@ -13,6 +13,7 @@ import {
   InvalidResponseError,
   NoCredentialsError,
   UnexpectedResponseError,
+  type Family,
   type Filter,
   type Order,
   type Tree,
@@ -173,8 +174,8 @@ test("errors", { skip }, async () => {
   const html = await rejects(fake("<p>", { "content-type": "text/html" }).getPet({ petId: 1 }), UnexpectedResponseError);
   assert.equal(html.body, "<p>");
 
-  // Operations the TypeScript client cannot send are left out.
-  assert.equal("putCard" in c, false);
+  // Operations with XML bodies are sent too.
+  assert.equal("putCard" in c, true);
 });
 
 test("security", { skip }, async () => {
@@ -304,8 +305,12 @@ test("parameters and headers with content", { skip }, async () => {
   const where: Filter = { role: "a&b=c", tags: ["x y", "z"], owner: { name: "Ann", age: 4 } };
   const got = await client().getContent({ code: 12, where, xNote: "a, b", session: { theme: '"dark"; x', compact: true }, label: "hi, there; you" });
   assert.equal(got.status, 204);
-  // Text and form headers are read back; the XML one is left out.
-  assert.deepEqual(got.headers, { xCode: 12, xWhere: where });
+  // Text, form and XML headers are read back.
+  assert.deepEqual(got.headers, { xCode: 12, xWhere: where, xPrefs: { theme: '"dark"; x', compact: true } });
+  assert.deepEqual(await client().echoPrefs({ xPrefs: { theme: "light & <dim>", compact: false } }), {
+    status: 204,
+    headers: { xPrefs: { theme: "light & <dim>", compact: false } },
+  });
   await rejects(client().getContent({ code: 0 }), InvalidRequestError);
 });
 
@@ -410,4 +415,24 @@ test("base64 parts and object headers", { skip }, async () => {
 test("defaults", { skip }, async () => {
   // The server writes the defaults of what it leaves unset.
   assert.deepEqual(await client().getSettings({ petId: 1 }), { status: 200, body: { theme: "light", notify: true, version: 1 } });
+});
+
+test("XML bodies", { skip }, async () => {
+  const family: Family = {
+    name: "Rex",
+    litters: [{ name: "Pup", scores: { speed: 3 }, litters: [{ name: "Tiny" }] }],
+    scores: { agility: 9 },
+    home: { city: "Oslo" },
+    mark: { chip: "123" },
+  };
+  // Written by the client, read by the server, echoed, and read back.
+  assert.deepEqual(await client().putFamily({ petId: 1, body: family }), { status: 200, body: family });
+  assert.deepEqual(await client().putCard({ petId: 8, body: { id: 8, name: `"a" <b> & 'c'`, nicknames: ["x"], note: { lang: "en", text: "x]]>y" } } }), { status: 204 });
+  const card = await client({ validateResponses: true }).getCard({ petId: 3 }, { headers: { Accept: "application/xml" } });
+  assert.deepEqual(card, {
+    status: 200,
+    contentType: "application/xml",
+    body: { id: 3, name: "Rex", nicknames: ["T-Rex"], vets: [{ name: "Dr. Who", phone: "555" }], note: { lang: "en", text: "likes <bones>" } },
+  });
+  await rejects(client().putFamily({ petId: 1, body: { name: "a", mark: {} as Family["mark"] & object } }), InvalidRequestError);
 });

@@ -238,6 +238,10 @@ func (s *store) PutCard(_ context.Context, req *api.PutCardRequest) (api.PutCard
 	return api.PutCard204Response{}, nil
 }
 
+func (s *store) PutFamily(_ context.Context, req *api.PutFamilyRequest) (api.PutFamilyResponse, error) {
+	return api.PutFamily200XMLResponse{Body: req.Body}, nil
+}
+
 func (s *store) GetContent(_ context.Context, req *api.GetContentRequest) (api.GetContentResponse, error) {
 	s.seen["GetContent"] = req
 	return api.GetContent204Response{XCode: oapi.Some(req.Code), XWhere: req.Where, XPrefs: req.Session}, nil
@@ -1001,6 +1005,31 @@ func TestNestedFields(t *testing.T) {
 	}
 	if got := s.seen["Upload"].(*api.UploadRequest).Body.Value; got["a"] != "1" || got["b"] != "x" {
 		t.Errorf("upload = %v", got)
+	}
+}
+
+// TestXMLShapes covers a recursive type, a map, an inline object
+// (nodeType none) and a union, written as XML.
+func TestXMLShapes(t *testing.T) {
+	_, h := newTestServer()
+	doc := `<family name="Rex" city="Oslo"><family name="Pup"><scores><speed>3</speed></scores></family>` +
+		`<scores><speed>7</speed><agility>9</agility></scores><street>Main 1</street><mark ink="blue"><tattoo>R</tattoo></mark></family>`
+	r := do(t, h, "PUT", "/pets/7/family", "application/xml", doc)
+	want := `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
+		`<family name="Rex" city="Oslo"><family name="Pup"><scores><speed>3</speed></scores></family>` +
+		`<scores><agility>9</agility><speed>7</speed></scores><street>Main 1</street><mark ink="blue"><tattoo>R</tattoo></mark></family>`
+	if r.status != 200 || r.body != want {
+		t.Errorf("echo: %d\n%s\nwant\n%s", r.status, r.body, want)
+	}
+	for _, tt := range []struct{ doc, want string }{
+		{`<family name="a"><scores><x>no</x></scores></family>`, "body /scores/x: "},
+		{`<family name="a"><family/></family>`, "body /litters/0/name: "},
+		{`<family name="a"><mark ink="blue"/></family>`, "body /mark: "},
+	} {
+		r := do(t, h, "PUT", "/pets/7/family", "application/xml", tt.doc)
+		if got := problemErrors(t, r); r.status != 400 || len(got) == 0 || !strings.HasPrefix(got[0], tt.want) {
+			t.Errorf("%s: %d %q, want %q", tt.doc, r.status, got, tt.want)
+		}
 	}
 }
 

@@ -1123,7 +1123,9 @@ func opaque(s *oas.Schema) bool {
 	}
 	types, _ := splitTypes(s)
 	if len(types) == 0 {
-		return inferType(s) == "" || inferType(s) == "string"
+		// A composition describes its value through its members.
+		composed := len(s.OneOf) > 0 || len(s.AnyOf) > 0 || len(s.AllOf) > 0
+		return !composed && (inferType(s) == "" || inferType(s) == "string")
 	}
 	return slices.Equal(types, []string{"string"})
 }

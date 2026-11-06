@@ -699,11 +699,33 @@ and declared when writing; `xsi:nil="true"` is null. Elements and
 attributes the schema does not declare are kept as properties, for the
 decoder to accept or reject.
 
+Other shapes:
+- **Maps** (`additionalProperties` alone) are an element per key, named by
+  the key: `<scores><speed>7</speed></scores>`. A key that is not an XML
+  name cannot be written.
+- **Unions** (`oneOf`, `anyOf`, and objects with them) are one object with
+  the properties of all their variants, the first variant describing a
+  property they share; the decoder then picks the variant, as for JSON.
+  Every variant must be an object.
+- **Recursive types** are written to any depth: the generated
+  `server.XMLNode` refers to the type's shape (`Ref`) in a table on the
+  root (`Shapes`).
+- **`nodeType: none`** on an object (3.2) leaves out its element: its
+  attributes and elements are those of its parent. On an array, it
+  repeats the items in the parent, as without `wrapped`.
+
+An attribute or element the schema does not declare, but named like a
+declared property or one of its elements, is ignored, as it could not be
+written back.
+
 XML without a schema (or with a string schema) stays bytes, or a string
-for `text/xml`. Schemas XML cannot describe yet, such as unions, maps and
-recursive types, are answered with 415 in requests and cannot be returned
+for `text/xml`. Schemas XML cannot describe, such as maps of arrays,
+unions of non-objects and objects with typed `additionalProperties` next
+to properties, are answered with 415 in requests and cannot be returned
 in responses, with a warning. Documents are read with `encoding/xml`,
 which does not process DTDs or external entities; nesting is limited.
+TypeScript clients write and read XML the same way, with a reader of
+their own.
 
 ### Positional multipart bodies
 
@@ -1233,8 +1255,6 @@ if (resp.status === 200) {
 
 Not supported by the TypeScript client yet; `generate ts-client` warns
 about each one it leaves out:
-- XML bodies and responses, parameters with XML `content` (the operation
-  is left out) and response headers with it (the header is).
 - Headers of `multipart/form-data` parts, which `FormData` cannot set.
 - Webhooks and callbacks, which a server sends.
 - Cookie parameters in browsers, which do not let scripts set `Cookie`. Elsewhere they are sent, and in browsers the browser's own cookies are.
