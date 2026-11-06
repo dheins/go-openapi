@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,9 @@ import (
 // multipart/mixed or multipart/related: how each part becomes an item,
 // and the encodings of the parts by position.
 type Parts struct {
-	// Item is "file" (the part itself, an oapi.File), "text" (its body as
+	// Item is "file" (the part itself, an oapi.File), "bytes" (its body as
+	// a []byte, sent base64 with a Content-Transfer-Encoding and read as
+	// its own says), "text" (its body as
 	// a string) or "json" (its body decoded as JSON).
 	Item string
 	// Kinds are those of the first parts of a tuple (prefixItems), by
@@ -181,6 +184,13 @@ func decodeItem(dst any, kind string, part *multipart.Part, data []byte, dir oap
 	case "text":
 		// Through JSON, so that enums and formats are checked as usual.
 		return oapi.DecodeValue(oapi.AppendString(nil, string(data)), dst, dir)
+	case "bytes":
+		raw, err := transferDecoded(part.Header, data)
+		if err != nil {
+			return &oapi.ValidationError{Message: err.Error()}
+		}
+		// Through JSON too, where bytes are base64, for types of their own.
+		return oapi.DecodeValue(oapi.AppendString(nil, base64.StdEncoding.EncodeToString(raw)), dst, dir)
 	}
 	return oapi.DecodeValue(data, dst, dir)
 }
@@ -677,6 +687,13 @@ func encodeItem(ptr any, kind string, dir oapi.Direction) (textproto.MIMEHeader,
 			return nil, nil, "", err
 		}
 		return h, []byte(s), "text/plain; charset=utf-8", nil
+	case "bytes":
+		raw, err := encodedBytes(src, dir)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		h.Set("Content-Transfer-Encoding", "base64")
+		return h, base64Lines(raw), "application/octet-stream", nil
 	}
 	data, err := oapi.EncodeValue(src, dir)
 	if err != nil {
