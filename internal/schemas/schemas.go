@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
@@ -31,10 +32,11 @@ const (
 	Response
 )
 
-// Set compiles the schemas of one document. It is not safe for
-// concurrent use while it compiles: callers compile what they need first.
+// Set compiles the schemas of one document. It is safe for concurrent
+// use: compiling is serialized, and compiled schemas only read.
 type Set struct {
 	spec     *loader.Spec
+	mu       sync.Mutex
 	compiler *jsonschema.Compiler
 	compiled map[string]*jsonschema.Schema
 }
@@ -69,6 +71,8 @@ func (s *Set) Compile(schema *oas.Schema) *jsonschema.Schema {
 		return nil
 	}
 	u := loc.URI + "#" + (&url.URL{Fragment: loc.Pointer}).EscapedFragment()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if c, ok := s.compiled[u]; ok {
 		return c
 	}
@@ -81,9 +85,11 @@ func (s *Set) Compile(schema *oas.Schema) *jsonschema.Schema {
 }
 
 // Problem is how a value fails a schema: at a JSON pointer into it ("" for
-// the value itself).
+// the value itself). Missing are the required properties missing there,
+// which Message lists.
 type Problem struct {
 	Pointer, Message string
+	Missing          []string
 }
 
 // Check returns how inst, a value as jsonschema.UnmarshalJSON gives it,
@@ -106,11 +112,11 @@ func (s *Set) Check(compiled *jsonschema.Schema, inst any, dir Direction) []Prob
 				}
 			}
 			if len(missing) > 0 {
-				problems = append(problems, Problem{where, (&kind.Required{Missing: missing}).LocalizedString(printer)})
+				problems = append(problems, Problem{Pointer: where, Message: (&kind.Required{Missing: missing}).LocalizedString(printer), Missing: missing})
 			}
 			return
 		}
-		problems = append(problems, Problem{where, Describe(leaf)})
+		problems = append(problems, Problem{Pointer: where, Message: Describe(leaf)})
 	})
 	return problems
 }
@@ -118,7 +124,9 @@ func (s *Set) Check(compiled *jsonschema.Schema, inst any, dir Direction) []Prob
 // exempt reports whether the property name of the schema at schemaURL
 // need not be in a value sent in direction dir.
 func (s *Set) exempt(schemaURL, name string, dir Direction) bool {
+	s.mu.Lock()
 	c, err := s.compiler.Compile(strings.TrimSuffix(schemaURL, "/required"))
+	s.mu.Unlock()
 	if err != nil {
 		return false
 	}

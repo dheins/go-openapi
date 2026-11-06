@@ -38,10 +38,27 @@ func FormFields(body []byte) (map[string][]string, error) {
 // declares a content type, and carry its Headers.
 func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, error) {
 	var v T
+	data, files, err := MultipartJSON(body, contentType, obj)
+	if err != nil {
+		return v, err
+	}
+	if err := oapi.DecodeRequest(data, &v); err != nil {
+		return v, err
+	}
+	return v, setFiles(&v, files)
+}
+
+// MultipartJSON converts a multipart/form-data body to the JSON object
+// DecodeMultipart decodes, and returns its files by property: values are
+// converted like ObjectJSON, a file part is an empty string in the JSON,
+// so that the property is present, and parts must have their properties'
+// ContentTypes and Headers. Servers without generated types check the
+// JSON against the body's schema.
+func MultipartJSON(body []byte, contentType string, obj Property) ([]byte, map[string][]oapi.File, error) {
 	obj = obj.shape()
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil || params["boundary"] == "" {
-		return v, &oapi.ValidationError{Message: "multipart body without a boundary"}
+		return nil, nil, &oapi.ValidationError{Message: "multipart body without a boundary"}
 	}
 	fields := map[string][]string{}
 	files := map[string][]oapi.File{}
@@ -53,7 +70,7 @@ func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, e
 			break
 		}
 		if err != nil {
-			return v, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
+			return nil, nil, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
 		}
 		name := part.FormName()
 		if name == "" {
@@ -61,7 +78,7 @@ func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, e
 		}
 		data, err := io.ReadAll(part)
 		if err != nil {
-			return v, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
+			return nil, nil, &oapi.ValidationError{Message: "invalid multipart body: " + err.Error()}
 		}
 		prop := obj.Properties[name]
 		if msg := checkPart(part.Header, prop); msg != "" {
@@ -90,16 +107,13 @@ func DecodeMultipart[T any](body []byte, contentType string, obj Property) (T, e
 		}
 	}
 	if err := errs.Err(); err != nil {
-		return v, err
+		return nil, nil, err
 	}
 	data, err := ObjectJSON(fields, obj)
 	if err != nil {
-		return v, err
+		return nil, nil, err
 	}
-	if err := oapi.DecodeRequest(data, &v); err != nil {
-		return v, err
-	}
-	return v, setFiles(&v, files)
+	return data, files, nil
 }
 
 // checkPart checks a part's headers against its encoding, returning what
