@@ -36,6 +36,11 @@ func Document(spec *loader.Spec, opts Options) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return finish(data, opts)
+}
+
+// finish makes the changes opts asks for to a bundled document.
+func finish(data []byte, opts Options) ([]byte, error) {
 	if !opts.Hoist && !opts.RemoveUnused {
 		return data, nil
 	}
