@@ -81,7 +81,11 @@ func (g *tsGen) parseTemplates() error {
 		return err
 	}
 	if g.opts.Templates != nil {
-		if err := checkTemplates(g.opts.Templates, tmpl, funcs); err != nil {
+		names, err := targetNames(g.opts.Templates)
+		if err != nil {
+			return err
+		}
+		if err := checkTemplates(g.opts.Templates, tmpl, funcs, names); err != nil {
 			return err
 		}
 		if err := parseUserTemplates(tmpl, g.opts.Templates); err != nil {

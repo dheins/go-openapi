@@ -46,6 +46,10 @@ type Options struct {
 	OperationsImport  string
 	ModelsPackage     string
 	ModelsImport      string
+	// Import is the import path of the output directory, which packages
+	// of templates' targets of their own are imported below; see
+	// Target.Package.
+	Import string
 	// TypesPackage and TypesImport, if set, make Client use the
 	// operations' package of a server or client generated before, by its
 	// name and import path, instead of generating the types again.
@@ -130,7 +134,56 @@ func Models(m *ir.Model, opts Options) ([]File, error) {
 	if err := g.models(m); err != nil {
 		return nil, err
 	}
-	return g.files, nil
+	gens := map[string]*generator{"": g}
+	order := []string{""}
+	pkg := func(dir string) (*generator, error) {
+		if dir == "" {
+			return g, nil
+		}
+		// The models are in the root package, which the others import.
+		return extraPackage(opts, layout{modelsPkg: opts.Package, modelsImport: opts.Import}, gens, &order, dir)
+	}
+	if err := addTargets(m, opts, false, pkg); err != nil {
+		return nil, err
+	}
+	return packageFiles(gens, order), nil
+}
+
+// targetPackage returns the generator of the package in dir, below the
+// output: the root package (""), the operations' or the models', or one
+// of a target's own.
+func targetPackage(opts Options, lay layout, gens map[string]*generator, order *[]string, dir string) (*generator, error) {
+	switch clean := path.Clean(dir); {
+	case dir == "":
+		return gens[""], nil
+	case clean == lay.opsDir && gens[lay.opsImport] != nil:
+		return gens[lay.opsImport], nil
+	case clean == lay.modelsDir && gens[lay.modelsImport] != nil:
+		return gens[lay.modelsImport], nil
+	}
+	return extraPackage(opts, lay, gens, order, dir)
+}
+
+// extraPackage returns the generator of the package of a target's own in
+// dir, below opts.Import, creating it in gens.
+func extraPackage(opts Options, lay layout, gens map[string]*generator, order *[]string, dir string) (*generator, error) {
+	if opts.Import == "" {
+		return nil, fmt.Errorf("package %s needs the import path of the output (codegen.Options.Import, goapi generate -import)", dir)
+	}
+	imp := path.Join(opts.Import, path.Clean(dir))
+	if g, ok := gens[imp]; ok {
+		return g, nil
+	}
+	o := opts
+	o.Package = packageName(path.Clean(dir))
+	g, err := newGenerator(o)
+	if err != nil {
+		return nil, err
+	}
+	g.self, g.lay, g.dir = imp, lay, path.Clean(dir)
+	gens[imp] = g
+	*order = append(*order, imp)
+	return g, nil
 }
 
 type generator struct {
@@ -161,7 +214,11 @@ func newGenerator(opts Options) (*generator, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := checkTemplates(opts.Templates, builtin, f.funcs()); err != nil {
+		names, err := targetNames(opts.Templates)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkTemplates(opts.Templates, builtin, f.funcs(), names); err != nil {
 			return nil, err
 		}
 	}
@@ -248,7 +305,33 @@ func (g *generator) render(name string, data any, setup func(*fileGen)) ([]byte,
 	if err := tmpl.ExecuteTemplate(&body, name, data); err != nil {
 		return nil, err
 	}
+	return g.goFile(f, body.Bytes())
+}
 
+// renderText renders block name with data as a file that is not Go
+// source: as the block writes it.
+func (g *generator) renderText(name string, data any) ([]byte, error) {
+	f := &fileGen{gen: g, imports: map[string]string{}}
+	tmpl, err := template.New("go").Funcs(f.funcs()).ParseFS(templateFiles, "templates/*.tmpl")
+	if err != nil {
+		return nil, err
+	}
+	if g.opts.Templates != nil {
+		if err := parseUserTemplates(tmpl, g.opts.Templates); err != nil {
+			return nil, err
+		}
+	}
+	var body bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&body, name, data); err != nil {
+		return nil, err
+	}
+	return body.Bytes(), nil
+}
+
+// goFile completes the body of a Go file rendered with f: the header,
+// the package clause, the imports f collected and its variables, then
+// gofmt.
+func (g *generator) goFile(f *fileGen, body []byte) ([]byte, error) {
 	var out bytes.Buffer
 	out.WriteString(g.header())
 	fmt.Fprintf(&out, "package %s\n\n", g.opts.Package)
@@ -290,7 +373,7 @@ func (g *generator) render(name string, data any, setup func(*fileGen)) ([]byte,
 	for _, v := range f.varDecls {
 		out.WriteString("\n" + v + "\n")
 	}
-	out.Write(body.Bytes())
+	out.Write(body)
 
 	formatted, err := format.Source(out.Bytes())
 	if err != nil {
@@ -386,11 +469,19 @@ func (f *fileGen) funcs() template.FuncMap {
 		"opType": func(name string) string {
 			return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, name)
 		},
+		// modelType names a schema type, qualified for the package being
+		// written, as goType names references to it.
+		"modelType": func(t *ir.Type) string {
+			return f.qualify(f.gen.lay.modelsImport, f.gen.lay.modelsPkg, t.Name)
+		},
 		"unionDecodeStmts":   f.unionDecodeStmts,
 		"unionMarshalStmts":  f.unionMarshalStmts,
 		"unionValidateStmts": f.unionValidateStmts,
 		"tupleDecls":         f.tupleDecls,
 		"goapiVersion":       goapiVersion,
+	}
+	for name, fn := range namingFuncs {
+		funcs[name] = fn
 	}
 	for name, fn := range f.serverFuncs() {
 		funcs[name] = fn

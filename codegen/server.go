@@ -119,6 +119,12 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		}
 		g.add("sender.go", content)
 	}
+	pkg := func(dir string) (*generator, error) {
+		return targetPackage(opts, lay, gens, &order, dir)
+	}
+	if err := addTargets(m, opts, true, pkg); err != nil {
+		return nil, err
+	}
 	return packageFiles(gens, order), nil
 }
 

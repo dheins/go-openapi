@@ -293,6 +293,35 @@ func TestGenerateNestedPackages(t *testing.T) {
 	}
 }
 
+// TestGenerateTargets generates a server with templates that add files,
+// one package of their own among them, inside this module so that they
+// compile against the generated packages, and vets them.
+func TestGenerateTargets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet")
+	}
+	dir, err := os.MkdirTemp(".", "targetsgen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	out := filepath.Join(dir, "gen")
+	var stdout, stderr bytes.Buffer
+	args := []string{"generate", "server", "-out", out, "-templates", "../../codegen/testdata/targets", petserverDoc}
+	if code := run(args, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	for _, name := range []string{"routes.go", "README.md", "internal/repo/pet_repo.go", "docs/list_pets.md"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+			t.Errorf("%s not generated: %v", name, err)
+		}
+	}
+	cmd := exec.Command("go", "vet", "./"+path.Clean(filepath.ToSlash(dir))+"/...")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go vet: %v\n%s", err, out)
+	}
+}
+
 func TestGenerateServerImportPath(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "gen")
 	var stdout, stderr bytes.Buffer

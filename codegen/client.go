@@ -99,6 +99,12 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 		return nil, fmt.Errorf("generating client.go: %w", err)
 	}
 	g.add("client.go", content)
+	pkg := func(dir string) (*generator, error) {
+		return targetPackage(opts, lay, gens, &order, dir)
+	}
+	if err := addTargets(m, opts, true, pkg); err != nil {
+		return nil, err
+	}
 	return packageFiles(gens, order), nil
 }
 

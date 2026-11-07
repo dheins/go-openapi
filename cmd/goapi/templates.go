@@ -47,7 +47,7 @@ func runTemplates(args []string, stdout, stderr io.Writer) int {
 		return fail("%v", err)
 	}
 	// Edited copies are not overwritten.
-	for _, name := range files {
+	for _, name := range append(files, codegen.TargetsFile) {
 		if _, err := os.Stat(filepath.Join(*out, name)); err == nil {
 			return fail("%s exists; remove it or choose another -out", filepath.Join(*out, name))
 		}
@@ -66,5 +66,32 @@ func runTemplates(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, path)
 	}
+	// An example of files of your own, all commented out, so that the
+	// directory still generates the same code.
+	path := filepath.Join(*out, codegen.TargetsFile)
+	if err := os.WriteFile(path, []byte(targetsExample), 0o644); err != nil {
+		return fail("%v", err)
+	}
+	fmt.Fprintln(stdout, path)
 	return exitOK
 }
+
+// targetsExample is the goapi.yaml goapi templates writes.
+const targetsExample = `# Files of your own, written from blocks of the *.tmpl files here: once
+# for the document, each model (a component's root type) or each
+# operation, given the *ir.Model, *ir.Type or *ir.Operation. path and when
+# are templates given the same; a .go file is Go source of its package
+# (package clause, imports from imp, gofmt), others are written as they
+# are. package puts the file in a directory below the output: a generated
+# package's, or one of its own. See the guide's "Custom templates".
+#
+# targets:
+#   - template: repo
+#     scope: model
+#     path: "{{snake .Name}}_repo.go"
+#     package: internal/repo
+#     when: '{{eq (kind .) "struct"}}'
+#   - template: readme
+#     scope: document
+#     path: README.md
+`

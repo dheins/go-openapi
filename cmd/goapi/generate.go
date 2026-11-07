@@ -51,7 +51,8 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	}
 	formats := formatFlag{}
 	fs.Var(formats, "format-type", "`format=type`: the Go type of a format's values, a predeclared type or an import path and type name, such as uuid=github.com/google/uuid.UUID (repeatable)")
-	var opsPkg, models, importPath, types *string
+	importPath := fs.String("import", "", "import path of -out, for the subpackages and the packages of templates' targets (default: from the go.mod above -out)")
+	var opsPkg, models, types *string
 	if operations {
 		usage := `subdirectory and package of the operations' request and response types ("" puts them in the server package)`
 		if target == "client" {
@@ -59,7 +60,6 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		}
 		opsPkg = fs.String("operations", "api", usage+"; a path such as internal/api names the package after its last element")
 		models = fs.String("models", "model", `subdirectory and package of the schema types ("" puts them with the operations; a path such as internal/model works too)`)
-		importPath = fs.String("import", "", "import path of -out, for the subpackages (default: from the go.mod above -out)")
 	}
 	var paths, tags, excludePaths, excludeTags *string
 	if target == "client" {
@@ -161,12 +161,19 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		Package: *pkg,
 		Source:  filepath.ToSlash(filepath.Base(file)),
 		Title:   strings.TrimSpace(res.Spec.Document.Info.Title),
+		Import:  *importPath,
 	}
 	if *templates != "" {
 		if info, err := os.Stat(*templates); err != nil || !info.IsDir() {
 			return fail("-templates %s is not a directory", *templates)
 		}
 		opts.Templates = os.DirFS(*templates)
+		// Packages of targets of their own are imported below -out.
+		if opts.Import == "" {
+			if base, err := dirImportPath(*out); err == nil {
+				opts.Import = base
+			}
+		}
 	}
 	generate := codegen.Models
 	if operations && (types == nil || *types == "") {
