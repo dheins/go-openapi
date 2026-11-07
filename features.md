@@ -69,9 +69,10 @@ shipped in.
   types, and of streams; and decoding codec bodies with the JSON
   decoder's rules (required properties, read-only and write-only ones,
   defaults, pointers). — later
-- Validating requests against a document without generated code: a
-  middleware in front of handlers written by hand, as go-swagger's
-  `middleware` and `untyped` packages offer. — later
+- `middleware.Validate`: checking text, binary and stream bodies against
+  their schemas (only their media types are), responses other than JSON,
+  response headers' values, and a generated server's messages for the
+  same problems. — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -144,6 +145,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Validating requests (and, opt-in, responses) of handlers written by
+  hand against a document: `middleware.Validate`, as go-swagger's
+  `middleware` and `untyped` packages offer. (b1d5464, ca46b20, 0a886ed)
 - [x] Codecs of media types goapi does not know (msgpack, CBOR, ...):
   declared by `goapi generate -codec` or `x-goapi-codec`, registered
   with `server.WithCodec`, `client.WithCodec` and a TypeScript client's

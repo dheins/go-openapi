@@ -26,6 +26,8 @@ JSON Schema 2020-12; Swagger 2.0 documents are converted as they are read.
   types moved into `components` and unused components dropped
 - `diff`: the changes between two versions of a document, by what they
   break for clients
+- `middleware`: checks the requests (and responses) of handlers written
+  by hand against a document, without generated code
 
 ```go
 spec, err := loader.Load("openapi.yaml")
@@ -144,7 +146,7 @@ metrics.
 
 ## Documentation
 
-- [Guide](docs/guide.md): validation, models, servers, clients (Go and TypeScript), webhooks and callbacks, documents from Go code, security, options
+- [Guide](docs/guide.md): validation, models, servers, validating hand-written handlers, clients (Go and TypeScript), webhooks and callbacks, documents from Go code, security, options
 - [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-go-formats`, `x-go-custom-tag`, `x-omitempty`, `x-nullable`, `x-goapi-codec`, `x-enum-varnames`, `x-enum-descriptions`
 - [Example](examples/petstore): a complete server (`go run ./examples/petstore -key secret`)
 - [Benchmarks](docs/benchmarks.md)

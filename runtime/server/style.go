@@ -609,6 +609,29 @@ func (n *fieldNode) indexedJSON(path string, prop Property) (json.RawMessage, er
 	return json.Marshal(out)
 }
 
+// ValuesJSON converts the values of a parameter of the given shape to
+// JSON, as a server without generated types checks them against the
+// parameter's schema: a scalar and the items of an array by the type of
+// prop ("integer", "number", "boolean", or a string), and an object's
+// fields as ObjectJSON does. A value that does not parse as its type is
+// kept as a string, for the schema to reject.
+func ValuesJSON(v Values, shape Shape, prop Property) ([]byte, error) {
+	switch shape {
+	case Array:
+		out := make([]json.RawMessage, len(v.Items))
+		for i, item := range v.Items {
+			out[i] = scalarJSON(item, prop.Type)
+		}
+		return json.Marshal(out)
+	case Object:
+		return ObjectJSON(v.Fields, prop)
+	}
+	if len(v.Items) != 1 {
+		return nil, &oapi.ValidationError{Message: fmt.Sprintf("expected a single value, got %d", len(v.Items))}
+	}
+	return scalarJSON(v.Items[0], prop.Type), nil
+}
+
 // scalarJSON renders a text value as JSON of the given type, or as a
 // string when it does not parse.
 func scalarJSON(v, typ string) json.RawMessage {

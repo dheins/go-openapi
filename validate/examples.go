@@ -3,35 +3,31 @@ package validate
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 
+	"github.com/dheins/go-openapi/internal/schemas"
 	"github.com/dheins/go-openapi/oas"
 )
 
-// direction is where an example is sent: in a request, where read-only
-// properties need not be, in a response, where write-only ones need not
-// be, or either, for an example in a schema.
-type direction int
+// direction is where an example is sent: in a request, in a response, or
+// either, for an example in a schema.
+type direction = schemas.Direction
 
 const (
-	eitherWay direction = iota
-	inRequest
-	inResponse
+	eitherWay  = schemas.Either
+	inRequest  = schemas.Request
+	inResponse = schemas.Response
 )
 
 // exampleChecker checks examples against the schemas they are examples
 // of, compiled where they are in the loaded files, so that references
 // resolve as the loader resolved them.
 type exampleChecker struct {
-	c        *checker
-	compiler *jsonschema.Compiler
-	compiled map[string]*jsonschema.Schema
+	c       *checker
+	schemas *schemas.Set
 	// seen are the examples checked, so that an example reached twice,
 	// such as a component referenced twice, is reported once.
 	seen map[exampleKey]bool
@@ -47,23 +43,11 @@ type exampleKey struct {
 // those of media types, parameters, headers and schemas, and of the
 // components they come from.
 func (c *checker) checkExamples() error {
-	e := &exampleChecker{c: c, compiler: jsonschema.NewCompiler(), compiled: map[string]*jsonschema.Schema{}, seen: map[exampleKey]bool{}}
-	e.compiler.AssertFormat()
-	// Every file is added below; nothing else is fetched.
-	e.compiler.UseLoader(noLoader{})
-	for _, src := range c.spec.Sources() {
-		data, err := src.JSON()
-		if err != nil {
-			return err
-		}
-		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
-		if err != nil {
-			return err
-		}
-		if err := e.compiler.AddResource(src.URI(), doc); err != nil {
-			return err
-		}
+	set, err := schemas.New(c.spec)
+	if err != nil {
+		return err
 	}
+	e := &exampleChecker{c: c, schemas: set, seen: map[exampleKey]bool{}}
 	for _, item := range c.pathItems {
 		for _, p := range item.Parameters {
 			e.parameter(p.Deref())
@@ -232,7 +216,7 @@ func (e *exampleChecker) check(obj any, tokens []string, value json.RawMessage, 
 		return
 	}
 	e.seen[key] = true
-	compiled := e.schema(schema)
+	compiled := e.schemas.Compile(schema)
 	if compiled == nil {
 		return
 	}
@@ -241,86 +225,15 @@ func (e *exampleChecker) check(obj any, tokens []string, value json.RawMessage, 
 		// Not JSON: the document does not parse, which is reported first.
 		return
 	}
-	var ve *jsonschema.ValidationError
-	if err := compiled.Validate(inst); !errors.As(err, &ve) {
-		return
-	}
 	var problems []string
-	collectLeaves(ve, func(leaf *jsonschema.ValidationError) {
-		if msg := e.problem(leaf, dir); msg != "" {
-			problems = append(problems, msg)
+	for _, p := range e.schemas.Check(compiled, inst, dir) {
+		where := p.Pointer
+		if where == "" {
+			where = "/"
 		}
-	})
+		problems = append(problems, where+": "+p.Message)
+	}
 	if len(problems) > 0 {
 		e.c.report(Warning, RuleExampleSchema, obj, tokens, "the example does not match its schema: %s", strings.Join(problems, "; "))
 	}
-}
-
-// problem describes a leaf error, or returns "" for one that does not
-// apply in direction dir: a missing required property that is read-only
-// in a request, or write-only in a response.
-func (e *exampleChecker) problem(leaf *jsonschema.ValidationError, dir direction) string {
-	where := oas.JoinPointer("", leaf.InstanceLocation...)
-	if where == "" {
-		where = "/"
-	}
-	if req, ok := leaf.ErrorKind.(*kind.Required); ok {
-		var missing []string
-		for _, name := range req.Missing {
-			if !e.exempt(leaf.SchemaURL, name, dir) {
-				missing = append(missing, name)
-			}
-		}
-		if len(missing) == 0 {
-			return ""
-		}
-		req = &kind.Required{Missing: missing}
-		return where + ": " + req.LocalizedString(printer)
-	}
-	return where + ": " + describe(leaf)
-}
-
-// exempt reports whether the property name of the schema at schemaURL
-// need not be in a value sent in direction dir.
-func (e *exampleChecker) exempt(schemaURL, name string, dir direction) bool {
-	s, err := e.compiler.Compile(strings.TrimSuffix(schemaURL, "/required"))
-	if err != nil {
-		return false
-	}
-	prop := s.Properties[name]
-	for prop != nil {
-		switch {
-		case dir != inResponse && prop.ReadOnly, dir != inRequest && prop.WriteOnly:
-			return true
-		}
-		prop = prop.Ref
-	}
-	return false
-}
-
-// schema returns schema, compiled where it is, or nil if it cannot be:
-// an invalid schema is reported by the structural checks.
-func (e *exampleChecker) schema(schema *oas.Schema) *jsonschema.Schema {
-	loc, ok := e.c.spec.Location(schema)
-	if !ok {
-		return nil
-	}
-	u := loc.URI + "#" + (&url.URL{Fragment: loc.Pointer}).EscapedFragment()
-	if s, ok := e.compiled[u]; ok {
-		return s
-	}
-	s, err := e.compiler.Compile(u)
-	if err != nil {
-		s = nil
-	}
-	e.compiled[u] = s
-	return s
-}
-
-// noLoader refuses to load anything: every file of the document is
-// added to the compiler as a resource.
-type noLoader struct{}
-
-func (noLoader) Load(url string) (any, error) {
-	return nil, fmt.Errorf("%s is not part of the document", url)
 }

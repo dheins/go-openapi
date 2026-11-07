@@ -1116,6 +1116,61 @@ says otherwise, until Ctrl+C. Errors in the document are printed, and a
 document that loads despite them is still served; one that cannot be
 loaded makes it exit with 1. `-assets` is `WithDocumentAssets`.
 
+## Validating hand-written handlers
+
+Without generating a server, `middleware.Validate` checks the requests
+of handlers written by hand against a document, as a generated server
+does, and answers invalid ones the same way (problem details, 400, 401,
+413, 415):
+
+```go
+spec, err := loader.Load("openapi.yaml")
+check, err := middleware.Validate(spec)
+http.ListenAndServe(":8080", check(mux)) // mux: your handlers
+```
+
+It routes requests to the document's operations, below the first server
+URL's path (`middleware.WithBasePath` changes it), and answers those no
+operation matches with 404, or 405 with `Allow`, unless
+`middleware.WithPassThrough()` hands them to the handler. For each
+operation it checks:
+
+- **Parameters** (path, query, header, cookie and querystring), in every
+  style and with `content` (JSON, text, forms, XML), against their
+  schemas; required ones must be there.
+- **Bodies** of JSON, forms, `multipart/form-data` and XML against their
+  schemas, as requests (required read-only properties may be missing);
+  others (text, binary, streams, positional parts, codecs) are only
+  matched against the declared media types. The handler reads the body
+  as usual.
+- **Credentials**: one of the operation's security requirements must have
+  its credentials present (the API key, `Authorization` of the scheme, a
+  client certificate), else 401 with the schemes' challenges. Checking
+  them is the handler's.
+
+Handlers get the operation and what was parsed, as JSON has the values
+(numbers are `json.Number`):
+
+```go
+op, _ := middleware.OperationFrom(r.Context())
+id := op.Params.Path["petId"]   // json.Number("7")
+pet := op.Body.(map[string]any) // the JSON body
+```
+
+`middleware.WithResponseValidation(middleware.LogResponses)` checks
+responses too: the status is declared, the media type, a JSON body
+against its schema (required write-only properties may be missing) and
+required headers. `LogResponses` logs what is wrong and sends the
+response; `RejectResponses` sends a 500 problem instead. Responses are
+buffered to be checked; one the handler flushes is streamed unchecked.
+
+Messages come from JSON Schema validation, so they read differently from
+a generated server's, which also stops at values of the wrong type
+before checking constraints. Operations a generated server would answer
+with 501 are routed but not checked, with a warning in the log. The other
+options are those of generated servers: `WithLogger`, `WithErrorHandler`
+and `WithMaxBodyBytes`.
+
 ## Generate a client
 
 ```sh

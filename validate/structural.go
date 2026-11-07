@@ -12,10 +12,8 @@ import (
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/santhosh-tekuri/jsonschema/v6/kind"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 
+	"github.com/dheins/go-openapi/internal/schemas"
 	"github.com/dheins/go-openapi/oas"
 )
 
@@ -207,8 +205,6 @@ type problem struct {
 	message string
 }
 
-var printer = message.NewPrinter(language.English)
-
 // check validates the JSON document data against schema.
 func check(schema *jsonschema.Schema, data []byte) ([]problem, error) {
 	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
@@ -225,10 +221,10 @@ func check(schema *jsonschema.Schema, data []byte) ([]problem, error) {
 	}
 	var problems []problem
 	seen := make(map[problem]bool)
-	collectLeaves(ve, func(e *jsonschema.ValidationError) {
+	schemas.Leaves(ve, func(e *jsonschema.ValidationError) {
 		p := problem{
 			pointer: oas.JoinPointer("", e.InstanceLocation...),
-			message: describe(e),
+			message: schemas.Describe(e),
 		}
 		if !seen[p] {
 			seen[p] = true
@@ -237,44 +233,6 @@ func check(schema *jsonschema.Schema, data []byte) ([]problem, error) {
 	})
 	slices.SortStableFunc(problems, func(a, b problem) int { return strings.Compare(a.pointer, b.pointer) })
 	return problems, nil
-}
-
-// collectLeaves calls fn for the most specific errors: those without
-// causes. Parent errors such as "allOf failed" only repeat their causes.
-//
-// When all alternatives of an anyOf or oneOf fail, reporting every
-// alternative's errors is mostly noise (a broken schema would also be
-// reported as "missing $ref"). Only the alternative that got deepest into
-// the value is followed, as it is most likely the one that was meant; on a
-// tie, the first one.
-func collectLeaves(e *jsonschema.ValidationError, fn func(*jsonschema.ValidationError)) {
-	if len(e.Causes) == 0 {
-		fn(e)
-		return
-	}
-	causes := e.Causes
-	switch e.ErrorKind.(type) {
-	case *kind.AnyOf, *kind.OneOf:
-		best := causes[0]
-		for _, c := range causes[1:] {
-			if depth(c) > depth(best) {
-				best = c
-			}
-		}
-		causes = []*jsonschema.ValidationError{best}
-	}
-	for _, c := range causes {
-		collectLeaves(c, fn)
-	}
-}
-
-// depth returns the deepest instance location among e's leaf errors.
-func depth(e *jsonschema.ValidationError) int {
-	d := len(e.InstanceLocation)
-	for _, c := range e.Causes {
-		d = max(d, depth(c))
-	}
-	return d
 }
 
 // usesDefaultDialect reports whether the document's Schema Objects use the
@@ -287,23 +245,4 @@ func usesDefaultDialect(doc []byte, ver version) bool {
 		return false
 	}
 	return head.JSONSchemaDialect == "" || head.JSONSchemaDialect == ver.dialect
-}
-
-// describe returns a readable message for a validation error. A "false
-// schema" failure at a property comes from unevaluatedProperties: false in
-// the official schemas, which means the property is not allowed there. A
-// "not" failure carries no detail of its own, so the failing schema
-// location is named instead.
-func describe(e *jsonschema.ValidationError) string {
-	if _, ok := e.ErrorKind.(*kind.FalseSchema); ok && len(e.InstanceLocation) > 0 {
-		return fmt.Sprintf("property %q is not allowed here", e.InstanceLocation[len(e.InstanceLocation)-1])
-	}
-	if _, ok := e.ErrorKind.(*kind.Not); ok {
-		_, schema, _ := strings.Cut(e.SchemaURL, "#")
-		if schema == "/$defs/parameters" {
-			return "querystring and query parameters cannot be used together"
-		}
-		return fmt.Sprintf("value matches a schema it must not match (%s/not)", schema)
-	}
-	return e.ErrorKind.LocalizedString(printer)
 }
