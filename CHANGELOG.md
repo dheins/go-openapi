@@ -4,6 +4,11 @@
 
 ### Added
 
+- `goapi flatten -expand` and `goapi mixin -expand`
+  (`flatten.Options.Expand`): every reference replaced by a copy of what
+  it points to, recursive schemas kept as references, keywords next to a
+  reference combined with the copy, and the components nothing refers to
+  dropped.
 - `goapi mixin` (`flatten.Mixin`): documents merged into the first, each
   bundled, with their paths, webhooks, components, tags, servers and
   security requirements; conflicts are reported with the first

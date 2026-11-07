@@ -123,9 +123,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   rather than left out, 3.0 documents merged with 3.1 ones (converting
   them), and the `x-` extensions of objects other than the root and paths
   merged. — later
-- `goapi flatten -expand`: every `$ref` replaced by what it points to
-  (recursive schemas kept as references), as `swagger expand` does.
-  — later
+- `goapi flatten -expand`: references into or out of schemas with an
+  `$id`, and `$dynamicRef`, expanded too (they are kept). — later
 - `goapi diff`: callbacks, links, examples, defaults and discriminator
   mappings are not compared; `oneOf`/`anyOf` alternatives are matched by
   position, so reordered ones read as changed; and what breaks servers
@@ -145,6 +144,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi flatten -expand`: every reference replaced by what it points
+  to (recursive schemas kept as references), as `swagger expand` does,
+  for `goapi mixin` too. (08202c2, 05c99b4)
 - [x] `goapi mixin`: documents merged into the first (their paths,
   webhooks, components, tags, servers and security), with conflicts
   reported, as `swagger mixin` does. (a5304ef, d06901f)

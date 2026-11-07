@@ -780,6 +780,25 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   together; they are conflicts now.
 - *Not done*: see [features.md](../features.md).
 
+### M40 – Expanded documents ✅
+- [x] `flatten.Options.Expand`: references replaced by copies of their
+  targets, recursion kept as references, keywords next to references
+  combined, unused components dropped
+- [x] `-expand` for `goapi flatten` and `goapi mixin`
+
+**How it went**
+- *A copy, not in place*: the expansion builds a new tree from the
+  bundled one, so targets resolve against the document as written; a
+  reference is kept when its target is one of the objects being copied,
+  and expansions that kept none are shared between uses.
+- *Siblings*: overlaying every keyword next to a reference would change
+  what `additionalProperties` and its like check, so those go in an
+  `allOf` with the copy.
+- *Contexts*: a `$ref` in example data or an extension is data, and the
+  keys of `properties` or `paths` are names, so the walk keeps track of
+  which objects it is in.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
