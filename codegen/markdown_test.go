@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dheins/go-openapi/ir"
+	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/oas"
 	"github.com/dheins/go-openapi/validate"
 )
@@ -141,13 +142,13 @@ func normalizeFences(text string) string {
 	return strings.Join(out, "\n")
 }
 
-func petserverDocument(t *testing.T) *oas.Document {
+func petserverDocument(t *testing.T) *loader.Spec {
 	t.Helper()
 	res, err := validate.File("testdata/golden/petserver/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return res.Spec.Document
+	return res.Spec
 }
 
 func TestMarkdownSelect(t *testing.T) {

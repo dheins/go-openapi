@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/dheins/go-openapi/ir"
+	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/oas"
 )
 
@@ -48,10 +49,12 @@ type MarkdownOptions struct {
 // Markdown renders reference documentation of doc as one Markdown file:
 // its overview, servers and security schemes, its operations by tag, its
 // webhooks and its component schemas, described as the document states
-// them. Headings get the anchors GitHub gives them, which links between
-// operations and schemas use.
-func Markdown(doc *oas.Document, opts MarkdownOptions) ([]byte, error) {
-	g := &mdGen{doc: doc, opts: opts, schemaAnchors: map[*oas.Schema]string{}, opAnchors: map[*oas.Operation]string{}, slugs: map[string]int{}}
+// them; a schema specialising a template by $dynamicAnchor is described
+// with what its dynamic references lead to. Headings get the anchors
+// GitHub gives them, which links between operations and schemas use.
+func Markdown(spec *loader.Spec, opts MarkdownOptions) ([]byte, error) {
+	doc := spec.Document
+	g := &mdGen{spec: spec, doc: doc, opts: opts, schemaAnchors: map[*oas.Schema]string{}, opAnchors: map[*oas.Operation]string{}, slugs: map[string]int{}}
 	tmpl, err := template.New("markdown").Funcs(g.funcs()).ParseFS(markdownTemplateFiles, "markdown/*.tmpl")
 	if err != nil {
 		return nil, err
@@ -98,8 +101,12 @@ func tidyMarkdown(b []byte) []byte {
 
 // mdGen builds the data of the Markdown templates.
 type mdGen struct {
+	spec *loader.Spec
 	doc  *oas.Document
 	opts MarkdownOptions
+	// scope is the dynamic scope $dynamicRefs are described in: the
+	// resource of the specialisation being described.
+	scope []string
 	// schemaAnchors are the anchors of the component schemas' headings,
 	// and opAnchors those of the operations' and webhooks'.
 	schemaAnchors map[*oas.Schema]string
@@ -703,7 +710,14 @@ func linkValue(v json.RawMessage) string {
 // fillSchema describes a component schema.
 func (g *mdGen) fillSchema(ms *MDSchema) {
 	s := ms.Schema
-	if !isPlainObject(s) {
+	if target, anchors := specialisation(s); target != nil {
+		// The template's properties, with what this schema's
+		// $dynamicAnchors give.
+		ms.Type = g.typeText(&oas.Schema{Ref: s.Ref, Resolved: target}) + " with " + g.givenText(s, anchors)
+		g.scope = []string{g.spec.Resource(s)}
+		defer func() { g.scope = nil }()
+		s = target
+	} else if !isPlainObject(s) {
 		ms.Type = g.typeText(s)
 		if ms.Type == "object" {
 			// The properties say it.
@@ -720,6 +734,36 @@ func (g *mdGen) fillSchema(ms *MDSchema) {
 		}
 	}
 	ms.Examples = mdExamples(s.Example, nil, s)
+}
+
+// givenText describes what the $dynamicAnchors anchors of s's $defs give.
+func (g *mdGen) givenText(s *oas.Schema, anchors []string) string {
+	var given []string
+	for _, d := range s.Defs.All() {
+		if d != nil && slices.Contains(anchors, d.DynamicAnchor) {
+			given = append(given, fmt.Sprintf("%s = %s", code(d.DynamicAnchor), g.typeText(d)))
+		}
+	}
+	return strings.Join(given, ", ")
+}
+
+// specialisation returns the template s specialises, the schema its $ref
+// leads to, and the names of the $dynamicAnchors of its $defs that give
+// the template's dynamic references their schemas; nil if it is none.
+func specialisation(s *oas.Schema) (*oas.Schema, []string) {
+	if s.Ref == "" || s.Resolved == nil {
+		return nil, nil
+	}
+	var names []string
+	for _, d := range s.Defs.All() {
+		if d != nil && d.DynamicAnchor != "" {
+			names = append(names, d.DynamicAnchor)
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	return s.Resolved, names
 }
 
 // isPlainObject reports whether s is an object with properties and
@@ -889,6 +933,9 @@ func (g *mdGen) typeAt(s *oas.Schema, depth int) string {
 		return "nothing"
 	}
 	if s.Ref != "" {
+		if target, anchors := specialisation(s); target != nil && g.schemaAnchors[s] == "" {
+			return g.typeAt(&oas.Schema{Ref: s.Ref, Resolved: target}, depth+1) + " with " + g.givenText(s, anchors)
+		}
 		if anchor, ok := g.schemaAnchors[s.Resolved]; ok {
 			return fmt.Sprintf("[%s](#%s)", g.schemaName(s.Resolved), anchor)
 		}
@@ -896,6 +943,16 @@ func (g *mdGen) typeAt(s *oas.Schema, depth int) string {
 			return g.typeAt(s.Resolved, depth+1)
 		}
 		return code(s.Ref)
+	}
+	if s.DynamicRef != "" {
+		target := g.spec.ResolveDynamic(s, g.scope)
+		if anchor, ok := g.schemaAnchors[target]; ok {
+			return fmt.Sprintf("[%s](#%s)", g.schemaName(target), anchor)
+		}
+		if target != nil {
+			return g.typeAt(target, depth+1)
+		}
+		return code(s.DynamicRef)
 	}
 	list := func(members []*oas.Schema, sep string) string {
 		var parts []string

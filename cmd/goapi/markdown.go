@@ -69,7 +69,7 @@ func runGenerateMarkdown(args []string, stdout, stderr io.Writer) int {
 		}
 		opts.Templates = os.DirFS(*templates)
 	}
-	md, err := codegen.Markdown(res.Spec.Document, opts)
+	md, err := codegen.Markdown(res.Spec, opts)
 	if err != nil {
 		return fail("%v", err)
 	}

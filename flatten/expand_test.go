@@ -299,3 +299,36 @@ func TestExpandGolden(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandDynamicRefs(t *testing.T) {
+	// Without schemas with an $id, a $dynamicRef leads where it does
+	// statically, which -expand copies like a $ref's target; one into a
+	// schema being copied stays.
+	doc, data := expanded(t, `openapi: 3.1.0
+info: {title: X, version: "1"}
+paths:
+  /trees:
+    get:
+      responses:
+        "200": {description: OK., content: {application/json: {schema: {$ref: "#/components/schemas/Tree"}}}}
+components:
+  schemas:
+    Tree:
+      $dynamicAnchor: node
+      type: object
+      properties:
+        label: {$dynamicRef: "#label"}
+        children: {type: array, items: {$dynamicRef: "#node"}}
+    Label:
+      $anchor: label
+      type: string
+      maxLength: 10
+`, nil)
+	schema := valueAt(doc, "paths", "/trees", "get", "responses", "200", "content", "application/json", "schema")
+	if valueAt(schema, "properties", "label", "maxLength") != 10.0 {
+		t.Errorf("the label is not expanded:\n%s", data)
+	}
+	if valueAt(schema, "properties", "children", "items", "$dynamicRef") != "#node" || valueAt(doc, "components", "schemas", "Tree") == nil {
+		t.Errorf("the recursion is not kept:\n%s", data)
+	}
+}

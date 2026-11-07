@@ -122,7 +122,7 @@ func TestGolden(t *testing.T) {
 			}
 			files = append(files, File{Name: "ts/warnings.txt", Content: []byte(strings.Join(append(tsWarnings, ""), "\n"))})
 			// The Markdown reference, of the whole document.
-			md, err := Markdown(res.Spec.Document, MarkdownOptions{Source: opts.Source})
+			md, err := Markdown(res.Spec, MarkdownOptions{Source: opts.Source})
 			if err != nil {
 				t.Fatal(err)
 			}

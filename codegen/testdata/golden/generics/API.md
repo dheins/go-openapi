@@ -83,7 +83,7 @@ Schemas of JSON Schema 2020-12 generics, a template of an item that $dynamicAnch
 
 `200`:
 
-- `application/json`: [Page](#page)
+- `application/json`: [Page](#page) with `item` = [Owner](#owner)
 
 ### `GET` `/trees`
 
@@ -131,15 +131,35 @@ A page of items; the item is given by $dynamicAnchor item.
 
 A page of pets.
 
-Type: [Page](#page)
+Type: [Page](#page) with `item` = [Pet](#pet)
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [Pet](#pet) | yes |  |
+| `first` | [Pet](#pet) | no |  |
+| `meta` | object | no |  |
+| `meta.total` | integer | no | minimum: `0` |
+| `meta.sample` | [Pet](#pet) | no |  |
+| `links` | object | no |  |
+| `links.next` | string (uri) | no |  |
 
 ### TagPage
 
-Type: [Page](#page)
+Type: [Page](#page) with `item` = string
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of string | yes |  |
+| `first` | string | no |  |
+| `meta` | object | no |  |
+| `meta.total` | integer | no | minimum: `0` |
+| `meta.sample` | string | no |  |
+| `links` | object | no |  |
+| `links.next` | string (uri) | no |  |
 
 ### Tree
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | string | yes |  |
-| `children` | array of any | no |  |
+| `children` | array of [Tree](#tree) | no |  |
