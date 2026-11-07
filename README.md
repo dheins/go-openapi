@@ -152,7 +152,7 @@ metrics.
 ## Documentation
 
 - [Guide](docs/guide.md): validation, models, servers, validating hand-written handlers, clients (Go and TypeScript), webhooks and callbacks, documents from Go code, security, options
-- [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-go-formats`, `x-go-custom-tag`, `x-omitempty`, `x-nullable`, `x-goapi-codec`, `x-enum-varnames`, `x-enum-descriptions`
+- [Extensions](docs/extensions.md): `x-go-name`, `x-go-type`, `x-go-formats`, `x-go-custom-tag`, `x-omitempty`, `x-order`, `x-go-json-string`, `x-nullable`, `x-goapi-codec`, `x-enum-varnames`, `x-enum-descriptions`
 - [Example](examples/petstore): a complete server (`go run ./examples/petstore -key secret`)
 - [Benchmarks](docs/benchmarks.md)
 - [Changelog](CHANGELOG.md), [known bugs](bugs.md), [planned work](features.md)

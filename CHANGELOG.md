@@ -4,6 +4,12 @@
 
 ### Added
 
+- `x-order`: properties with it come first, by it, in Go structs and the
+  JSON they write, TypeScript types and Markdown references.
+- `x-go-json-string`: integer, number and boolean properties written and
+  read as JSON strings holding their values, by Go models
+  (`oapi.DecodeJSONString`, `ObjectDecoder.DecodeString`), TypeScript
+  clients (`Property.jsonString`) and `middleware.Validate`.
 - `goapi flatten -expand` and `goapi mixin -expand`
   (`flatten.Options.Expand`): every reference replaced by a copy of what
   it points to, recursive schemas kept as references, keywords next to a

@@ -27,9 +27,9 @@ shipped in.
   `contains`, `dependentSchemas`) with `anyOf`/`oneOf` or with
   `additionalProperties` or property counts of a struct; these keywords on
   enums and unions. — later
-- go-swagger's `x-order` (the order of struct fields and encoded
-  properties) and `x-go-json-string` (numbers and booleans written and
-  read as JSON strings, like `encoding/json`'s `,string`). — later
+- `x-go-json-string` on arrays of numbers and booleans (each item a
+  string), and `goapi scan` writing a Go field with `,string` as its type
+  with `x-go-json-string` (it writes `type: string`). — later
 
 ## Server
 
@@ -144,6 +144,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] go-swagger's `x-order` (the order of struct fields and encoded
+  properties) and `x-go-json-string` (numbers and booleans written and
+  read as JSON strings, like `encoding/json`'s `,string`), in Go models,
+  TypeScript clients, `middleware.Validate` and Markdown references.
+  (e61bf93, fb96fc2, 5f8202b)
 - [x] `goapi flatten -expand`: every reference replaced by what it points
   to (recursive schemas kept as references), as `swagger expand` does,
   for `goapi mixin` too. (08202c2, 05c99b4)
