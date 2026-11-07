@@ -1,4 +1,4 @@
-# 51:29: collectionFormat tsv has no OpenAPI 3 equivalent in query; the values are read as csv
+# 51:29: collectionFormat tsv has no OpenAPI 3 equivalent in query; goapi reads it by x-goapi-collection-format, other tools as csv
 openapi: 3.1.0
 info:
   title: Kitchen sink
@@ -58,6 +58,7 @@ paths:
             type: array
             items:
               type: string
+            x-goapi-collection-format: tsv
           style: form
           explode: false
         - name: limit

@@ -1272,6 +1272,11 @@ export interface ParamSpec {
   readonly style: string;
   readonly explode: boolean;
   readonly shape: "scalar" | "array" | "object";
+  /** Separates the items of an array instead of the style's, and
+   * itemDelimiter the items of each item, an array too
+   * (x-goapi-collection-format). */
+  readonly delimiter?: string;
+  readonly itemDelimiter?: string;
   /** The parameter is serialized with a media type (content), not in a
    * style: as JSON, as text, as form fields, or as XML. */
   readonly content?: Content;
@@ -1624,13 +1629,19 @@ function quoteItem(s: string): string {
 // each piece.
 function simple(p: ParamSpec, v: unknown, item: (s: string) => string): string {
   if (p.shape === "array" && Array.isArray(v)) {
-    return v.map((x) => item(text(x))).join(",");
+    return v.map((x) => item(itemText(p, x))).join(p.delimiter === undefined ? "," : item(p.delimiter));
   }
   if (p.shape === "object") {
     const parts = entries(v).map(([k, x]) => (p.explode ? `${item(k)}=${item(text(x))}` : `${item(k)},${item(text(x))}`));
     return parts.join(",");
   }
   return item(text(v));
+}
+
+// itemText writes an item of an array parameter: an array itself with its
+// items separated by the parameter's itemDelimiter.
+function itemText(p: ParamSpec, x: unknown): string {
+  return p.itemDelimiter !== undefined && Array.isArray(x) ? x.map(text).join(p.itemDelimiter) : text(x);
 }
 
 // contentText writes the value of a parameter with content as its media
@@ -1695,13 +1706,13 @@ function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown): void {
     return;
   }
   if (p.shape === "array" && Array.isArray(v)) {
-    const items = v.map(text);
+    const items = v.map((x) => itemText(p, x));
     if (p.style === "form" && p.explode) {
       for (const item of items) {
         q.append(p.name, item);
       }
     } else {
-      q.append(p.name, items.join({ spaceDelimited: " ", pipeDelimited: "|" }[p.style] ?? ","));
+      q.append(p.name, items.join(p.delimiter ?? { spaceDelimited: " ", pipeDelimited: "|" }[p.style] ?? ","));
     }
     return;
   }
@@ -1761,14 +1772,15 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
       case "header":
         // Only the items of a list are quoted: a scalar, such as a Range
         // of several ranges, is sent as it is, as the Go client does.
-        b.headers.set(p.name, p.content !== undefined ? contentText(p, v) : p.shape === "scalar" ? text(v) : simple(p, v, quoteItem));
+        // Items with a delimiter of their own are not a header list.
+        b.headers.set(p.name, p.content !== undefined ? contentText(p, v) : p.shape === "scalar" ? text(v) : simple(p, v, p.delimiter === undefined ? quoteItem : (x) => x));
         break;
       case "cookie":
         if (p.content !== undefined) {
           b.cookies.push(`${p.name}=${encodeURIComponent(contentText(p, v))}`);
         } else if (p.shape === "array" && Array.isArray(v) && p.explode) {
           for (const x of v) {
-            b.cookies.push(`${p.name}=${encodeURIComponent(text(x))}`);
+            b.cookies.push(`${p.name}=${encodeURIComponent(itemText(p, x))}`);
           }
         } else if (p.shape === "object" && p.explode) {
           for (const [k, x] of entries(v)) {

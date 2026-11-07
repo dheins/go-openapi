@@ -116,7 +116,7 @@ func TestConvert20Warnings(t *testing.T) {
       parameters:
         - {name: m, in: query, type: array, items: {type: array, collectionFormat: pipes, items: {type: string}}}
       responses: {"204": {description: ok}}`,
-			"7:84: collectionFormat pipes of nested items has no OpenAPI 3 equivalent; the items are read as csv"},
+			"7:84: collectionFormat pipes of nested items has no OpenAPI 3 equivalent; goapi reads it by x-goapi-collection-format, other tools as csv"},
 		{"multi header", `
   /a:
     get:

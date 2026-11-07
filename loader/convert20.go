@@ -739,7 +739,18 @@ func (c *converter) paramSchema(p *yaml.Node, in string) (*yaml.Node, *yaml.Node
 		switch k {
 		case "items":
 			items, _ := c.paramSchema(v, "items")
-			if cf := mappingValue(v, "collectionFormat"); cf != nil && cf.Value != "csv" {
+			if t := mappingValue(v, "type"); t != nil && t.Value == "array" && in != "formData" {
+				// Items that are arrays themselves: how they are joined
+				// has no OpenAPI 3 equivalent.
+				format, at := "csv", t
+				if cf := mappingValue(v, "collectionFormat"); cf != nil {
+					format, at = cf.Value, cf
+				}
+				set(items, collectionFormatKey, str(format, at))
+				if format != "csv" {
+					c.warn(at, "collectionFormat %s of nested items has no OpenAPI 3 equivalent; goapi reads it by %s, other tools as csv", format, collectionFormatKey)
+				}
+			} else if cf := mappingValue(v, "collectionFormat"); cf != nil && cf.Value != "csv" {
 				c.warn(cf, "collectionFormat %s of nested items has no OpenAPI 3 equivalent; the items are read as csv", cf.Value)
 			}
 			schema.Content = append(schema.Content, str(k, v), items)
@@ -783,12 +794,25 @@ func (c *converter) paramSchema(p *yaml.Node, in string) (*yaml.Node, *yaml.Node
 	case format == "pipes" && in == "query":
 		return schema, style("pipeDelimited", false)
 	}
-	c.warn(at, "collectionFormat %s has no OpenAPI 3 equivalent in %s; the values are read as csv", format, in)
-	if in == "query" || in == "formData" {
+	if in == "formData" || !slices.Contains([]string{"csv", "ssv", "tsv", "pipes"}, format) {
+		c.warn(at, "collectionFormat %s has no OpenAPI 3 equivalent in %s; the values are read as csv", format, in)
+		if in == "formData" {
+			return schema, style("form", false)
+		}
+		return schema, nil
+	}
+	c.warn(at, "collectionFormat %s has no OpenAPI 3 equivalent in %s; goapi reads it by %s, other tools as csv", format, in, collectionFormatKey)
+	set(schema, collectionFormatKey, str(format, at))
+	if in == "query" {
 		return schema, style("form", false)
 	}
 	return schema, nil
 }
+
+// collectionFormatKey is the extension keeping a Swagger 2.0
+// collectionFormat that OpenAPI 3 has no style for: tsv, or ssv and pipes
+// outside a query, or the format of nested items.
+const collectionFormatKey = "x-goapi-collection-format"
 
 // boolNode returns a boolean scalar at the position of at.
 func boolNode(b bool, at *yaml.Node) *yaml.Node {
