@@ -26,10 +26,6 @@ checked off under [Fixed](#fixed), by the release they shipped in.
 - **Explicit `false` defaults are dropped on output.** `required: false`,
   `deprecated: false` and similar disappear when a document is re-marshalled
   (meaning is unchanged; every such field defaults to false).
-- **`$dynamicRef` is resolved statically.** It points to the
-  `$dynamicAnchor` of its own resource; dynamic scope, which can redirect it
-  (as generic "template" schemas rely on), is ignored, so such schemas are
-  typed as their unspecialised form.
 
 ## Validate
 
@@ -89,6 +85,18 @@ checked off under [Fixed](#fixed), by the release they shipped in.
 
 Unreleased:
 
+- [x] **`$dynamicRef` was resolved statically.** It pointed to the
+  `$dynamicAnchor` of its own resource, ignoring dynamic scope, so generic
+  "template" schemas were typed as their unspecialised form; it is
+  resolved within its dynamic scope now, and specialisations get types of
+  their own. (5bac777, 1d2d792)
+- [x] **Arrays whose items accept nothing did not compile.** The
+  `Validate` of an array with `items: {not: true}` declared a loop
+  variable it did not use. (1d2d792)
+- [x] **`flatten` broke schema resources.** `-remove-unused` and
+  `-expand` dropped components referred to by `$id` or anchor, and
+  `-hoist` moved schemas out of resources with an `$id`. (1d2d792,
+  4143ccb)
 - [x] **Cookie parameters with JSON content lost their quotes.**
   `http.Cookie` drops `"` and other bytes a cookie cannot hold; Go clients
   percent-encode them, and servers decode them.

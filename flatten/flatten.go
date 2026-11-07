@@ -101,7 +101,7 @@ func hoist(root *node, data []byte) error {
 			continue
 		}
 		tokens, err := splitPointer(t.Location.Pointer)
-		if err != nil || len(tokens) == 3 && tokens[0] == "components" && tokens[1] == "schemas" || typedEvents(tokens) {
+		if err != nil || len(tokens) == 3 && tokens[0] == "components" && tokens[1] == "schemas" || typedEvents(tokens) || inResource(root, tokens) {
 			continue
 		}
 		if !seen[t.Location.Pointer] {
@@ -140,6 +140,22 @@ func hoist(root *node, data []byte) error {
 	}
 	rewriteRefs(root, moves)
 	return nil
+}
+
+// inResource reports whether the schema at tokens is inside a schema with
+// an $id, whose references, and those into it, resolve against that $id:
+// moving it out would break them.
+func inResource(root *node, tokens []string) bool {
+	cur := root
+	for _, t := range tokens[:len(tokens)-1] {
+		if cur = cur.child(t); cur == nil {
+			return false
+		}
+		if id := cur.get("$id"); id != nil && id.kind == 's' {
+			return true
+		}
+	}
+	return false
 }
 
 // typedEvents reports whether tokens point at the itemSchema of a
@@ -198,9 +214,21 @@ func removeUnused(root *node, keepSchemes bool) {
 		used[e] = true
 		queue = append(queue, e)
 	}
+	// anchors are the components holding an $anchor or $dynamicAnchor, by
+	// name.
+	var anchors map[string][2]string
 	// ref marks the component a reference within the document leads to.
 	ref := func(s string) {
 		if !strings.HasPrefix(s, "#") {
+			return
+		}
+		if name := s[1:]; name != "" && !strings.HasPrefix(name, "/") {
+			if anchors == nil {
+				anchors = componentAnchors(components)
+			}
+			if e, ok := anchors[name]; ok {
+				use(e[0], e[1])
+			}
 			return
 		}
 		if ptr, err := url.PathUnescape(s[1:]); err == nil {
@@ -241,6 +269,15 @@ func removeUnused(root *node, keepSchemes bool) {
 			root.vals[i].walk(visit)
 		}
 	}
+	// A schema with an $id may be referred to by it, from any resource,
+	// which is not followed here: it is kept.
+	if schemas := components.get("schemas"); schemas != nil && schemas.kind == '{' {
+		for i, name := range schemas.keys {
+			if id := schemas.vals[i].get("$id"); id != nil && id.kind == 's' {
+				use("schemas", name)
+			}
+		}
+	}
 	for len(queue) > 0 {
 		e := queue[0]
 		queue = queue[1:]
@@ -267,6 +304,42 @@ func removeUnused(root *node, keepSchemes bool) {
 	if len(components.keys) == 0 {
 		root.remove("components")
 	}
+}
+
+// componentAnchors returns the schema components (section and name)
+// holding an $anchor or $dynamicAnchor, outside schemas with an $id of
+// their own, by the anchor's name.
+func componentAnchors(components *node) map[string][2]string {
+	out := map[string][2]string{}
+	schemas := components.get("schemas")
+	if schemas == nil || schemas.kind != '{' {
+		return out
+	}
+	for i, name := range schemas.keys {
+		var walk func(n *node, top bool)
+		walk = func(n *node, top bool) {
+			if n.kind != '{' && n.kind != '[' {
+				return
+			}
+			if n.kind == '{' {
+				if id := n.get("$id"); id != nil && !top {
+					return
+				}
+				for _, kw := range []string{"$anchor", "$dynamicAnchor"} {
+					if a := n.get(kw); a != nil && a.kind == 's' {
+						if _, ok := out[a.str]; !ok {
+							out[a.str] = [2]string{"schemas", name}
+						}
+					}
+				}
+			}
+			for _, v := range n.vals {
+				walk(v, false)
+			}
+		}
+		walk(schemas.vals[i], true)
+	}
+	return out
 }
 
 // refNode is the schema {"$ref": ref}.

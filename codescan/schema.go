@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"go/constant"
 	"go/types"
+	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
@@ -46,6 +47,10 @@ func (s *scanner) schemaOf(t types.Type) *oas.Schema {
 		return &oas.Schema{Type: oas.Types{"object"}, AdditionalProperties: s.schemaOf(t.Elem())}
 	case *types.Struct:
 		return s.object(t)
+	case *types.TypeParam:
+		// A type parameter of a template is what the instance's
+		// $dynamicAnchor of its name gives.
+		return &oas.Schema{DynamicRef: "#" + t.Obj().Name()}
 	case *types.Interface:
 		if !t.Empty() {
 			s.report(s.pos, Warning, "the interface %s has no schema; values of it are left untyped", t)
@@ -141,12 +146,135 @@ func (s *scanner) named(t *types.Named) *oas.Schema {
 	}
 
 	td := s.decls[obj]
+	if inst := instanceOf(t, td); inst != nil {
+		if hasTypeParams(inst) {
+			// An instance inside a template, of its type parameters: its
+			// fields, in the template's resource.
+			return s.inlineInstance(t)
+		}
+		return s.component(t, td, func() *oas.Schema { return s.specialisation(inst) })
+	}
 	return s.component(t, td, func() *oas.Schema {
 		schema := s.schemaOf(t.Underlying())
 		if td != nil && td.enum {
 			schema.Enum = s.enumValues(t, td)
 		}
 		return schema
+	})
+}
+
+// instanceOf returns the instance of a generic type that t is, or is
+// defined as, or nil.
+func instanceOf(t *types.Named, td *typeDecl) *types.Named {
+	switch {
+	case t.TypeArgs().Len() > 0:
+		return t
+	case td != nil:
+		return td.instance
+	}
+	return nil
+}
+
+// hasTypeParams reports whether a type argument of inst is, or holds, a
+// type parameter.
+func hasTypeParams(inst *types.Named) bool {
+	for i := range inst.TypeArgs().Len() {
+		if holdsTypeParam(inst.TypeArgs().At(i)) {
+			return true
+		}
+	}
+	return false
+}
+
+func holdsTypeParam(t types.Type) bool {
+	switch t := types.Unalias(t).(type) {
+	case *types.TypeParam:
+		return true
+	case *types.Pointer:
+		return holdsTypeParam(t.Elem())
+	case *types.Slice:
+		return holdsTypeParam(t.Elem())
+	case *types.Array:
+		return holdsTypeParam(t.Elem())
+	case *types.Map:
+		return holdsTypeParam(t.Key()) || holdsTypeParam(t.Elem())
+	case *types.Named:
+		return hasTypeParams(t)
+	}
+	return false
+}
+
+// inlineInstance returns the schema of t, an instance of its template's
+// type parameters, as its fields: the template's $dynamicAnchors are
+// those of the resource it is in. An instance holding itself cannot be.
+func (s *scanner) inlineInstance(t *types.Named) *oas.Schema {
+	key := types.TypeString(t, nil)
+	if s.inlining[key] {
+		s.report(t.Obj().Pos(), Warning, "%s holds itself inside a generic type; it is left untyped there", key)
+		return &oas.Schema{}
+	}
+	s.inlining[key] = true
+	defer delete(s.inlining, key)
+	return s.schemaOf(t.Underlying())
+}
+
+// specialisation returns the schema of inst, an instance of a generic
+// type: a reference to the template, the generic type's component, with
+// a $dynamicAnchor per type parameter giving its type argument.
+func (s *scanner) specialisation(inst *types.Named) *oas.Schema {
+	origin := inst.Origin()
+	template := s.template(origin)
+	defs := &oas.OrderedMap[*oas.Schema]{}
+	params := origin.TypeParams()
+	for i := range params.Len() {
+		arg := s.schemaOf(inst.TypeArgs().At(i))
+		arg.DynamicAnchor = params.At(i).Obj().Name()
+		defs.Set(params.At(i).Obj().Name(), arg)
+	}
+	return &oas.Schema{Ref: template.Ref, Defs: defs}
+}
+
+// template returns a reference to the component of a generic type,
+// adding it the first time: its fields, with a $dynamicRef for each use
+// of a type parameter, and a $dynamicAnchor of its name for any value.
+func (s *scanner) template(origin *types.Named) *oas.Schema {
+	s.generic = true
+	return s.component(origin, s.decls[origin.Obj()], func() *oas.Schema {
+		schema := s.schemaOf(origin.Underlying())
+		params := origin.TypeParams()
+		if schema.Defs == nil && params.Len() > 0 {
+			schema.Defs = &oas.OrderedMap[*oas.Schema]{}
+		}
+		for i := range params.Len() {
+			name := params.At(i).Obj().Name()
+			schema.Defs.Set(name, &oas.Schema{DynamicAnchor: name})
+		}
+		return schema
+	})
+}
+
+// identify gives every component schema of a document with templates
+// its name as $id, and makes references to components refer to that:
+// a template and its instances are resources of their own, inside which
+// "#/components/schemas/..." would not resolve to the component.
+func (s *scanner) identify(doc *oas.Document) error {
+	for name, schema := range s.schemas.All() {
+		schema.ID = name
+	}
+	return oas.Walk(doc, "", nil, func(obj any, _ string, _ *url.URL) error {
+		switch v := obj.(type) {
+		case *oas.Schema:
+			if name, ok := strings.CutPrefix(v.Ref, refPrefix); ok {
+				v.Ref = name
+			}
+		case *oas.Discriminator:
+			for key, target := range v.Mapping.All() {
+				if name, ok := strings.CutPrefix(target, refPrefix); ok {
+					v.Mapping.Set(key, name)
+				}
+			}
+		}
+		return nil
 	})
 }
 

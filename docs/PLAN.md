@@ -833,6 +833,27 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   with `Bird`; components of different names are now never paired.
 - *Not done*: see [features.md](../features.md).
 
+### M43 – Generic schemas ✅
+- [x] `loader.Spec.Resource` and `ResolveDynamic`: `$dynamicRef` within a
+  dynamic scope
+- [x] specialised types in the model, so Go, TypeScript, servers and
+  clients get `PetPage` with `Items []Pet`
+- [x] `goapi scan` writes Go generics as templates and instances
+- [x] the Markdown reference and `flatten -expand` follow
+
+**How it went**
+- *Types keyed by scope*: a type is its schema and where the
+  `$dynamicRef`s its values may meet lead in the scope it is built in, so
+  specialisations are separate types and everything else is shared as
+  before.
+- *Resources everywhere*: a template and its instances must be resources
+  of their own, which breaks `#/components/...` inside them; scanned
+  documents with generics name components by `$id`, and the golden
+  fixture showed flatten dropping and moving such schemas.
+- *A compile error on the way*: an array whose items accept nothing
+  generated a `Validate` with an unused variable.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

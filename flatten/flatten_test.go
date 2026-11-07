@@ -78,8 +78,9 @@ func TestSameTypes(t *testing.T) {
 				t.Errorf("types\n got %q\nwant %q", got, want)
 			}
 			// The inline types of the root file are components now, but for
-			// the data of typed events; those made of a component itself,
-			// such as the base of a hierarchy, are where they were.
+			// the data of typed events and those inside schemas with an $id;
+			// those made of a component itself, such as the base of a
+			// hierarchy, are where they were.
 			root, err := parse(data)
 			if err != nil {
 				t.Fatal(err)
@@ -87,7 +88,7 @@ func TestSameTypes(t *testing.T) {
 			schemas := root.get("components").get("schemas")
 			for _, ty := range ir.Build(spec, ir.Options{Operations: true}).Types {
 				tokens, _ := splitPointer(ty.Location.Pointer)
-				if ty.Location.URI != spec.Root().URI() || len(tokens) == 3 && tokens[1] == "schemas" || typedEvents(tokens) {
+				if ty.Location.URI != spec.Root().URI() || len(tokens) == 3 && tokens[1] == "schemas" || typedEvents(tokens) || inResource(root, tokens) {
 					continue
 				}
 				if schemas.get(ty.Name) == nil {

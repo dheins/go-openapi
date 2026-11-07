@@ -571,6 +571,44 @@ union becomes such a field too (named after the referenced union, or
 `OneOf`/`AnyOf`). An `anyOf` value that matches several object members
 keeps them all and encodes their properties together.
 
+### Generic schemas
+
+JSON Schema 2020-12 writes generics as a template whose `$dynamicRef`
+another schema redirects with a `$dynamicAnchor` of the same name, in a
+resource of its own (`$id`):
+
+```yaml
+Page:                                    # type Page struct{ Items []any }
+  $id: https://example.com/page
+  $defs:
+    item: {$dynamicAnchor: item}
+  type: object
+  properties:
+    items: {type: array, items: {$dynamicRef: "#item"}}
+    meta:
+      type: object
+      properties:
+        sample: {$dynamicRef: "#item"}
+PetPage:                                 # type PetPage struct{ Items []Pet; Meta ...PetPageMeta }
+  $id: https://example.com/pet-page
+  $ref: page
+  $defs:
+    item: {$dynamicAnchor: item, $ref: pet}
+```
+
+goapi resolves `$dynamicRef` within its dynamic scope, as JSON Schema
+does, so a schema that specialises a template is a struct of its own
+with the template's properties and what it gives the item: `PetPage` has
+`Items []Pet`, not an alias of `Page`. Types inside the template that
+depend on the item are specialised too and named after the
+specialisation (`PetPageMeta`); those that do not are shared
+(`PageLinks`). A specialisation where it is used, such as a response
+body with `$id`, `$ref` and `$defs`, is named after its place. The
+template itself is typed as its placeholder says: `{}` is any value,
+`not: true` none. TypeScript types, clients, servers, the Markdown
+reference ("`Page` with `item` = `Pet`") and `goapi validate` follow the
+dynamic scope too.
+
 ## Generate a server
 
 ```sh
@@ -1821,6 +1859,8 @@ const (
 | `oapi.Nullable[T]` | `T` or `null` |
 | `,string` in the `json` tag | `string` |
 | a named type | a `$ref` to its component, named after the type (the package name is added on a clash, type arguments for a generic instance) |
+| a generic type `Page[T any]` | a template: `T` as `$dynamicRef: "#T"`, with `$defs: {T: {$dynamicAnchor: T}}` |
+| an instance, `Page[Pet]` or `type Pets Page[Pet]` | its component (`PagePet`, or the defined type's), a `$ref` to the template with `$defs: {T: {$dynamicAnchor: T, $ref: Pet}}` |
 
 The `goapi` struct tag adds keywords, separated by `;`, where `\;` is a
 semicolon. They are `minimum`, `maximum`, `exclusiveMinimum`,
@@ -1832,6 +1872,15 @@ the flags `readOnly`, `writeOnly`, `deprecated`, `uniqueItems`,
 `nullable`, `required` and `optional`. Values of a string field are taken
 as they are; other values are JSON. Doc comments become descriptions, and
 a `Deprecated:` paragraph sets `deprecated`.
+
+Templates and instances are schema resources of their own ([Generic
+schemas](#generic-schemas)), inside which `#/components/schemas/Pet`
+would not resolve, so in a document with generic types every component
+schema has its name as `$id` and references name it (`$ref: Pet`).
+Instances of a template's own type parameters inside it (a
+`Page[T]` field of `Envelope[T]`) are written as their fields there.
+Models generated from the scanned document have the types the instances
+had before: `PagePet` with `Items []Pet`.
 
 ### Unions
 

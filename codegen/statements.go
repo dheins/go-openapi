@@ -654,7 +654,7 @@ func (v *validator) ref(expr, path string, r *ir.Ref, hint string, depth int) {
 		inner := v.sub()
 		inner.ref(item, fmt.Sprintf("oapi.Index(%s, %s)", path, index), r.Elem, hint+"Item", depth+1)
 		if inner.b.Len() > 0 {
-			v.line(depth, "for %s, %s := range %s {", index, item, expr)
+			v.line(depth, "for %s, %s := range %s {", index, usedOrBlank(inner.b.String(), item), expr)
 			v.b.WriteString(inner.b.String())
 			v.line(depth, "}")
 		}

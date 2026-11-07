@@ -225,6 +225,7 @@ func (r *resolver) register(obj any, src *Source, ptr string) error {
 			if v.DynamicRef != "" {
 				r.extras = append(r.extras, extra{o, b, loc})
 			}
+			r.recordResource(v, b)
 		case *oas.Document:
 			if namesSchemeByURI(v.Security) {
 				r.extras = append(r.extras, extra{o, b, loc})
@@ -240,6 +241,23 @@ func (r *resolver) register(obj any, src *Source, ptr string) error {
 		return r.errorAt(Location{src.URI(), ptr}, err)
 	}
 	return nil
+}
+
+// recordResource records the schema resource s belongs to, base being
+// its base URI, and its $dynamicAnchor, which the first schema of the
+// resource to have it keeps.
+func (r *resolver) recordResource(s *oas.Schema, base *url.URL) {
+	if _, done := r.spec.resources[s]; done || base == nil {
+		return
+	}
+	resource := r.localize(withoutFragment(base).String())
+	r.spec.resources[s] = resource
+	if s.DynamicAnchor != "" {
+		key := resource + "#" + s.DynamicAnchor
+		if _, exists := r.spec.dynamicAnchors[key]; !exists {
+			r.spec.dynamicAnchors[key] = s
+		}
+	}
 }
 
 // run resolves queued references until none are left. Decoding a target

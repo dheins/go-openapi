@@ -106,6 +106,8 @@ func Scan(opts Options) (*Result, error) {
 		names:   map[string]string{},
 		taken:   map[string]bool{},
 		schemes: map[string]bool{},
+
+		inlining: map[string]bool{},
 	}
 	if s.pkgs, err = load(s.fset, absDir, patterns); err != nil {
 		return nil, err
@@ -133,6 +135,11 @@ func Scan(opts Options) (*Result, error) {
 			doc.Components = &oas.Components{}
 		}
 		doc.Components.Schemas = s.schemas
+	}
+	if s.generic {
+		if err := s.identify(doc); err != nil {
+			return nil, err
+		}
 	}
 	slices.SortStableFunc(s.diags, func(a, b Diagnostic) int {
 		return cmp.Or(strings.Compare(a.Position.Filename, b.Position.Filename), a.Position.Line-b.Position.Line, a.Position.Column-b.Position.Column)
@@ -165,6 +172,11 @@ type scanner struct {
 	linkTargets []schemeUse
 	// uses32 says that the document uses what only 3.2 has.
 	uses32 bool
+	// generic says that the document has templates of generic types,
+	// whose schemas are resources referred to by their $id; inlining
+	// holds the instances of generic types inlined into a template.
+	generic  bool
+	inlining map[string]bool
 	// checks run once every schema is built.
 	checks  []func()
 	schemas *oas.OrderedMap[*oas.Schema]
@@ -202,6 +214,9 @@ type typeDecl struct {
 	// gives the type, as a variant, at discValuePos.
 	discValue    string
 	discValuePos token.Pos
+	// instance is the instance of a generic type the type is defined as
+	// (type Pets Page[Pet]), or nil.
+	instance *types.Named
 }
 
 func (s *scanner) report(pos token.Pos, sev Severity, format string, args ...any) {
@@ -264,6 +279,9 @@ func (s *scanner) index() {
 					td := &typeDecl{obj: obj, doc: ts.Doc}
 					if td.doc == nil && len(gen.Specs) == 1 {
 						td.doc = gen.Doc
+					}
+					if n, ok := types.Unalias(p.info.TypeOf(ts.Type)).(*types.Named); ok && n.TypeArgs().Len() > 0 && !ts.Assign.IsValid() {
+						td.instance = n
 					}
 					s.decls[obj] = td
 					s.order = append(s.order, td)

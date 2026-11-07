@@ -246,6 +246,21 @@ func TestExpandFiles(t *testing.T) {
 	}
 }
 
+// byID reports whether ref is a reference within a schema resource: by
+// the $id of a component schema, or to an anchor.
+func byID(doc map[string]any, ref string) bool {
+	if strings.HasPrefix(ref, "#") && !strings.HasPrefix(ref, "#/") {
+		return true
+	}
+	schemas, _ := valueAt(doc, "components", "schemas").(map[string]any)
+	for _, s := range schemas {
+		if id, ok := valueAt(s, "$id").(string); ok && (id == ref || strings.HasSuffix(id, "/"+ref)) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestExpandGolden expands the documents of the golden fixtures: each is
 // valid, and the references left are those of recursive schemas, to a
 // component that refers to itself, or to schemas with an $id.
@@ -263,6 +278,10 @@ func TestExpandGolden(t *testing.T) {
 			loadBytes(t, data)
 			doc := decode(t, data)
 			for _, ref := range refs(doc) {
+				if byID(doc, ref) {
+					// Within a resource, as it was.
+					continue
+				}
 				name, ok := strings.CutPrefix(ref, "#/components/schemas/")
 				target := valueAt(doc, "components", "schemas", name)
 				if !ok || target == nil {
@@ -278,5 +297,38 @@ func TestExpandGolden(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestExpandDynamicRefs(t *testing.T) {
+	// Without schemas with an $id, a $dynamicRef leads where it does
+	// statically, which -expand copies like a $ref's target; one into a
+	// schema being copied stays.
+	doc, data := expanded(t, `openapi: 3.1.0
+info: {title: X, version: "1"}
+paths:
+  /trees:
+    get:
+      responses:
+        "200": {description: OK., content: {application/json: {schema: {$ref: "#/components/schemas/Tree"}}}}
+components:
+  schemas:
+    Tree:
+      $dynamicAnchor: node
+      type: object
+      properties:
+        label: {$dynamicRef: "#label"}
+        children: {type: array, items: {$dynamicRef: "#node"}}
+    Label:
+      $anchor: label
+      type: string
+      maxLength: 10
+`, nil)
+	schema := valueAt(doc, "paths", "/trees", "get", "responses", "200", "content", "application/json", "schema")
+	if valueAt(schema, "properties", "label", "maxLength") != 10.0 {
+		t.Errorf("the label is not expanded:\n%s", data)
+	}
+	if valueAt(schema, "properties", "children", "items", "$dynamicRef") != "#node" || valueAt(doc, "components", "schemas", "Tree") == nil {
+		t.Errorf("the recursion is not kept:\n%s", data)
 	}
 }

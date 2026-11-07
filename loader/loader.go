@@ -42,6 +42,11 @@ type Spec struct {
 	// written is the root document as JSON before the 3.0 upgrade, for
 	// 3.0 documents only; root is still as written otherwise.
 	written []byte
+	// resources are the schema resources (the URI of their file or $id)
+	// schemas belong to, and dynamicAnchors the schemas with a
+	// $dynamicAnchor, by "resourceURI#name".
+	resources      map[*oas.Schema]string
+	dynamicAnchors map[string]*oas.Schema
 }
 
 // Notice is something of a document that the loader could not carry
@@ -108,6 +113,38 @@ func (s *Spec) componentScheme(name string) *oas.SecurityScheme {
 		return def.Deref()
 	}
 	return nil
+}
+
+// Resource returns the URI of the schema resource s belongs to: its own
+// $id, an enclosing schema's, or its file's; "" if s is not part of the
+// loaded model.
+func (s *Spec) Resource(schema *oas.Schema) string {
+	return s.resources[schema]
+}
+
+// ResolveDynamic returns the schema ref's $dynamicRef leads to when it is
+// evaluated within scope, the URIs of the schema resources entered on the
+// way to it, outermost first (JSON Schema's dynamic scope). As 2020-12
+// says, a reference whose static target (DynamicResolved) has a
+// $dynamicAnchor of the name its fragment gives leads to the schema with
+// that $dynamicAnchor in the outermost resource of scope that has one;
+// otherwise, and for a fragment that is a JSON pointer, it leads to its
+// static target. It returns nil if ref has no resolved $dynamicRef.
+func (s *Spec) ResolveDynamic(ref *oas.Schema, scope []string) *oas.Schema {
+	target := ref.DynamicResolved
+	if target == nil {
+		return nil
+	}
+	_, name, _ := strings.Cut(ref.DynamicRef, "#")
+	if name == "" || strings.HasPrefix(name, "/") || target.DynamicAnchor != name {
+		return target
+	}
+	for _, resource := range scope {
+		if anchor, ok := s.dynamicAnchors[resource+"#"+name]; ok {
+			return anchor
+		}
+	}
+	return target
 }
 
 // Position returns the source position of loc, or the zero Position if the
@@ -252,11 +289,13 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 	}
 
 	spec := &Spec{
-		SourceVersion: version,
-		root:          src,
-		sources:       map[string]*Source{src.URI(): src},
-		locations:     make(map[any]Location),
-		schemes:       make(map[schemeKey]*oas.SecurityScheme),
+		SourceVersion:  version,
+		root:           src,
+		sources:        map[string]*Source{src.URI(): src},
+		locations:      make(map[any]Location),
+		schemes:        make(map[schemeKey]*oas.SecurityScheme),
+		resources:      make(map[*oas.Schema]string),
+		dynamicAnchors: make(map[string]*oas.Schema),
 	}
 	r := newResolver(spec, newConfig(opts))
 	r.addSource(src)

@@ -15,7 +15,6 @@ shipped in.
   `conversion` warnings: the `schemes` of an operation (it could become
   operation-level `servers`), `collectionFormat: tsv`, and the collection
   formats of nested items. — later
-- Dynamic-scope resolution of `$dynamicRef` (see bugs.md). — later
 
 ## Models
 
@@ -98,8 +97,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - Examples checked against schemas for XML and binary media types, whose
   examples are usually the serialized document, and `serializedValue`;
   `externalValue` is not fetched. — later
-- Generic types are only mapped as instances (`Page[Pet]` becomes
-  `PagePet`); a generic `$defs`-style schema is not. — later
+- Generic types with constrained type parameters: the template's
+  placeholder is any value, not the constraint. — later
 - `encoding/json`'s rules for fields of the same name at one depth of
   embedding (both are dropped) are approximated: the first is kept.
   — later
@@ -124,7 +123,8 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   them), and the `x-` extensions of objects other than the root and paths
   merged. — later
 - `goapi flatten -expand`: references into or out of schemas with an
-  `$id`, and `$dynamicRef`, expanded too (they are kept). — later
+  `$id`, and the `$dynamicRef`s inside them, which the dynamic scope
+  redirects, expanded too (they are kept). — later
 - `goapi diff`: `allOf` members are compared by position, and
   `prefixItems`, `if`/`then`/`else`, `not`, `patternProperties` and
   `dependentSchemas` are not compared. — later
@@ -142,6 +142,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `$dynamicRef` resolved within its dynamic scope: schemas
+  specialising a generic template by `$dynamicAnchor` are types of their
+  own, and `goapi scan` writes Go generics as templates and instances.
+  (5bac777, 1d2d792, a3cca17, 4143ccb)
 - [x] `goapi diff`: callbacks, links, examples, defaults and discriminator
   mappings compared; `oneOf`/`anyOf` alternatives paired by what they
   are; and `-for server`, what breaks servers implementing the old
