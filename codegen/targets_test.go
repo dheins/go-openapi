@@ -112,3 +112,48 @@ func TestTargetErrors(t *testing.T) {
 		t.Errorf("empty goapi.yaml: %v", err)
 	}
 }
+
+func TestTSTargets(t *testing.T) {
+	templates := fstest.MapFS{
+		"goapi.yaml": {Data: []byte(`targets:
+  - {template: names, scope: document, path: names.ts}
+  - {template: modeldoc, scope: model, path: "{{snake .Name}}.md", package: docs, when: '{{eq .Name "Pet"}}'}
+  - {template: op, scope: operation, path: "ops/{{camel .Name}}.ts"}
+`)},
+		"t.tmpl": {Data: []byte(`{{define "names"}}export const names = [{{range .Types}}{{if eq .Root .}}{{jsString .Name}}, {{end}}{{end}}];
+{{end}}{{define "modeldoc"}}# {{.Name}} ({{snake .Name}}){{end}}{{define "op"}}export const path = {{jsString .Path}};
+{{end}}`)},
+	}
+	files, _, err := TypeScript(petserverModel(t), TSOptions{Source: "openapi.yaml", Templates: templates})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]string{}
+	for _, f := range files {
+		byName[f.Name] = string(f.Content)
+	}
+	for name, want := range map[string]string{
+		"names.ts":        `"Pet", `,
+		"docs/pet.md":     "# Pet (pet)",
+		"ops/listPets.ts": `export const path = "/pets";`,
+		"models.ts":       "export interface Pet",
+	} {
+		if !strings.Contains(byName[name], want) {
+			t.Errorf("%s has no %q:\n%.300s", name, want, byName[name])
+		}
+	}
+	if _, ok := byName["docs/order.md"]; ok {
+		t.Error("when: docs/order.md written")
+	}
+	// A target cannot write over a generated file, nor be a built-in
+	// block, which its definition would replace.
+	for config, want := range map[string]string{
+		"targets: [{template: names, scope: document, path: models.ts}]": "models.ts is written twice",
+		"targets: [{template: model, scope: document, path: m.ts}]":      `names block "model", which is a block of goapi's templates`,
+	} {
+		fsys := fstest.MapFS{"goapi.yaml": {Data: []byte(config)}, "t.tmpl": {Data: []byte(`{{define "names"}}x{{end}}{{define "model"}}{{end}}`)}}
+		if _, _, err := TypeScript(petserverModel(t), TSOptions{Templates: fsys}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", config, err, want)
+		}
+	}
+}

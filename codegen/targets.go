@@ -147,6 +147,71 @@ func (t Target) items(m *ir.Model, haveOperations bool) ([]any, error) {
 	return out, nil
 }
 
+// path returns the path of t's file for item, cleaned, or false when its
+// condition does not hold.
+func (t Target) path(item any, funcs template.FuncMap) (string, bool, error) {
+	if t.When != "" {
+		ok, err := expand(t.Template+" when", t.When, item, funcs)
+		if err != nil {
+			return "", false, fmt.Errorf("templates: target %s: when: %w", t.Template, err)
+		}
+		if strings.TrimSpace(ok) != "true" {
+			return "", false, nil
+		}
+	}
+	name, err := expand(t.Template+" path", t.Path, item, funcs)
+	if err != nil {
+		return "", false, fmt.Errorf("templates: target %s: path: %w", t.Template, err)
+	}
+	clean := path.Clean(name)
+	if name == "" || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(name, "\\") {
+		return "", false, fmt.Errorf("templates: target %s: path %q is not below its package", t.Template, name)
+	}
+	return clean, true, nil
+}
+
+// tsTargets returns the files of the targets of the TypeScript templates
+// fsys for m, rendered with render and funcs, next to files, the
+// generated ones: as the blocks write them, in the output or a target's
+// package directory.
+func tsTargets(m *ir.Model, fsys fs.FS, files []File, funcs template.FuncMap, render func(name string, data any) (string, error)) ([]File, error) {
+	targets, err := LoadTargets(fsys)
+	if err != nil {
+		return nil, err
+	}
+	taken := map[string]bool{}
+	for _, f := range files {
+		taken[f.Name] = true
+	}
+	var out []File
+	for _, t := range targets {
+		items, err := t.items(m, len(m.Operations) > 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			clean, ok, err := t.path(item, funcs)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			name := path.Join(path.Clean("./"+t.Package), clean)
+			if taken[name] {
+				return nil, fmt.Errorf("templates: target %s: %s is written twice", t.Template, name)
+			}
+			taken[name] = true
+			content, err := render(t.Template, item)
+			if err != nil {
+				return nil, fmt.Errorf("templates: target %s: %s: %w", t.Template, name, err)
+			}
+			out = append(out, File{Name: name, Content: []byte(content)})
+		}
+	}
+	return out, nil
+}
+
 // addTargets writes the files of the targets of opts.Templates for m.
 // pkg returns the generator of a package directory ("" for the root
 // package), creating one for a package of a target's own.
@@ -166,26 +231,17 @@ func addTargets(m *ir.Model, opts Options, haveOperations bool, pkg func(dir str
 		}
 		funcs := (&fileGen{gen: g, imports: map[string]string{}}).funcs()
 		for _, item := range items {
-			if t.When != "" {
-				ok, err := expand(t.Template+" when", t.When, item, funcs)
-				if err != nil {
-					return fmt.Errorf("templates: target %s: when: %w", t.Template, err)
-				}
-				if strings.TrimSpace(ok) != "true" {
-					continue
-				}
-			}
-			name, err := expand(t.Template+" path", t.Path, item, funcs)
+			clean, ok, err := t.path(item, funcs)
 			if err != nil {
-				return fmt.Errorf("templates: target %s: path: %w", t.Template, err)
+				return err
 			}
-			clean := path.Clean(name)
+			if !ok {
+				continue
+			}
 			goFile := strings.HasSuffix(clean, ".go")
 			switch {
-			case name == "" || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(name, "\\"):
-				return fmt.Errorf("templates: target %s: path %q is not below its package", t.Template, name)
 			case goFile && strings.Contains(clean, "/"):
-				return fmt.Errorf("templates: target %s: Go file %q must be in its package's directory; use package for another", t.Template, name)
+				return fmt.Errorf("templates: target %s: Go file %q must be in its package's directory; use package for another", t.Template, clean)
 			case g.fileNames[clean]:
 				return fmt.Errorf("templates: target %s: %s is written twice", t.Template, path.Join(g.dir, clean))
 			}

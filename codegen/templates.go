@@ -109,6 +109,10 @@ func checkTemplates(fsys fs.FS, set *template.Template, funcs template.FuncMap, 
 		}
 	}
 	for _, name := range targets {
+		if builtin[name] {
+			// Its definition would replace the built-in block too.
+			return fmt.Errorf("templates: %s names block %q, which is a block of goapi's templates; name it otherwise", TargetsFile, name)
+		}
 		if _, ok := defined[name]; !ok {
 			return fmt.Errorf("templates: %s names block %q, which no *.tmpl file defines", TargetsFile, name)
 		}
