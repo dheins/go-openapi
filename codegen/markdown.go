@@ -777,7 +777,11 @@ func (g *mdGen) addProperties(list *[]*MDProperty, prefix string, s *oas.Schema,
 				mp.Constraints = append(mp.Constraints, g.constraints(p)...)
 				continue
 			}
-			*list = append(*list, &MDProperty{Name: full, Type: g.typeText(p), Required: slices.Contains(required, name),
+			typ := g.typeText(p)
+			if jsonString(p) {
+				typ += ", sent as a string"
+			}
+			*list = append(*list, &MDProperty{Name: full, Type: typ, Required: slices.Contains(required, name),
 				Deprecated: p.Deprecated, Description: cmpText(p.Description, p.Title), Constraints: g.constraints(p)})
 			switch {
 			case p.Ref == "" && hasProperties(p):
@@ -793,6 +797,33 @@ func (g *mdGen) addProperties(list *[]*MDProperty, prefix string, s *oas.Schema,
 			add(m)
 		}
 	}
+}
+
+// jsonString reports whether a property's value, an integer, number or
+// boolean, is sent as a JSON string holding it (x-go-json-string).
+func jsonString(s *oas.Schema) bool {
+	if s == nil {
+		return false
+	}
+	raw, ok := s.Extra.Get("x-go-json-string")
+	if !ok || strings.TrimSpace(string(raw)) != "true" {
+		return false
+	}
+	types := s.Type
+	if len(types) == 0 && s.Resolved != nil {
+		types = s.Resolved.Type
+	}
+	scalars := 0
+	for _, t := range types {
+		switch t {
+		case "integer", "number", "boolean":
+			scalars++
+		case "null":
+		default:
+			return false
+		}
+	}
+	return scalars == 1
 }
 
 // byOrder returns the names of properties in the order generated types

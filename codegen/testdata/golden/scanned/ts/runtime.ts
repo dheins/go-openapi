@@ -74,6 +74,9 @@ export interface Property {
   /** Written even when unset (x-omitempty: false), as its zero value,
    * which stands for an absent property and is not checked. */
   readonly zeroIsAbsent?: boolean;
+  /** Sent and read as a JSON string holding the value, a number or
+   * boolean (x-go-json-string), as the Go models write it. */
+  readonly jsonString?: boolean;
 }
 
 export interface UnionSchema {
@@ -471,7 +474,7 @@ export function encode(schema: Schema, value: unknown, direction: Direction): un
         if (p === undefined) {
           out[name] = schema.additional ? encode(schema.additional, item, direction) : item;
         } else if (!(direction === "request" && p.readOnly) && !(direction === "response" && p.writeOnly)) {
-          out[name] = encode(p.schema, item, direction);
+          out[name] = p.jsonString && (typeof item === "number" || typeof item === "boolean") ? String(item) : encode(p.schema, item, direction);
         }
       }
       return out;
@@ -2512,8 +2515,9 @@ function isBytes(schema: Schema | undefined): boolean {
 
 // withDefaults fills the absent properties of v, a response's value of
 // schema, with their defaults, through nested objects, arrays and maps,
-// but for write-only properties, which responses do not have. It changes
-// v, and returns it.
+// but for write-only properties, which responses do not have, and reads
+// the values of x-go-json-string properties from their strings, throwing
+// for one that is not a string. It changes v, and returns it.
 function withDefaults<T>(schema: Schema | undefined, v: T): T {
   fill(schema, v);
   return v;
@@ -2555,6 +2559,8 @@ function fill(schema: Schema | undefined, v: unknown): void {
         if (obj[k] === undefined && p.default !== undefined) {
           // A copy, so that responses do not share it.
           obj[k] = structuredClone(p.default);
+        } else if (p.jsonString && obj[k] !== undefined && obj[k] !== null) {
+          obj[k] = unquote(k, obj[k]);
         } else {
           fill(p.schema, obj[k]);
         }
@@ -2562,6 +2568,24 @@ function fill(schema: Schema | undefined, v: unknown): void {
       return;
     }
   }
+}
+
+// unquote returns the number or boolean v, a JSON string, holds, for the
+// property name: x-go-json-string values are read only as strings.
+function unquote(name: string, v: unknown): unknown {
+  if (typeof v !== "string") {
+    throw new Error(`${name}: expected a string holding the value, got ${typeOf(v)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = v === v.trim() ? JSON.parse(v) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  if (typeof parsed !== "number" && typeof parsed !== "boolean") {
+    throw new Error(`${name}: expected a string holding a number or boolean, got ${JSON.stringify(v)}`);
+  }
+  return parsed;
 }
 
 // scalarValue converts text to the primitive value schema describes (or

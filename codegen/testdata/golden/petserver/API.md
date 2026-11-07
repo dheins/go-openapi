@@ -1416,10 +1416,10 @@ Variant 2:
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `count` | integer | yes | minimum: `0` |
-| `ratio` | number | no |  |
-| `enabled` | boolean | no | default: `true` |
-| `limit` | integer, nullable | no |  |
+| `count` | integer, sent as a string | yes | minimum: `0` |
+| `ratio` | number, sent as a string | no |  |
+| `enabled` | boolean, sent as a string | no | default: `true` |
+| `limit` | integer, nullable, sent as a string | no |  |
 | `label` | string | no |  |
 
 ### Ranked

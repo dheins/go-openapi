@@ -61,6 +61,12 @@ func TestMiddlewareParity(t *testing.T) {
 		{"PUT", "/pets/1", "", "", nil},
 		{"GET", "/nowhere", "", "", nil},
 		{"GET", "/secure", "", "", nil},
+		// x-go-json-string values are strings holding valid values.
+		{"PUT", "/counters", "application/json", `{"count":3}`, nil},
+		{"PUT", "/counters", "application/json", `{"count":"three"}`, nil},
+		{"PUT", "/counters", "application/json", `{"count":"-1"}`, nil},
+		{"PUT", "/counters", "application/x-www-form-urlencoded", "count=-1", nil},
+		{"PUT", "/counters", "application/xml", "<counter><count>x</count></counter>", nil},
 	} {
 		want := do(t, generated, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)
 		got := do(t, accept, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)
@@ -73,6 +79,16 @@ func TestMiddlewareParity(t *testing.T) {
 			if !slices.Contains(reported, w) {
 				t.Errorf("%s %s %s: middleware does not report %q: %q", tt.method, tt.target, tt.body, w, reported)
 			}
+		}
+	}
+	// The values generated code sends pass, as JSON, forms and XML.
+	for contentType, body := range map[string]string{
+		"application/json":                  `{"count":"3","ratio":"0.5","enabled":"true","limit":null}`,
+		"application/x-www-form-urlencoded": "count=3&enabled=false",
+		"application/xml":                   "<counter><count>3</count></counter>",
+	} {
+		if got := do(t, accept, "PUT", "/counters", contentType, body); got.status != http.StatusNoContent {
+			t.Errorf("%s %s: middleware %d\n%s", contentType, body, got.status, got.body)
 		}
 	}
 }

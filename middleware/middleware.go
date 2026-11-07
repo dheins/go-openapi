@@ -115,7 +115,7 @@ func Validate(spec *loader.Spec, opts ...Option) (func(http.Handler) http.Handle
 	}
 	model := ir.Build(spec, ir.Options{Operations: true})
 	cfg := server.NewConfig(append([]server.Option{server.WithBasePath(model.BasePath)}, s.server...)...)
-	set, err := schemas.New(spec)
+	set, err := schemas.New(spec, schemas.JSONStrings())
 	if err != nil {
 		return nil, fmt.Errorf("middleware: %w", err)
 	}

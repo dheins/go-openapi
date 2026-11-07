@@ -151,7 +151,7 @@ export interface Counter {
 }
 
 /** The schema of Counter, for validation and encoding. */
-export const CounterSchema: $Schema = { kind: "object", properties: { count: { schema: { kind: "integer", minimum: 0 }, required: true }, ratio: { schema: { kind: "number" } }, enabled: { schema: { kind: "boolean" }, default: true }, limit: { schema: { kind: "nullable", of: { kind: "integer" } } }, label: { schema: { kind: "string" } } } };
+export const CounterSchema: $Schema = { kind: "object", properties: { count: { schema: { kind: "integer", minimum: 0 }, required: true, jsonString: true }, ratio: { schema: { kind: "number" }, jsonString: true }, enabled: { schema: { kind: "boolean" }, jsonString: true, default: true }, limit: { schema: { kind: "nullable", of: { kind: "integer" } }, jsonString: true }, label: { schema: { kind: "string" } } } };
 
 /** Properties put in order by x-order; those without one follow. */
 export interface Ranked {
