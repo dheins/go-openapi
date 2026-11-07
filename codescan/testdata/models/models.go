@@ -101,6 +101,16 @@ type Page[T any] struct {
 //goapi:schema PetPage
 type Pets Page[Pet]
 
+// Envelope wraps a page of items.
+type Envelope[T any] struct {
+	Data Page[T] `json:"data"`
+}
+
+// PetEnvelope is an envelope of pets.
+//
+//goapi:schema
+type PetEnvelope Envelope[Pet]
+
 // Upload holds a file.
 //
 //goapi:schema

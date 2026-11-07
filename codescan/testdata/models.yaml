@@ -1,4 +1,4 @@
-# testdata/models/models.go:109:2: warning: chan bool values are not encoded as JSON; they are left untyped
+# testdata/models/models.go:119:2: warning: chan bool values are not encoded as JSON; they are left untyped
 openapi: 3.1.0
 info:
   title: github.com/dheins/go-openapi/codescan/testdata/models
@@ -6,6 +6,7 @@ info:
 components:
   schemas:
     Pet:
+      $id: Pet
       properties:
         id:
           type: integer
@@ -19,7 +20,7 @@ components:
           examples:
             - Rex
         kind:
-          $ref: '#/components/schemas/Kind'
+          $ref: Kind
           default: dog
         tag:
           type: string
@@ -29,7 +30,7 @@ components:
             - "null"
           description: Nickname may be null.
         owner:
-          $ref: '#/components/schemas/Owner'
+          $ref: Owner
         tags:
           items:
             type: string
@@ -59,10 +60,10 @@ components:
         extra: {}
         anything: {}
         parent:
-          $ref: '#/components/schemas/Pet'
+          $ref: Pet
         friends:
           items:
-            $ref: '#/components/schemas/PetID'
+            $ref: PetID
           type: array
           maxItems: 2
           minItems: 2
@@ -79,7 +80,7 @@ components:
         by:
           type: string
         meta:
-          $ref: '#/components/schemas/Meta'
+          $ref: Meta
         label:
           type: string
           deprecated: true
@@ -101,25 +102,28 @@ components:
 
         It is the main type of the fixture.
     Kind:
+      $id: Kind
       type: string
       enum:
         - dog
         - cat
       description: Kind is the kind of a pet.
     Owner:
+      $id: Owner
       properties:
         name:
           type: string
         other:
-          $ref: '#/components/schemas/SharedOwner'
+          $ref: SharedOwner
         level:
-          $ref: '#/components/schemas/Level'
+          $ref: Level
       type: object
       required:
         - name
         - level
       description: Owner is a pet's owner; its name clashes with shared.Owner.
     SharedOwner:
+      $id: SharedOwner
       properties:
         email:
           type: string
@@ -129,6 +133,7 @@ components:
         - email
       description: Owner is an owner, from another package.
     Level:
+      $id: Level
       type: integer
       enum:
         - 1
@@ -136,10 +141,12 @@ components:
       format: int64
       description: Level is a numeric enum.
     PetID:
+      $id: PetID
       type: integer
       format: int64
       description: PetID identifies a pet.
     Meta:
+      $id: Meta
       properties:
         version:
           type: integer
@@ -149,34 +156,22 @@ components:
         - version
       description: Meta is embedded in Pet under a name.
     PetPage:
-      properties:
-        items:
-          items:
-            $ref: '#/components/schemas/Pet'
-          type: array
-        next:
-          type: string
-      type: object
-      required:
-        - items
+      $id: PetPage
+      $ref: Page
+      $defs:
+        T:
+          $ref: Pet
+          $dynamicAnchor: T
       description: Pets is a page of pets, named by the directive.
-    Upload:
-      properties:
-        file:
-          type: string
-          format: binary
-        done: {}
-        pages:
-          $ref: '#/components/schemas/PageOwner'
-      type: object
-      required:
-        - file
-      description: Upload holds a file.
-    PageOwner:
+    Page:
+      $id: Page
+      $defs:
+        T:
+          $dynamicAnchor: T
       properties:
         items:
           items:
-            $ref: '#/components/schemas/Owner'
+            $dynamicRef: '#T'
           type: array
         next:
           type: string
@@ -184,15 +179,66 @@ components:
       required:
         - items
       description: Page is a page of items.
+    PetEnvelope:
+      $id: PetEnvelope
+      $ref: Envelope
+      $defs:
+        T:
+          $ref: Pet
+          $dynamicAnchor: T
+      description: PetEnvelope is an envelope of pets.
+    Envelope:
+      $id: Envelope
+      $defs:
+        T:
+          $dynamicAnchor: T
+      properties:
+        data:
+          properties:
+            items:
+              items:
+                $dynamicRef: '#T'
+              type: array
+            next:
+              type: string
+          type: object
+          required:
+            - items
+      type: object
+      required:
+        - data
+      description: Envelope wraps a page of items.
+    Upload:
+      $id: Upload
+      properties:
+        file:
+          type: string
+          format: binary
+        done: {}
+        pages:
+          $ref: PageOwner
+      type: object
+      required:
+        - file
+      description: Upload holds a file.
+    PageOwner:
+      $id: PageOwner
+      $ref: Page
+      $defs:
+        T:
+          $ref: Owner
+          $dynamicAnchor: T
+      description: Page is a page of items.
     Feeding:
+      $id: Feeding
       properties:
         diet:
-          $ref: '#/components/schemas/Diet'
+          $ref: Diet
         contact:
-          $ref: '#/components/schemas/Contact'
+          $ref: Contact
         backup:
           anyOf:
-            - $ref: '#/components/schemas/Diet'
+            - $ref: Diet
             - type: "null"
       type: object
       required:
@@ -200,20 +246,22 @@ components:
         - backup
       description: Feeding uses the unions.
     Diet:
+      $id: Diet
       oneOf:
-        - $ref: '#/components/schemas/Omnivore'
-        - $ref: '#/components/schemas/Herbivore'
-        - $ref: '#/components/schemas/Carnivore'
+        - $ref: Omnivore
+        - $ref: Herbivore
+        - $ref: Carnivore
       required:
         - kind
       description: Diet is what a pet eats.
       discriminator:
         propertyName: kind
         mapping:
-          Omnivore: '#/components/schemas/Omnivore'
-          Herbivore: '#/components/schemas/Herbivore'
-          meat: '#/components/schemas/Carnivore'
+          Omnivore: Omnivore
+          Herbivore: Herbivore
+          meat: Carnivore
     Omnivore:
+      $id: Omnivore
       properties:
         kind:
           type: string
@@ -222,6 +270,7 @@ components:
         - kind
       description: Omnivore eats anything; a variant of models.Diet from another package.
     Herbivore:
+      $id: Herbivore
       properties:
         kind:
           type: string
@@ -235,6 +284,7 @@ components:
         - plants
       description: Herbivore eats plants.
     Carnivore:
+      $id: Carnivore
       properties:
         kind:
           type: string
@@ -246,14 +296,17 @@ components:
         - prey
       description: Carnivore eats meat; a Diet through its pointer.
     Contact:
+      $id: Contact
       anyOf:
-        - $ref: '#/components/schemas/Email'
-        - $ref: '#/components/schemas/Phone'
+        - $ref: Email
+        - $ref: Phone
       description: 'Contact is how to reach an owner: any of its variants may match.'
     Email:
+      $id: Email
       type: string
       description: Email is an email address.
     Phone:
+      $id: Phone
       properties:
         number:
           type: string

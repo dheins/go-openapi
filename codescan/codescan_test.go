@@ -12,6 +12,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/dheins/go-openapi/ir"
 	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/validate"
 )
@@ -200,5 +201,41 @@ func TestWrongExample(t *testing.T) {
 	if len(v.Diagnostics) != 1 || v.Diagnostics[0].Rule != validate.RuleExampleSchema || v.Diagnostics[0].Severity != validate.Warning ||
 		v.Diagnostics[0].Location.Pointer != "/paths/~1items/get/parameters/0/example" {
 		t.Errorf("diagnostics = %v", v.Diagnostics)
+	}
+}
+
+// TestGenericTypes checks that the types built from the scan of generic
+// types, templates and their instances, are those flattening the
+// instances gave: PetPage and PageOwner, with typed items.
+func TestGenericTypes(t *testing.T) {
+	res, err := Scan(Options{Patterns: []string{"./testdata/models/..."}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(res.Document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := loader.ParseBytes(data, "file:///scan/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := loader.LoadSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := ir.Build(spec, ir.Options{})
+	items := map[string]string{}
+	for _, ty := range model.Types {
+		for _, f := range ty.Fields {
+			if f.JSONName == "items" && f.Type.Kind == ir.Slice && f.Type.Elem.Kind == ir.Named {
+				items[ty.Name] = f.Type.Elem.Type.Name
+			}
+		}
+	}
+	for typ, want := range map[string]string{"PetPage": "Pet", "PageOwner": "Owner", "PetEnvelopeData": "Pet"} {
+		if items[typ] != want {
+			t.Errorf("%s items are %q, want %q (all: %v)", typ, items[typ], want, items)
+		}
 	}
 }
