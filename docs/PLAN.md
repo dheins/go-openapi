@@ -887,6 +887,22 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   converted ones are right but unused, which features.md lists.
 - *Not done*: see [features.md](../features.md).
 
+### M46 – Operation servers in clients ✅
+- [x] `ir.Operation.ServerURL`: an operation's own first server, else its
+  path item's
+- [x] Go clients: `Request.Server`, `client.WithDefaultBaseURL` and
+  `client.WithOperationServers`; the generated CLI too
+- [x] TypeScript clients: `OperationSpec.server` and `operationServers`
+
+**How it went**
+- *The base URL wins*: a base URL of the caller's own is usually a test
+  server or a proxy, which should get every request, so operation servers
+  apply only with the document's server unless forced.
+- *Server warnings, server targets*: the generated server still routes
+  only the document's servers, so its warnings are marked
+  `ir.Warning.ServerOnly`, which client targets no longer print.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
