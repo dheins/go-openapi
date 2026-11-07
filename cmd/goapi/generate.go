@@ -57,8 +57,8 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		if target == "client" {
 			usage = "subdirectory and package of the operations' request and response types"
 		}
-		opsPkg = fs.String("operations", "api", usage)
-		models = fs.String("models", "model", `subdirectory and package of the schema types ("" puts them with the operations)`)
+		opsPkg = fs.String("operations", "api", usage+"; a path such as internal/api names the package after its last element")
+		models = fs.String("models", "model", `subdirectory and package of the schema types ("" puts them with the operations; a path such as internal/model works too)`)
 		importPath = fs.String("import", "", "import path of -out, for the subpackages (default: from the go.mod above -out)")
 	}
 	var paths, tags, excludePaths, excludeTags *string
@@ -95,11 +95,13 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	var opsImport, modelsImport string
 	if operations && (types == nil || *types == "") && (*opsPkg != "" || *models != "") {
 		for _, f := range []struct{ flag, name string }{{"operations", *opsPkg}, {"models", *models}} {
-			if f.name != "" && (!token.IsIdentifier(f.name) || token.IsKeyword(f.name)) {
-				return fail("%q is not a valid package name for -%s", f.name, f.flag)
+			if f.name != "" {
+				if err := codegen.CheckPackageDir(f.name); err != nil {
+					return fail("-%s: %v", f.flag, err)
+				}
 			}
 		}
-		if *opsPkg != "" && *opsPkg == *models {
+		if *opsPkg != "" && path.Clean(*opsPkg) == path.Clean(*models) {
 			return fail("-operations and -models must differ")
 		}
 		base := *importPath

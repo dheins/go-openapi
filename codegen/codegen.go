@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"go/format"
+	"go/token"
 	"io/fs"
 	"path"
 	"slices"
@@ -34,11 +35,13 @@ type Options struct {
 	// openapi.json) so the server can serve it with server.WithDocument.
 	Document []byte
 	// OperationsPackage, if set, makes Server put the request and response
-	// types of the operations in a package of their own, in the
-	// subdirectory of that name, imported as OperationsImport; the server
-	// package keeps a small handler file per operation. ModelsPackage and
-	// ModelsImport do the same for the schema types, which otherwise go
-	// with the operations. Without either, all files are one package.
+	// types of the operations in a package of their own, in that
+	// subdirectory ("api", or a path such as "internal/api", the package
+	// named after its last element), imported as OperationsImport; the
+	// server package keeps a small handler file per operation.
+	// ModelsPackage and ModelsImport do the same for the schema types,
+	// which otherwise go with the operations. Without either, all files
+	// are one package.
 	OperationsPackage string
 	OperationsImport  string
 	ModelsPackage     string
@@ -58,24 +61,57 @@ type Options struct {
 }
 
 // layout says which package each kind of generated code goes to, by
-// import path; "" is the package of Options.Package.
+// import path; "" is the package of Options.Package. Each has a name, and
+// a directory below the output, whose last element the name is.
 type layout struct {
-	opsPkg, opsImport       string
-	modelsPkg, modelsImport string
+	opsPkg, opsDir, opsImport          string
+	modelsPkg, modelsDir, modelsImport string
 }
 
 func layoutOf(opts Options) (layout, error) {
 	l := layout{
-		opsPkg: opts.OperationsPackage, opsImport: opts.OperationsImport,
-		modelsPkg: opts.ModelsPackage, modelsImport: opts.ModelsImport,
+		opsDir: opts.OperationsPackage, opsImport: opts.OperationsImport,
+		modelsDir: opts.ModelsPackage, modelsImport: opts.ModelsImport,
 	}
-	if (l.opsPkg == "") != (l.opsImport == "") || (l.modelsPkg == "") != (l.modelsImport == "") {
+	if (l.opsDir == "") != (l.opsImport == "") || (l.modelsDir == "") != (l.modelsImport == "") {
 		return layout{}, fmt.Errorf("codegen: a separate package needs both a name and an import path")
 	}
-	if l.modelsPkg == "" {
-		l.modelsPkg, l.modelsImport = l.opsPkg, l.opsImport
+	for _, dir := range []*string{&l.opsDir, &l.modelsDir} {
+		if *dir == "" {
+			continue
+		}
+		if err := CheckPackageDir(*dir); err != nil {
+			return layout{}, err
+		}
+		*dir = path.Clean(*dir)
+	}
+	l.opsPkg, l.modelsPkg = packageName(l.opsDir), packageName(l.modelsDir)
+	if l.modelsDir == "" {
+		l.modelsPkg, l.modelsDir, l.modelsImport = l.opsPkg, l.opsDir, l.opsImport
 	}
 	return l, nil
+}
+
+// packageName returns the name of the package in dir: its last element.
+func packageName(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return path.Base(dir)
+}
+
+// CheckPackageDir reports why dir cannot hold a generated package: a
+// relative, slash-separated path below the output, whose last element
+// names the package.
+func CheckPackageDir(dir string) error {
+	clean := path.Clean(dir)
+	if path.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(dir, "\\") {
+		return fmt.Errorf("codegen: %q is not a directory below the output", dir)
+	}
+	if name := path.Base(clean); !token.IsIdentifier(name) || token.IsKeyword(name) {
+		return fmt.Errorf("codegen: %q is not a valid package name, the last element of %q", name, dir)
+	}
+	return nil
 }
 
 // File is one generated source file.
@@ -107,7 +143,9 @@ type generator struct {
 	vars map[string]bool
 	// params are the variables describing parameters, shared by a
 	// package's client functions and handlers.
-	params    map[*ir.Param]string
+	params map[*ir.Param]string
+	// dir is the package's directory below the output, for subpackages.
+	dir       string
 	files     []File
 	fileNames map[string]bool
 }

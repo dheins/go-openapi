@@ -253,6 +253,46 @@ func TestGenerateServerOnePackage(t *testing.T) {
 	}
 }
 
+// TestGenerateNestedPackages generates a server and its client with the
+// operations and models in nested directories, inside this module so
+// that the generated code compiles against its runtime, and vets it.
+func TestGenerateNestedPackages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet")
+	}
+	dir, err := os.MkdirTemp(".", "nestedgen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	var stdout, stderr bytes.Buffer
+	for _, args := range [][]string{
+		{"generate", "server", "-out", filepath.Join(dir, "gen"), "-operations", "internal/api", "-models", "internal/model", petserverDoc},
+		{"generate", "client", "-out", filepath.Join(dir, "gen", "client"), "-types", "github.com/dheins/go-openapi/cmd/goapi/" + path.Clean(filepath.ToSlash(dir)) + "/gen/internal/api", petserverDoc},
+	} {
+		if code := run(args, &stdout, &stderr); code != exitOK {
+			t.Fatalf("%v: exit code %d\nstderr: %s", args, code, &stderr)
+		}
+	}
+	if op := readFile(t, filepath.Join(dir, "gen", "internal", "api", "list_pets_operation.go")); !strings.Contains(op, "package api") || !strings.Contains(op, "/gen/internal/model\"") {
+		t.Errorf("list_pets_operation.go:\n%.600s", op)
+	}
+	cmd := exec.Command("go", "vet", "./"+filepath.ToSlash(dir)+"/...")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go vet: %v\n%s", err, out)
+	}
+	stderr.Reset()
+	if code := run([]string{"generate", "server", "-out", filepath.Join(dir, "bad"), "-operations", "internal/2api", petserverDoc}, &stdout, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), `"2api" is not a valid package name`) {
+		t.Errorf("bad package: %d %s", code, &stderr)
+	}
+	stderr.Reset()
+	if code := run([]string{"generate", "server", "-out", filepath.Join(dir, "bad"), "-operations", "../api", petserverDoc}, &stdout, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), "is not a directory below the output") {
+		t.Errorf("outside: %d %s", code, &stderr)
+	}
+}
+
 func TestGenerateServerImportPath(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "gen")
 	var stdout, stderr bytes.Buffer
