@@ -21,6 +21,7 @@ JSON Schema 2020-12; Swagger 2.0 documents are converted as they are read.
   `Date`, validation errors)
 - `runtime/server`, `runtime/problem`: the runtime of generated servers
 - `runtime/client`: the runtime of generated clients
+- `runtime/cli`: the runtime of generated command-line clients
 - `codescan`: generates a document from Go types and `//goapi:` directives
 - `flatten`: writes a document of several files as one, with its inline
   types moved into `components` and unused components dropped
@@ -55,6 +56,7 @@ goapi generate ts-client -out web/src/api openapi.yaml # a TypeScript client usi
 goapi generate model -out internal/models openapi.yaml
 goapi generate server -out internal/gen openapi.yaml   # server in gen, operations in gen/api, schemas in gen/model
 goapi generate client -out internal/petclient -types example.com/shop/internal/gen/api openapi.yaml   # a client sharing the server's types
+goapi generate cli -out cmd/petctl openapi.yaml       # a command-line client, a command per operation
 ```
 
 Generated models decode with JSON-pointer error paths and have a

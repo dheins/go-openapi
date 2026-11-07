@@ -727,6 +727,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   so that is an error, as an undefined block is.
 - *Not done*: see [features.md](../features.md).
 
+### M37 – Command-line clients ✅
+- [x] `codegen.CLI` and `runtime/cli`: a command per operation, flags per
+  parameter, bodies as JSON, files and stdin, output and exit codes
+- [x] `goapi generate cli`, with the client it sends with or one
+  generated before
+
+**How it went**
+- *Thin over the client*: commands are a table the runtime reads; it sets
+  flags into the request types by reflection (through `oapi.Optional`,
+  pointers and text unmarshalers) and sends them with the generated
+  client, which validates and encodes them as it does for any caller.
+- *Status from middleware*: response variants do not carry their status,
+  so a middleware of the client keeps the response, and the body as it
+  was sent, for `-v`, printing and the exit code.
+- *Codecs*: a client needing codecs failed to start, which the petserver
+  test found; the generated `clientOptions` lets the program add them.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

@@ -322,6 +322,45 @@ func TestGenerateTargets(t *testing.T) {
 	}
 }
 
+// TestGenerateCLI generates a command-line client, with the client it
+// sends with, inside this module so that it compiles, and vets it.
+func TestGenerateCLI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet")
+	}
+	dir, err := os.MkdirTemp(".", "cligen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	out := filepath.Join(dir, "petctl")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"generate", "cli", "-out", out, petserverDoc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	if !strings.Contains(stderr.String(), "BatchPets: bodies of type multipart/mixed cannot be given on a command line yet") {
+		t.Errorf("stderr = %s", &stderr)
+	}
+	main := readFile(t, filepath.Join(out, "main.go"))
+	if !strings.Contains(main, "package main") || !strings.Contains(main, `Name:    "petctl"`) || !strings.Contains(main, `"list-pets"`) {
+		t.Errorf("main.go:\n%.800s", main)
+	}
+	for _, name := range []string{"client/client.go", "api/list_pets_operation.go", "model/pet.go"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+			t.Errorf("%s not generated: %v", name, err)
+		}
+	}
+	cmd := exec.Command("go", "vet", "./"+path.Clean(filepath.ToSlash(dir))+"/...")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go vet: %v\n%s", err, out)
+	}
+	stderr.Reset()
+	if code := run([]string{"generate", "cli", "-out", filepath.Join(dir, "bad"), "-client", "example.com/c", petserverDoc}, &stdout, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), "-client and -types go together") {
+		t.Errorf("-client without -types: %d %s", code, &stderr)
+	}
+}
+
 func TestGenerateServerImportPath(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "gen")
 	var stdout, stderr bytes.Buffer

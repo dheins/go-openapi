@@ -6,6 +6,7 @@
 //	goapi generate model [-out dir] [-package name] [-optional wrapper|pointer] file
 //	goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
 //	goapi generate client [-out dir] [-package name] [-types import] file
+//	goapi generate cli [-out dir] [-name name] [-client import -types import] file
 //	goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
 //	goapi convert [-out file] [-format yaml|json] file
 //	goapi diff [-format text|json] [-fail-on error|warning] old new
@@ -91,6 +92,7 @@ Usage:
   goapi generate model [-out dir] [-package name] [-optional wrapper|pointer] file
   goapi generate server [-out dir] [-package name] [-optional wrapper|pointer] file
   goapi generate client [-out dir] [-package name] [-types import] file
+  goapi generate cli [-out dir] [-name name] [-client import -types import] file
   goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
   goapi convert [-out file] [-format yaml|json] file
   goapi diff [-format text|json] [-fail-on error|warning] old new
@@ -105,6 +107,7 @@ Commands:
   generate model    generate Go types for the schemas of a document
   generate server   generate the types and an HTTP server for a document
   generate client   generate the types and an HTTP client for a document
+  generate cli      generate a command-line client for a document
   generate ts-client generate a TypeScript client for a document
   convert           write a Swagger 2.0 document as OpenAPI 3.1
   diff              report the changes between two versions of a document

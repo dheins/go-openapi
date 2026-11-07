@@ -21,6 +21,7 @@ its tests.
 - [Server options](#server-options)
 - [Documentation pages](#documentation-pages)
 - [Generate a client](#generate-a-client)
+- [Generate a command-line client](#generate-a-command-line-client)
 - [Generate a TypeScript client](#generate-a-typescript-client)
 - [Webhooks and callbacks](#webhooks-and-callbacks)
 - [Generate a document from Go code](#generate-a-document-from-go-code)
@@ -1338,6 +1339,64 @@ with a `*client.Config` from `client.NewConfig`.
 The client does not retry, paginate or cache; middleware does that.
 Required headers of positional parts that are not files cannot be sent yet
 ([features.md](../features.md)).
+
+## Generate a command-line client
+
+```sh
+goapi generate cli -out cmd/petctl openapi.yaml
+go run ./cmd/petctl help
+go run ./cmd/petctl list-pets -limit 10 -tags cat,dog -v
+go run ./cmd/petctl create-pet -body @pet.json
+go run ./cmd/petctl upload-photo -pet-id 7 -body '{"caption":"me"}' -photo @rex.png
+```
+
+`goapi generate cli` writes a `main` package with a command per
+operation, named after its `operationId` in kebab case and listed by tag
+in `help`, sent with the generated Go client: the client goes to
+`-out/client`, and the `api` and `model` packages beside it (`-operations`
+and `-models` as for `generate server`); `-client` and `-types` use a
+client generated before instead. It only needs the standard library and
+goapi's runtime (`runtime/cli`). `-name` names the program (the base name
+of `-out` by default).
+
+- **Parameters** are flags named in kebab case (`-pet-id`,
+  `-x-request-id`; in front of the location when two clash): scalars as
+  their text, arrays repeated or comma-separated, objects and values with
+  JSON `content` as JSON. Required ones must be given.
+- **Bodies** are `-body`: JSON of the body type (also for forms, XML,
+  multipart and codecs, which the client then encodes), text or bytes,
+  given as they are, as `@file` or `-` for stdin. The file properties of a
+  multipart body are flags of their own (`-photo @rex.png`, the content
+  type from the extension). With several media types, `-content-type`
+  picks one. Bodies of positional parts and event streams cannot be
+  given yet; those commands are left out, with a warning.
+- **Output:** the body on stdout, JSON indented, text and bytes as they
+  are, and the items of JSON Lines and event streams one a line as they
+  come; `-v` adds the status and headers on stderr. A declared 2XX
+  response exits 0, another declared one 1, and usage errors, invalid
+  requests (with their problems), transport errors and undeclared
+  responses 2.
+- **Server and credentials:** `-server` or `<NAME>_SERVER`, the
+  document's server by default; per security scheme a flag and an
+  environment variable named after it (`-api-key` or `PETCTL_API_KEY`;
+  `-basic-auth-user` and `-basic-auth-password`, or
+  `PETCTL_BASIC_AUTH_USER` and `..._PASSWORD`), so secrets can stay out
+  of the shell's history. `-header name:value` and `-timeout` apply to
+  any command.
+
+The generated `main.go` declares `clientOptions`, which a file of yours
+in the package adds to, for what the client needs besides, such as the
+codecs of media types goapi does not know:
+
+```go
+func init() {
+	clientOptions = append(clientOptions, goapiclient.WithCodec("application/msgpack", msgpackCodec{}))
+}
+```
+
+The commands come from `cli.go.tmpl` (`cli` and `command`), which custom
+templates can change, and `goapi.yaml` targets can add files to the
+program.
 
 ## Generate a TypeScript client
 

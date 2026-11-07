@@ -46,6 +46,10 @@ type Options struct {
 	OperationsImport  string
 	ModelsPackage     string
 	ModelsImport      string
+	// Name, ClientPackage and ClientImport are the program name of a
+	// command-line client and the package of the generated client it
+	// sends requests with; see CLI.
+	Name, ClientPackage, ClientImport string
 	// Import is the import path of the output directory, which packages
 	// of templates' targets of their own are imported below; see
 	// Target.Package.
@@ -469,6 +473,9 @@ func (f *fileGen) funcs() template.FuncMap {
 		"opType": func(name string) string {
 			return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, name)
 		},
+		// clientPackage names the generated client's package, for
+		// command-line clients.
+		"clientPackage": func() string { return f.gen.opts.ClientPackage },
 		// modelType names a schema type, qualified for the package being
 		// written, as goType names references to it.
 		"modelType": func(t *ir.Type) string {

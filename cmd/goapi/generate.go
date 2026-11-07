@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,13 +22,13 @@ import (
 )
 
 // runGenerate implements "generate model", "generate server",
-// "generate client" and "generate ts-client".
+// "generate client", "generate cli" and "generate ts-client".
 func runGenerate(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "ts-client" {
 		return runGenerateTS(args[1:], stdout, stderr)
 	}
-	if len(args) == 0 || (args[0] != "model" && args[0] != "server" && args[0] != "client") {
-		fmt.Fprintln(stderr, `goapi generate: expected "model", "server", "client" or "ts-client"`)
+	if len(args) == 0 || (args[0] != "model" && args[0] != "server" && args[0] != "client" && args[0] != "cli") {
+		fmt.Fprintln(stderr, `goapi generate: expected "model", "server", "client", "cli" or "ts-client"`)
 		return exitFailure
 	}
 	target := args[0]
@@ -39,7 +40,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	defaultOut := map[string]string{"model": "models", "server": "gen", "client": "client"}[target]
+	defaultOut := map[string]string{"model": "models", "server": "gen", "client": "client", "cli": "cli"}[target]
 	operations := target != "model"
 	out := fs.String("out", defaultOut, "directory to write the generated files to")
 	pkg := fs.String("package", "", "package name (default: the base name of -out)")
@@ -61,8 +62,13 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		opsPkg = fs.String("operations", "api", usage+"; a path such as internal/api names the package after its last element")
 		models = fs.String("models", "model", `subdirectory and package of the schema types ("" puts them with the operations; a path such as internal/model works too)`)
 	}
+	var name, clientPkg *string
+	if target == "cli" {
+		name = fs.String("name", "", "the program's name, in usage and its environment variables (default: the base name of -out)")
+		clientPkg = fs.String("client", "", "import path of a client generated before to send with, with -types; by default one is generated in -out/client")
+	}
 	var paths, tags, excludePaths, excludeTags *string
-	if target == "client" {
+	if target == "client" || target == "cli" {
 		types = fs.String("types", "", "import path of the operations' package of a server or client generated before, to use instead of generating the types")
 		paths = fs.String("paths", "", "comma-separated path patterns of the operations to generate (* is a segment, ** any number)")
 		tags = fs.String("tags", "", "comma-separated tags of the operations to generate, as well as those -paths matches")
@@ -81,18 +87,28 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	if *optional != "wrapper" && *optional != "pointer" {
 		return fail("unknown -optional %q", *optional)
 	}
+	if target == "cli" {
+		if *name == "" {
+			*name = filepath.Base(filepath.Clean(*out))
+		}
+		if (*clientPkg == "") != (*types == "") {
+			return fail("-client and -types go together")
+		}
+		// The client generated next to the program is package client.
+		*pkg = "client"
+	}
 	if *pkg == "" {
 		*pkg = filepath.Base(filepath.Clean(*out))
 	}
 	if !token.IsIdentifier(*pkg) || token.IsKeyword(*pkg) {
 		return fail("%q is not a valid package name; use -package", *pkg)
 	}
-	if target == "client" && *types == "" && *opsPkg == "" {
+	if (target == "client" || target == "cli") && *types == "" && *opsPkg == "" {
 		return fail("a client needs -operations or -types")
 	}
 	// Each subpackage is imported by the server or client, so its path is
 	// needed.
-	var opsImport, modelsImport string
+	var opsImport, modelsImport, base string
 	if operations && (types == nil || *types == "") && (*opsPkg != "" || *models != "") {
 		for _, f := range []struct{ flag, name string }{{"operations", *opsPkg}, {"models", *models}} {
 			if f.name != "" {
@@ -104,7 +120,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		if *opsPkg != "" && path.Clean(*opsPkg) == path.Clean(*models) {
 			return fail("-operations and -models must differ")
 		}
-		base := *importPath
+		base = *importPath
 		if base == "" {
 			var err error
 			if base, err = dirImportPath(*out); err != nil {
@@ -161,7 +177,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		Package: *pkg,
 		Source:  filepath.ToSlash(filepath.Base(file)),
 		Title:   strings.TrimSpace(res.Spec.Document.Info.Title),
-		Import:  *importPath,
+		Import:  cmp.Or(base, *importPath),
 	}
 	if *templates != "" {
 		if info, err := os.Stat(*templates); err != nil || !info.IsDir() {
@@ -195,7 +211,12 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 			return fail("%v", err)
 		}
 	}
-	files, err := generate(model, opts)
+	var files []codegen.File
+	if target == "cli" {
+		files, err = generateCLI(model, opts, *name, *clientPkg, *types, stderr)
+	} else {
+		files, err = generate(model, opts)
+	}
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -287,6 +308,45 @@ func (f formatFlag) Set(v string) error {
 	}
 	f[format] = typ
 	return nil
+}
+
+// generateCLI returns the files of a command-line client: the program in
+// the output directory, sending with the client of clientImport and the
+// operations of types, or with one generated in client, sharing the
+// operations' and models' packages opts says, and reports the commands
+// left out on stderr.
+func generateCLI(m *ir.Model, opts codegen.Options, name, clientImport, types string, stderr io.Writer) ([]codegen.File, error) {
+	var files []codegen.File
+	if clientImport == "" {
+		if opts.Import == "" {
+			return nil, errors.New("the generated client needs the import path of -out; use -import")
+		}
+		clientFiles, err := codegen.Client(m, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range clientFiles {
+			// The client's own files, not those of its subpackages, go
+			// to client.
+			if !strings.HasPrefix(f.Name, path.Clean(opts.OperationsPackage)+"/") && !strings.HasPrefix(f.Name, path.Clean(opts.ModelsPackage)+"/") {
+				f.Name = path.Join("client", f.Name)
+			}
+			files = append(files, f)
+		}
+		clientImport = path.Join(opts.Import, "client")
+		types = opts.OperationsImport
+	}
+	cli := opts
+	cli.Name, cli.ClientImport, cli.ClientPackage = name, clientImport, path.Base(clientImport)
+	cli.OperationsPackage, cli.OperationsImport = path.Base(types), types
+	cliFiles, warnings, err := codegen.CLI(m, cli)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(stderr, "goapi generate cli: warning: %s\n", w)
+	}
+	return append(files, cliFiles...), nil
 }
 
 // codecFlag collects -codec flags: media types with codecs.
