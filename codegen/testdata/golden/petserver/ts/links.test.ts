@@ -1,6 +1,6 @@
 // Tests of links with $url, $method, $statusCode, expressions embedded
-// in text and servers. Not generated; codegen's TestTypeScript runs
-// them.
+// in text, expressions inside constants and servers. Not generated;
+// codegen's TestTypeScript runs them.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -73,4 +73,49 @@ test("a call's own server", async () => {
   const c = new Client({ fetch, codecs });
   await c.getPet({ petId: 7 }, { server: "https://other.example.com/v2" });
   assert.deepEqual(sent, ["https://other.example.com/v2/pets/7"]);
+});
+
+// recorder returns a client of pets.test and the requests it sends, each
+// answered as its operation declares.
+function recorder(): [Client, Request[]] {
+  const sent: Request[] = [];
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const r = new Request(input, init);
+    sent.push(r);
+    const path = new URL(r.url).pathname;
+    if (path.startsWith("/v1/reports/")) {
+      return new Response(null, { status: 204 });
+    }
+    if (path === "/v1/notes") {
+      return new Response("HI!", { status: 200, headers: { "Content-Type": "text/plain" } });
+    }
+    return new Response(`{"id":8,"name":"Bo"}`, { status: 201, headers: { "Content-Type": "application/json" } });
+  };
+  return [new Client({ baseUrl: "http://pets.test/v1", fetch, codecs }), sent];
+}
+
+test("text given to arrays and objects is read as JSON or their styles", async () => {
+  const [c, sent] = recorder();
+  await c.followCreatePetReports(created, req);
+  const u = new URL(sent[0]!.url);
+  assert.equal(u.pathname, "/v1/reports/;ids=7;ids=7");
+  assert.equal(u.searchParams.get("fields"), "Ann|tag");
+  assert.equal(u.searchParams.get("filter[role]"), "Ann");
+  assert.deepEqual(JSON.parse(sent[0]!.headers.get("X-Meta")!), { role: "Ann", age: 201 });
+  assert.equal(sent[0]!.headers.get("Cookie"), "theme=Ann");
+});
+
+test("expressions inside a body are filled in", async () => {
+  const [c, sent] = recorder();
+  await c.followCreatePetRename({ status: 201, body: { id: 7, name: "Ann", tag: "cat" } }, req);
+  assert.deepEqual(await sent[0]!.json(), { name: "copy of Ann", tag: "cat", secret: "code 201" });
+  // A value that is not there leaves its property out.
+  await c.followCreatePetRename(created, req);
+  assert.deepEqual(await sent[1]!.json(), { name: "copy of Ann", secret: "code 201" });
+});
+
+test("text given to a text body", async () => {
+  const [c, sent] = recorder();
+  await c.followCreatePetShout(created, req);
+  assert.equal(await sent[0]!.text(), "hi Ann");
 });
