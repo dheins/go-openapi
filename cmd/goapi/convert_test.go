@@ -43,7 +43,7 @@ func TestConvert(t *testing.T) {
 	if !strings.HasPrefix(stdout.String(), "openapi: 3.1.0\ninfo:\n  title: Kitchen sink\n  version: \"1.0\"\n") {
 		t.Errorf("output starts %.80q", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "kitchen.yaml:51:29: warning: collectionFormat tsv") || strings.Count(got, "\n") != 2 {
+	if got := stderr.String(); !strings.Contains(got, "kitchen.yaml:51:29: warning: collectionFormat tsv") || strings.Count(got, "\n") != 1 {
 		t.Errorf("stderr = %s", got)
 	}
 	convertedValid(t, "openapi.yaml", stdout.Bytes())

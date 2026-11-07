@@ -42,6 +42,12 @@ type converter struct {
 	// version is the OpenAPI version converted to (Convert31 or
 	// Convert32).
 	version string
+	// host and basePath are the root's, and serverURLs the URLs of its
+	// servers, which operations with schemes of their own use too.
+	host, basePath string
+	serverURLs     []string
+	// schemes are the root's schemes.
+	schemes []string
 }
 
 func newConverter(lookup func(base, ref string) *yaml.Node, version string) *converter {
@@ -307,6 +313,12 @@ func (c *converter) servers(n *yaml.Node) {
 	if basePath != nil {
 		path = strings.TrimSuffix(basePath.Value, "/")
 	}
+	if host != nil {
+		c.host = host.Value
+	}
+	c.schemes = stringsOf(schemes)
+	c.basePath = path
+	defer func() { c.serverURLs = serverURLs(n) }()
 	var urls []string
 	switch {
 	case host != nil:
@@ -332,6 +344,46 @@ func (c *converter) servers(n *yaml.Node) {
 		list.Content = append(list.Content, mapping(at, str("url", at), str(u, at)))
 	}
 	n.Content = slices.Insert(n.Content, min(place, len(n.Content)), str("servers", at), list)
+}
+
+// serverURLs returns the URLs of the servers of a converted document.
+func serverURLs(n *yaml.Node) []string {
+	var urls []string
+	if list := resolveAlias(mappingValue(n, "servers")); list != nil {
+		for _, s := range list.Content {
+			if u := mappingValue(s, "url"); u != nil {
+				urls = append(urls, u.Value)
+			}
+		}
+	}
+	return urls
+}
+
+// operationServers returns the servers of an operation with schemes of
+// its own: the document's host and base path with each, or nil when they
+// are the document's servers. Without a host there is none, since a
+// server URL cannot say the scheme alone; that is reported.
+func (c *converter) operationServers(schemes *yaml.Node) *yaml.Node {
+	names := stringsOf(schemes)
+	if len(names) == 0 || slices.Equal(names, c.schemes) {
+		return nil
+	}
+	if c.host == "" {
+		c.warn(schemes, "the schemes of an operation need the document's host to become its servers; it uses the document's servers")
+		return nil
+	}
+	var urls []string
+	for _, s := range names {
+		urls = append(urls, s+"://"+c.host+c.basePath)
+	}
+	if slices.Equal(urls, c.serverURLs) {
+		return nil
+	}
+	list := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Line: schemes.Line, Column: schemes.Column}
+	for _, u := range urls {
+		list.Content = append(list.Content, mapping(schemes, str("url", schemes), str(u, schemes)))
+	}
+	return list
 }
 
 // componentParameters sorts the parameters of #/parameters: bodies become
@@ -450,7 +502,9 @@ func (c *converter) operation(op *yaml.Node, inherited []*yaml.Node) {
 		produces = stringsOf(v)
 	}
 	if s := removeKey(op, "schemes"); s != nil {
-		c.warn(s, "the schemes of an operation are not converted; it uses the document's servers")
+		if servers := c.operationServers(s); servers != nil {
+			set(op, "servers", servers)
+		}
 	}
 
 	place := keyIndex(op, "parameters")

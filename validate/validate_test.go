@@ -77,7 +77,7 @@ func TestSwagger2(t *testing.T) {
 	for _, d := range res.Diagnostics {
 		got = append(got, fmt.Sprintf("%s %s %d:%d", d.Severity, d.Rule, d.Position.Line, d.Position.Column))
 	}
-	if want := "warning conversion 51:29,warning conversion 124:16"; strings.Join(got, ",") != want {
+	if want := "warning conversion 51:29"; strings.Join(got, ",") != want {
 		t.Errorf("diagnostics = %v, want %s", res.Diagnostics, want)
 	}
 
