@@ -100,6 +100,17 @@ func TestGolden(t *testing.T) {
 				for _, f := range clientFiles {
 					files = append(files, File{Name: path.Join("client", f.Name), Content: f.Content})
 				}
+				// The command-line client, in cli, sending with it.
+				cliFiles, cliWarnings, err := CLI(model, Options{Name: filepath.Base(c.dir) + "ctl", Source: opts.Source, Title: opts.Title,
+					ClientPackage: "client", ClientImport: pkg + "/client", OperationsPackage: "api", OperationsImport: pkg + "/api",
+					ModelsPackage: "model", ModelsImport: pkg + "/model"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, f := range cliFiles {
+					files = append(files, File{Name: path.Join("cli", f.Name), Content: f.Content})
+				}
+				files = append(files, File{Name: "cli/warnings.txt", Content: []byte(strings.Join(append(cliWarnings, ""), "\n"))})
 			}
 			// The TypeScript of the model, in ts.
 			tsFiles, tsWarnings, err := TypeScript(model, TSOptions{Source: opts.Source})
@@ -125,13 +136,13 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// generatedFiles lists the files of dir and its api, model, client and ts directories
+// generatedFiles lists the files of dir and its api, model, client, cli and ts directories
 // that the generator owns, slash-separated and relative to dir: every .go
 // file except tests, plus warnings.txt and openapi.json.
 func generatedFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	var names []string
-	for _, sub := range []string{"", "api", "model", "client", "ts"} {
+	for _, sub := range []string{"", "api", "model", "client", "cli", "ts"} {
 		entries, err := os.ReadDir(filepath.Join(dir, sub))
 		if os.IsNotExist(err) && sub != "" {
 			continue

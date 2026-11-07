@@ -1,0 +1,86 @@
+{{- /*
+Templates of a command-line client: "cli" (main.go: the commands, the
+credentials of the security schemes, and main), and per command
+"command" (its description for the runtime of runtime/cli).
+*/ -}}
+
+{{/* "cli" gets Name, Summary, Client (the client's package name), HasServerURL, Commands and Schemes, and the *ir.Model's fields. */}}
+{{define "cli"}}
+// {{.Name}} is a command-line client of {{if .Summary}}{{.Summary}}{{else}}the API{{end}}: a command per
+// operation, sent with the generated client. Run {{.Name}} help for them.
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run runs the command of args, as main does.
+func run(args []string, stdout, stderr io.Writer) int {
+	return cli.Run(app, args, stdout, stderr)
+}
+
+var app = cli.App[*{{.Client}}.Client]{
+	Name:    {{quote .Name}},
+	Summary: {{quote (or .Summary "the API")}},
+{{- if .HasServerURL}}
+	Server:  {{.Client}}.DefaultServerURL,
+{{- end}}
+	Schemes: []cli.Scheme{
+{{- range .Schemes}}
+		{Flag: {{quote .Flag}}, Env: {{quote .Env}}, Help: {{quote .Help}}{{if .Basic}}, Basic: true{{end}}},
+{{- end}}
+	},
+	New:      newClient,
+	Commands: []cli.Command[*{{.Client}}.Client]{
+{{- range .Commands}}
+{{template "command" .}}
+{{- end}}
+	},
+}
+
+// newClient returns a client sending the credentials given.
+func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{.Client}}.Client, error) {
+{{- if .SecuritySchemes}}
+	var c {{.Client}}.Credentials
+{{- range .Schemes}}
+	if v, ok := creds[{{quote .Flag}}]; ok {
+{{- if .Basic}}
+		c.{{.Scheme.Method}} = func(context.Context) (string, string, error) { return v.User, v.Password, nil }
+{{- else}}
+		c.{{.Scheme.Method}} = func(context.Context) (string, error) { return v.Value, nil }
+{{- end}}
+	}
+{{- end}}
+	return {{.Client}}.New(c, opts...)
+{{- else}}
+	return {{.Client}}.New(opts...)
+{{- end}}
+}
+{{- end}}
+
+{{/* "command" gets a command: Operation (*ir.Operation), Name, Summary, Tag, Params, Media, BodyRequired and ContentType. */}}
+{{define "command"}}		{
+			Name: {{quote .Name}}, Summary: {{quote .Summary}}, Tag: {{quote .Tag}},
+			Request: func() any { return new({{opType .Operation.RequestType}}) },
+{{- if .Params}}
+			Params: []cli.Param{
+{{- range .Params}}
+				{Flag: {{quote .Flag}}, Field: {{quote .Field}}, In: {{quote .In}}, Name: {{quote .Name}}, Kind: {{.Kind}}{{if .Required}}, Required: true{{end}}{{if .Help}}, Help: {{quote .Help}}{{end}}},
+{{- end}}
+			},
+{{- end}}
+{{- if .Media}}
+			Media: []cli.Media{
+{{- range .Media}}
+				{MediaType: {{quote .MediaType}}, Kind: {{quote .Kind}}, Field: {{quote .Field}}{{if .Files}}, Files: []cli.File{ {{- range .Files}}{Flag: {{quote .Flag}}, Property: {{quote .Property}}, Field: {{quote .Field}}}, {{end -}} }{{end}}},
+{{- end}}
+			},
+{{- if .BodyRequired}}
+			BodyRequired: true,
+{{- end}}
+{{- if .ContentType}}
+			ContentType: {{quote .ContentType}},
+{{- end}}
+{{- end}}
+			Call: func(ctx context.Context, c *{{clientPackage}}.Client, req any) (any, error) {
+				return c.{{.Operation.Name}}(ctx, req.(*{{opType .Operation.RequestType}}))
+			},
+		},{{end}}
