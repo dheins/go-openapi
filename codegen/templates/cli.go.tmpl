@@ -36,8 +36,14 @@ var app = cli.App[*{{.Client}}.Client]{
 	},
 }
 
+// clientOptions configure the client of every command: a file of yours
+// in this package can add to them in an init function, such as the
+// codecs of media types the client needs (goapiclient.WithCodec).
+var clientOptions []goapiclient.Option
+
 // newClient returns a client sending the credentials given.
 func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{.Client}}.Client, error) {
+	opts = append(slices.Clone(clientOptions), opts...)
 {{- if .SecuritySchemes}}
 	var c {{.Client}}.Credentials
 {{- range .Schemes}}

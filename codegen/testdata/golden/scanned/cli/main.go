@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/scanned/api"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/scanned/client"
@@ -117,8 +118,14 @@ var app = cli.App[*client.Client]{
 	},
 }
 
+// clientOptions configure the client of every command: a file of yours
+// in this package can add to them in an init function, such as the
+// codecs of media types the client needs (goapiclient.WithCodec).
+var clientOptions []goapiclient.Option
+
 // newClient returns a client sending the credentials given.
 func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*client.Client, error) {
+	opts = append(slices.Clone(clientOptions), opts...)
 	var c client.Credentials
 	if v, ok := creds["api-key"]; ok {
 		c.APIKey = func(context.Context) (string, error) { return v.Value, nil }

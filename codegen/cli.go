@@ -69,6 +69,7 @@ func CLI(m *ir.Model, opts Options) ([]File, []string, error) {
 		f.imp("context", "context")
 		f.imp("io", "io")
 		f.imp("os", "os")
+		f.imp("slices", "slices")
 		f.imp(cliImport, "cli")
 		f.imp(clientImport, "goapiclient")
 		f.imp(opts.ClientImport, opts.ClientPackage)
