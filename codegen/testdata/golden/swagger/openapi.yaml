@@ -41,6 +41,27 @@ paths:
           collectionFormat: pipes
           items:
             type: string
+        - name: words
+          in: query
+          type: array
+          collectionFormat: tsv
+          items:
+            type: string
+        - name: grid
+          in: query
+          type: array
+          items:
+            type: array
+            collectionFormat: pipes
+            items:
+              type: integer
+              format: int32
+        - name: X-Tags
+          in: header
+          type: array
+          collectionFormat: tsv
+          items:
+            type: string
         - name: limit
           in: query
           type: integer

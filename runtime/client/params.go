@@ -76,7 +76,7 @@ func pathValue(p server.Param, v any) (string, error) {
 		}
 		return s, nil
 	case server.Array:
-		items, err := arrayItems(v)
+		items, err := arrayItems(v, p.ItemDelimiter)
 		if err != nil {
 			return "", err
 		}
@@ -99,7 +99,7 @@ func pathValue(p server.Param, v any) (string, error) {
 			}
 			return ";" + p.Name + "=" + strings.Join(items, ","), nil
 		}
-		return strings.Join(items, ","), nil
+		return strings.Join(items, url.PathEscape(p.Sep(","))), nil
 	}
 	fields, err := server.ObjectFields(v, false, oapi.Request)
 	if err != nil {
@@ -148,21 +148,21 @@ func queryValue(q url.Values, p server.Param, v any) error {
 		q.Add(p.Name, s)
 		return nil
 	case server.Array:
-		items, err := arrayItems(v)
+		items, err := arrayItems(v, p.ItemDelimiter)
 		if err != nil {
 			return err
 		}
 		switch {
 		case p.Style == "spaceDelimited":
-			q.Add(p.Name, strings.Join(items, " "))
+			q.Add(p.Name, strings.Join(items, p.Sep(" ")))
 		case p.Style == "pipeDelimited":
-			q.Add(p.Name, strings.Join(items, "|"))
+			q.Add(p.Name, strings.Join(items, p.Sep("|")))
 		case p.Explode:
 			for _, it := range items {
 				q.Add(p.Name, it)
 			}
 		default:
-			q.Add(p.Name, strings.Join(items, ","))
+			q.Add(p.Name, strings.Join(items, p.Sep(",")))
 		}
 		return nil
 	}
@@ -222,7 +222,11 @@ func simpleValue(p server.Param, v any, item func(string) string) (string, error
 	case server.Scalar:
 		return scalar(v)
 	case server.Array:
-		items, err := arrayItems(v)
+		items, err := arrayItems(v, p.ItemDelimiter)
+		if p.Delimiter != "" {
+			// Its own delimiter separates the items, not a header list.
+			return strings.Join(items, p.Delimiter), err
+		}
 		for i := range items {
 			items[i] = item(items[i])
 		}
@@ -262,7 +266,7 @@ func (r *Request) CookieParam(p server.Param, v any) {
 	add := func(name, value string) { r.cookies = append(r.cookies, &http.Cookie{Name: name, Value: value}) }
 	switch {
 	case p.Shape == server.Array && p.Explode:
-		items, err := arrayItems(v)
+		items, err := arrayItems(v, p.ItemDelimiter)
 		if err != nil {
 			r.fail(fmt.Errorf("cookie %q: %w", p.Name, err))
 			return
@@ -280,7 +284,7 @@ func (r *Request) CookieParam(p server.Param, v any) {
 			add(f.Name(), strings.Join(f.Values, ","))
 		}
 	default:
-		s, err := simpleValue(server.Param{Name: p.Name, Shape: p.Shape}, v, plainItem)
+		s, err := simpleValue(server.Param{Name: p.Name, Shape: p.Shape, Delimiter: p.Delimiter, ItemDelimiter: p.ItemDelimiter}, v, plainItem)
 		if err != nil {
 			r.fail(fmt.Errorf("cookie %q: %w", p.Name, err))
 			return
@@ -410,15 +414,25 @@ func scalar(v any) (string, error) {
 	return server.FormatScalar(v)
 }
 
-// arrayItems formats the items of a slice.
-func arrayItems(v any) ([]string, error) {
+// arrayItems formats the items of a slice; items that are slices too, with
+// their items separated by sep.
+func arrayItems(v any, sep string) ([]string, error) {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
 		return nil, fmt.Errorf("expected an array, got %T", v)
 	}
 	items := make([]string, rv.Len())
 	for i := range rv.Len() {
-		s, err := scalar(rv.Index(i).Interface())
+		item := rv.Index(i)
+		if sep != "" && item.Kind() == reflect.Slice {
+			inner, err := arrayItems(item.Interface(), "")
+			if err != nil {
+				return nil, err
+			}
+			items[i] = strings.Join(inner, sep)
+			continue
+		}
+		s, err := scalar(item.Interface())
 		if err != nil {
 			return nil, err
 		}

@@ -116,7 +116,7 @@ func TestConvert20Warnings(t *testing.T) {
       parameters:
         - {name: m, in: query, type: array, items: {type: array, collectionFormat: pipes, items: {type: string}}}
       responses: {"204": {description: ok}}`,
-			"7:84: collectionFormat pipes of nested items has no OpenAPI 3 equivalent; the items are read as csv"},
+			"7:84: collectionFormat pipes of nested items has no OpenAPI 3 equivalent; goapi reads it by x-goapi-collection-format, other tools as csv"},
 		{"multi header", `
   /a:
     get:
@@ -248,14 +248,14 @@ func TestLoadSwagger2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.SourceVersion != "2.0" || spec.Document.OpenAPI != convertedVersion {
+	if spec.SourceVersion != "2.0" || spec.Document.OpenAPI != Convert31 {
 		t.Errorf("versions: source %q, document %q", spec.SourceVersion, spec.Document.OpenAPI)
 	}
 	var notices []string
 	for _, n := range spec.Notices {
 		notices = append(notices, fmt.Sprintf("%s:%d:%d", filepath.Base(n.Location.File()), n.Position.Line, n.Position.Column))
 	}
-	if want := []string{"kitchen.yaml:51:29", "kitchen.yaml:124:16"}; strings.Join(notices, " ") != strings.Join(want, " ") {
+	if want := []string{"kitchen.yaml:51:29"}; strings.Join(notices, " ") != strings.Join(want, " ") {
 		t.Errorf("notices = %v, want %v", notices, want)
 	}
 	// Locations of decoded objects are 3.x pointers at 2.0 positions.
@@ -318,7 +318,44 @@ func TestLoadSwagger2MultiFile(t *testing.T) {
 // convertRoot converts the Swagger 2.0 document src alone, without
 // following references to other files, and returns its notices.
 func convertRoot(src *Source) []Notice {
-	c := newConverter(nil)
+	c := newConverter(nil, Convert31)
 	c.document(src.root, src.URI())
 	return c.notices
+}
+
+func TestOperationSchemes(t *testing.T) {
+	doc := func(host string) string {
+		return `swagger: "2.0"
+info: {title: t, version: "1"}
+` + host + `basePath: /v1
+schemes: [https, http]
+paths:
+  /a:
+    get: {schemes: [http], responses: {"200": {description: ok}}}
+  /b:
+    get: {schemes: [https, http], responses: {"200": {description: ok}}}
+`
+	}
+	spec, err := LoadBytes([]byte(doc("host: api.example.com\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := spec.Document.Paths.Items.Get("/a")
+	if len(a.Get.Servers) != 1 || a.Get.Servers[0].URL != "http://api.example.com/v1" {
+		t.Errorf("/a servers = %+v", a.Get.Servers)
+	}
+	// The document's own schemes need no servers of the operation.
+	b, _ := spec.Document.Paths.Items.Get("/b")
+	if len(b.Get.Servers) != 0 || len(spec.Notices) != 0 {
+		t.Errorf("/b servers = %+v, notices %v", b.Get.Servers, spec.Notices)
+	}
+	// Without a host, a scheme cannot be a server URL.
+	spec, err = LoadBytes([]byte(doc("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ = spec.Document.Paths.Items.Get("/a")
+	if len(a.Get.Servers) != 0 || len(spec.Notices) != 1 || !strings.Contains(spec.Notices[0].Message, "need the document's host") {
+		t.Errorf("without a host: servers %+v, notices %v", a.Get.Servers, spec.Notices)
+	}
 }

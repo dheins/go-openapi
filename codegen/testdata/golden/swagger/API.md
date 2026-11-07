@@ -48,6 +48,9 @@ HTTP `basic` authentication.
 | `tags` | query | array of string | no | explode: `false` |
 | `ids` | query | array of integer (int64) | no |  |
 | `fields` | query | array of string | no | style: `pipeDelimited` |
+| `words` | query | array of string | no | explode: `false` |
+| `grid` | query | array of array of integer (int32) | no | explode: `false` |
+| `X-Tags` | header | array of string | no |  |
 | `limit` | query | integer (int32) | no | minimum: `1`, maximum: `100`, default: `20` |
 | `X-Request-ID` | header | string | no |  |
 

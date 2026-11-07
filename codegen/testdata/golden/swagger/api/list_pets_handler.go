@@ -48,6 +48,33 @@ func HandleListPets(c *server.Config, h Handler, sec SecurityHandler) http.Handl
 				req.Fields = oapi.Some(v)
 			}
 		}
+		if vals, ok, err := listPetsWordsParam.QueryValues(query); err != nil {
+			b.Param("query", "words", err)
+		} else if ok {
+			if v, err := server.ParseArray[string](vals.Items); err != nil {
+				b.Param("query", "words", err)
+			} else {
+				req.Words = oapi.Some(v)
+			}
+		}
+		if vals, ok, err := listPetsGridParam.QueryValues(query); err != nil {
+			b.Param("query", "grid", err)
+		} else if ok {
+			if v, err := server.ParseNested[int32](vals.Items, "|"); err != nil {
+				b.Param("query", "grid", err)
+			} else {
+				req.Grid = oapi.Some(v)
+			}
+		}
+		if vals, ok, err := listPetsXTagsParam.HeaderValues(r.Header); err != nil {
+			b.Param("header", "X-Tags", err)
+		} else if ok {
+			if v, err := server.ParseArray[string](vals.Items); err != nil {
+				b.Param("header", "X-Tags", err)
+			} else {
+				req.XTags = oapi.Some(v)
+			}
+		}
 		if vals, ok, err := listPetsLimitParam.QueryValues(query); err != nil {
 			b.Param("query", "limit", err)
 		} else if ok {

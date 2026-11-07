@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
@@ -15,7 +16,7 @@ import (
 func get(t *testing.T, file string, ui server.UI, assets, target string) (*httptest.ResponseRecorder, string) {
 	t.Helper()
 	var stderr bytes.Buffer
-	h, err := serveHandler(file, ui, assets, &stderr)
+	h, err := serveHandler(file, ui, assets, loader.Convert31, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}

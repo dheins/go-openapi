@@ -140,6 +140,31 @@ count:
   x-go-json-string: true   # Count int64; {"count":"9007199254740993"}
 ```
 
+## `x-goapi-collection-format`
+
+On the schema of an array parameter, `csv`, `ssv`, `tsv` or `pipes`: how
+its items are separated when it is not exploded, instead of its style's
+delimiter; on the schema of its items, an array too, how their items are
+separated, which makes a parameter of arrays of arrays (`[][]T`).
+`goapi convert` and the loader write it for Swagger 2.0 `collectionFormat`
+values OpenAPI 3 has no style for: `tsv`, `ssv` and `pipes` outside a
+query, and the format of nested items. Generated servers, Go and
+TypeScript clients read and write it; other tools read the parameter as
+its style says (comma-separated), which the conversion warns about.
+
+```yaml
+- name: grid               # grid=1|2,3 is [][]int32{{1, 2}, {3}}
+  in: query
+  style: form
+  explode: false
+  schema:
+    type: array
+    items:
+      type: array
+      items: {type: integer, format: int32}
+      x-goapi-collection-format: pipes
+```
+
 ## `x-nullable`, `x-isnullable`
 
 On a schema, `true`: the value may be null, as 3.0's `nullable: true`

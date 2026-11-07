@@ -528,6 +528,12 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		if p.Content != "" {
 			s += fmt.Sprintf(", content: %q", p.ContentKind)
 		}
+		if p.Delimiter != "" {
+			s += ", delimiter: " + jsString(p.Delimiter)
+		}
+		if p.ItemDelimiter != "" {
+			s += ", itemDelimiter: " + jsString(p.ItemDelimiter)
+		}
 		if p.XML != nil {
 			s += ", xml: " + tsXMLNode(p.XML)
 		}

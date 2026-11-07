@@ -869,6 +869,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   comparing schemas.
 - *Not done*: see [features.md](../features.md).
 
+### M45 – Swagger 2.0 to 3.2 ✅
+- [x] `loader.WithConvertTo`, `goapi convert -version`, `-convert-to`:
+  2.0 converted to 3.2, with XML `nodeType` and `components.pathItems`
+- [x] operation `schemes` as operation `servers`
+- [x] `x-goapi-collection-format` for tsv and nested collection formats,
+  read and written by servers and Go and TypeScript clients
+
+**How it went**
+- *Same content, other fields*: a 3.2 conversion is the 3.1 one with the
+  fields 3.2 prefers; only XML's deprecated `attribute` and `wrapped`, and
+  where bundled path items go, differ.
+- *Warnings stay warnings*: conversion notices have one severity, and
+  other tools do read a kept collection format as csv, so they still
+  warn, saying goapi reads it.
+- *Found*: generated clients ignore operation-level `servers`; the
+  converted ones are right but unused, which features.md lists.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

@@ -42,6 +42,9 @@ type Spec struct {
 	// written is the root document as JSON before the 3.0 upgrade, for
 	// 3.0 documents only; root is still as written otherwise.
 	written []byte
+	// convertedTo is the version a Swagger 2.0 document was converted to,
+	// or "".
+	convertedTo string
 	// resources are the schema resources (the URI of their file or $id)
 	// schemas belong to, and dynamicAnchors the schemas with a
 	// $dynamicAnchor, by "resourceURI#name".
@@ -220,7 +223,16 @@ type config struct {
 	fetch   Fetcher
 	baseURI string
 	check   func(Fragment) error
+	// convertTo is the OpenAPI version Swagger 2.0 documents are
+	// converted to.
+	convertTo string
 }
+
+// Versions Swagger 2.0 documents can be converted to (WithConvertTo).
+const (
+	Convert31 = "3.1.0"
+	Convert32 = "3.2.0"
+)
 
 // Option configures loading.
 type Option func(*config)
@@ -245,8 +257,17 @@ func WithBaseURI(uri string) Option {
 	return func(c *config) { c.baseURI = uri }
 }
 
+// WithConvertTo sets the OpenAPI version Swagger 2.0 documents are
+// converted to: Convert31, the default, or Convert32, which writes XML
+// attributes and wrapped arrays as nodeType and puts path items of other
+// files in components.pathItems when the document is bundled. Loading
+// fails for another version.
+func WithConvertTo(version string) Option {
+	return func(c *config) { c.convertTo = version }
+}
+
 func newConfig(opts []Option) *config {
-	c := &config{fetch: FileFetcher}
+	c := &config{fetch: FileFetcher, convertTo: Convert31}
 	for _, o := range opts {
 		o(c)
 	}
@@ -297,7 +318,11 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 		resources:      make(map[*oas.Schema]string),
 		dynamicAnchors: make(map[string]*oas.Schema),
 	}
-	r := newResolver(spec, newConfig(opts))
+	cfg := newConfig(opts)
+	if cfg.convertTo != Convert31 && cfg.convertTo != Convert32 {
+		return nil, fmt.Errorf("cannot convert Swagger 2.0 documents to OpenAPI %q; use %s or %s", cfg.convertTo, Convert31, Convert32)
+	}
+	r := newResolver(spec, cfg)
 	r.addSource(src)
 
 	switch {
@@ -312,6 +337,7 @@ func LoadSource(src *Source, opts ...Option) (*Spec, error) {
 		// Bundle then returns the converted document: a 2.0 document with
 		// components added would be neither 2.0 nor 3.x.
 		r.converter().document(src.root, src.URI())
+		spec.convertedTo = cfg.convertTo
 	}
 	nullableExtensions(src.root)
 	var doc oas.Document
