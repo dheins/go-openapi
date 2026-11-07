@@ -13,8 +13,9 @@ import (
 )
 
 // runTemplates implements "templates": it writes the built-in templates
-// of the Go generators or of the TypeScript client, to copy the blocks to
-// override from into the directory -templates names.
+// of the Go generators, of the TypeScript client or of the Markdown
+// reference, to copy the blocks to override from into the directory
+// -templates names.
 func runTemplates(args []string, stdout, stderr io.Writer) int {
 	fail := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "goapi templates: "+format+"\n", a...)
@@ -23,7 +24,7 @@ func runTemplates(args []string, stdout, stderr io.Writer) int {
 	fset := flag.NewFlagSet("goapi templates", flag.ContinueOnError)
 	fset.SetOutput(stderr)
 	out := fset.String("out", "templates", "directory to write the templates to")
-	target := fset.String("target", "go", "templates of the Go generators (go) or of the TypeScript client (ts)")
+	target := fset.String("target", "go", "templates of the Go generators (go), of the TypeScript client (ts) or of the Markdown reference (markdown)")
 	if err := fset.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -39,15 +40,23 @@ func runTemplates(args []string, stdout, stderr io.Writer) int {
 		templates = codegen.GoTemplates()
 	case "ts":
 		templates = codegen.TSTemplates()
+	case "markdown":
+		templates = codegen.MarkdownTemplates()
 	default:
-		return fail("unknown target %q; use go or ts", *target)
+		return fail("unknown target %q; use go, ts or markdown", *target)
 	}
+	// The Markdown reference has no targets of goapi.yaml.
+	writeTargets := *target != "markdown"
 	files, err := fs.Glob(templates, "*.tmpl")
 	if err != nil {
 		return fail("%v", err)
 	}
 	// Edited copies are not overwritten.
-	for _, name := range append(files, codegen.TargetsFile) {
+	check := files
+	if writeTargets {
+		check = append(check, codegen.TargetsFile)
+	}
+	for _, name := range check {
 		if _, err := os.Stat(filepath.Join(*out, name)); err == nil {
 			return fail("%s exists; remove it or choose another -out", filepath.Join(*out, name))
 		}
@@ -65,6 +74,9 @@ func runTemplates(args []string, stdout, stderr io.Writer) int {
 			return fail("%v", err)
 		}
 		fmt.Fprintln(stdout, path)
+	}
+	if !writeTargets {
+		return exitOK
 	}
 	// An example of files of your own, all commented out, so that the
 	// directory still generates the same code.

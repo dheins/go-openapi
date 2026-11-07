@@ -20,6 +20,7 @@ its tests.
 - [Security](#security)
 - [Server options](#server-options)
 - [Documentation pages](#documentation-pages)
+- [Generate Markdown documentation](#generate-markdown-documentation)
 - [Generate a client](#generate-a-client)
 - [Generate a command-line client](#generate-a-command-line-client)
 - [Generate a TypeScript client](#generate-a-typescript-client)
@@ -1118,6 +1119,53 @@ says otherwise, until Ctrl+C. Errors in the document are printed, and a
 document that loads despite them is still served; one that cannot be
 loaded makes it exit with 1. `-assets` is `WithDocumentAssets`.
 
+## Generate Markdown documentation
+
+```sh
+goapi generate markdown openapi.yaml                    # API.md
+goapi generate markdown -out docs/pets.md -tags pets openapi.yaml
+goapi generate markdown -out - openapi.yaml | less
+```
+
+`goapi generate markdown` writes a document's reference as one Markdown
+file to commit next to it, such as `API.md` (`codegen.Markdown` from Go),
+which GitHub and other forges render. It describes the document as it
+states it, in its own terms rather than Go's, so it suits an API's users
+whatever they call it with:
+
+- **Overview:** title, version, summary, description, contact, license,
+  terms of service and the document's security, then a table of contents.
+- **Servers** with their variables, and **Authentication**: each security
+  scheme, its OAuth flows with their URLs and scopes.
+- **Operations**, under their first tag in the document's order of tags
+  (those without one under "Operations", or "Other operations" after
+  tagged ones), then **Webhooks**: method and path (or webhook name) and
+  summary as the heading, the description, the operation ID, the security
+  in force (alternatives with "or", `none` when anonymous access is
+  allowed), a table of parameters (with path-level ones), the request
+  body per media type, the responses with their headers and links, and
+  callbacks, each with the same parts.
+- **Schemas**: the component schemas, each with a table of properties
+  (those of inline objects and `allOf` members too, named `owner.name` and
+  `tags[].id`) and the variants of unions.
+
+Types read like `string (date-time)`, `array of [Pet](#pet)`,
+`map of integer`, `integer, nullable` or `one of Cat, Dog by kind`, and
+constraints by their keywords (`minLength: 1`, `enum: "a", "b"`,
+`default: 10`, `readOnly`); a parameter's style and explode are shown
+when they are not the defaults. Examples are those the document gives,
+in code blocks; none are made up from schemas. Every heading's anchor is
+the one GitHub gives it, so the links to schemas, schemes and linked
+operations work there; `-out -` writes to stdout.
+
+`-paths`, `-tags`, `-exclude-paths` and `-exclude-tags` describe some of
+the operations, as for clients; the schemas are all described. The text
+comes from `reference.md.tmpl`, whose blocks (`overview`, `operation`,
+`parameters`, `schema`, ...) `-templates` can replace, as for code
+([Custom templates](#custom-templates)); `goapi templates -target
+markdown` writes it. Its headings must keep their order, which the
+anchors of the data were given in.
+
 ## Validating hand-written handlers
 
 Without generating a server, `middleware.Validate` checks the requests
@@ -1869,13 +1917,15 @@ gives a typed client of the service the annotations describe.
 ```sh
 goapi templates -out templates             # the built-in Go templates, to copy from
 goapi templates -out ts-templates -target ts
+goapi templates -out md-templates -target markdown
 goapi generate model -templates my-templates openapi.yaml
 goapi generate ts-client -templates my-ts-templates openapi.yaml
 ```
 
 The generated code is written from Go templates, which a directory of
 your own can change: every `generate` command takes `-templates dir`
-(`codegen.Options.Templates` and `TSOptions.Templates` from Go). Its
+(`codegen.Options.Templates`, `TSOptions.Templates` and
+`MarkdownOptions.Templates` from Go). Its
 `*.tmpl` files are read after the built-in ones, so a
 `{{define "enum"}}` in them replaces the built-in `enum` block and
 nothing else; other blocks of yours may be helpers that your blocks call

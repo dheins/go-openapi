@@ -8,12 +8,13 @@
 //	goapi generate client [-out dir] [-package name] [-types import] file
 //	goapi generate cli [-out dir] [-name name] [-client import -types import] file
 //	goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
+//	goapi generate markdown [-out file] [-paths patterns] [-tags tags] file
 //	goapi convert [-out file] [-format yaml|json] file
 //	goapi diff [-format text|json] [-fail-on error|warning] old new
 //	goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused] file
 //	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
 //	goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
-//	goapi templates [-out dir] [-target go|ts]
+//	goapi templates [-out dir] [-target go|ts|markdown]
 //	goapi version
 package main
 
@@ -94,12 +95,13 @@ Usage:
   goapi generate client [-out dir] [-package name] [-types import] file
   goapi generate cli [-out dir] [-name name] [-client import -types import] file
   goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
+  goapi generate markdown [-out file] [-paths patterns] [-tags tags] file
   goapi convert [-out file] [-format yaml|json] file
   goapi diff [-format text|json] [-fail-on error|warning] old new
   goapi flatten [-out file] [-format yaml|json] [-hoist] [-remove-unused] file
   goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
   goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
-  goapi templates [-out dir] [-target go|ts]
+  goapi templates [-out dir] [-target go|ts|markdown]
   goapi version
 
 Commands:
@@ -109,6 +111,7 @@ Commands:
   generate client   generate the types and an HTTP client for a document
   generate cli      generate a command-line client for a document
   generate ts-client generate a TypeScript client for a document
+  generate markdown generate reference documentation of a document as Markdown
   convert           write a Swagger 2.0 document as OpenAPI 3.1
   diff              report the changes between two versions of a document
   flatten           write a document split over several files as one

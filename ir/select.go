@@ -25,9 +25,9 @@ type Selection struct {
 	Paths, Tags, ExcludePaths, ExcludeTags []string
 }
 
-// selects reports whether the selection keeps an operation of path (""
+// Selects reports whether the selection keeps an operation of path (""
 // for a webhook) with tags.
-func (s *Selection) selects(p string, tags []string) bool {
+func (s *Selection) Selects(p string, tags []string) bool {
 	hasTag := func(want []string) bool {
 		return slices.ContainsFunc(tags, func(t string) bool { return slices.Contains(want, t) })
 	}
@@ -89,7 +89,7 @@ func (b *builder) applySelection(sel *Selection) {
 			for _, t := range o.Tags {
 				known[t] = true
 			}
-			if sel.selects(path(o), o.Tags) {
+			if sel.Selects(path(o), o.Tags) {
 				kept = append(kept, o)
 			} else {
 				dropped = append(dropped, o.Location)

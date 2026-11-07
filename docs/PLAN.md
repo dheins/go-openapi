@@ -745,6 +745,23 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   test found; the generated `clientOptions` lets the program add them.
 - *Not done*: see [features.md](../features.md).
 
+### M38 – Markdown references ✅
+- [x] `codegen.Markdown`: a document's overview, servers, security
+  schemes, operations by tag, webhooks and schemas as one Markdown file,
+  from `reference.md.tmpl`
+- [x] `goapi generate markdown`, with the operation selection of clients,
+  and `goapi templates -target markdown`
+
+**How it went**
+- *From the document, not the model*: the `ir` model is in Go's terms
+  and leaves out what generators cannot handle; the reference describes
+  `oas` objects as written, with every operation.
+- *Anchors given in heading order*: links to schemas come before their
+  headings, so every heading's GitHub anchor is given while laying out
+  the data, in the template's order, and a test checks that each link of
+  the golden references finds its heading.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
