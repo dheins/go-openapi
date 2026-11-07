@@ -497,9 +497,10 @@ Your code uses all three: it implements `api.Handler` (with
 as `model.Pet`) and serves it with `gen.NewServer`. The packages import each
 other by the import path of `internal/gen`, found from the `go.mod` above
 it; pass `-import` when there is none. `-operations` and `-models` name the
-subdirectories and packages (default `api` and `model`); an empty
-`-models` puts the schema types with the operations, and an empty
-`-operations` puts those in the server package, so `-operations ""
+subdirectories and packages (default `api` and `model`), which may be
+paths such as `internal/api`, the package named after the last element;
+an empty `-models` puts the schema types with the operations, and an
+empty `-operations` puts those in the server package, so `-operations ""
 -models ""` gives the single package of v0.2.0.
 
 The `Handler` interface has one method per operation, and `NewServer`
@@ -1866,6 +1867,45 @@ A block of yours that is neither a built-in one nor used by another of
 yours is an error, which names the blocks there are, so a misspelt
 `{{define "strcut"}}` does not go unnoticed; so is text outside
 `{{define}}`. Errors in your templates name the file and line.
+
+### Files of your own
+
+A `goapi.yaml` next to the `*.tmpl` files adds files, written from
+blocks of yours, as go-swagger's generator config does (`goapi
+templates` writes an example):
+
+```yaml
+targets:
+  - template: repo                     # a {{define "repo"}} block of yours
+    scope: model                       # document, model or operation
+    path: "{{snake .Name}}_repo.go"    # a template, given the item
+    package: internal/repo             # optional: a directory below -out
+    when: '{{eq (kind .) "struct"}}'   # optional: written when it renders true
+  - template: readme
+    scope: document
+    path: README.md
+```
+
+- **Scope:** `document` writes one file, given the `*ir.Model`; `model`
+  one per component (its root `*ir.Type`, as `model.go` files are
+  written); `operation` one per operation (`*ir.Operation`), for
+  `generate server`, `client` and `ts-client`.
+- **Path:** a `.go` file is Go source of its package: it gets the
+  generated header, the package clause, the imports of `imp` and gofmt,
+  so the block writes declarations only. Other files (`.md`, `.sql`,
+  `.proto`, `.ts`, ...) are written as the block renders them, and may
+  be in subdirectories. A path outside `-out`, or one written twice (by
+  a target or a generated file), is an error.
+- **Package:** a generated package's directory (`api`, `model`), or one
+  of the target's own, imported below `-out` (from its `go.mod`, or
+  `-import`); in it `goType` and `modelType .` give `model.Pet`. For
+  TypeScript it is a subdirectory.
+- **Functions:** those of the built-in blocks, and `snake`, `camel`,
+  `pascal`, `lower` and `upper` for names, in blocks and paths alike;
+  `modelType` names a schema type for the target's package.
+
+A target's block must be defined, and must not be named like a built-in
+block, which its definition would replace.
 
 Custom templates are **experimental**: the data blocks are given, the
 `ir` types, may change in a minor release, which the CHANGELOG says. A

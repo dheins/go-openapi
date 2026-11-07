@@ -710,6 +710,23 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   server stops at type errors).
 - *Not done*: see [features.md](../features.md).
 
+### M36 – Template targets ✅
+- [x] `-operations` and `-models` take nested paths
+- [x] `goapi.yaml` targets: files of your own per document, model or
+  operation, in generated packages or packages of their own
+- [x] The same for TypeScript clients
+
+**How it went**
+- *One generator per directory*: a templates directory is parsed with one
+  generator's functions, so its targets are that generator's; no field
+  says which.
+- *Go files are Go*: a `.go` target gets the package clause, imports and
+  gofmt like the built-in files, and must stay in its package's
+  directory; other files are written as rendered.
+- *Names matter*: a target named like a built-in block would replace it,
+  so that is an error, as an undefined block is.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
