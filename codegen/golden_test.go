@@ -121,6 +121,12 @@ func TestGolden(t *testing.T) {
 				files = append(files, File{Name: path.Join("ts", f.Name), Content: f.Content})
 			}
 			files = append(files, File{Name: "ts/warnings.txt", Content: []byte(strings.Join(append(tsWarnings, ""), "\n"))})
+			// The Markdown reference, of the whole document.
+			md, err := Markdown(res.Spec.Document, MarkdownOptions{Source: opts.Source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			files = append(files, File{Name: "API.md", Content: md})
 			var warnings bytes.Buffer
 			for _, w := range model.Warnings {
 				fmt.Fprintf(&warnings, "%d:%d: %s\n", w.Position.Line, w.Position.Column, w.Message)
@@ -138,7 +144,7 @@ func TestGolden(t *testing.T) {
 
 // generatedFiles lists the files of dir and its api, model, client, cli and ts directories
 // that the generator owns, slash-separated and relative to dir: every .go
-// file except tests, plus warnings.txt and openapi.json.
+// file except tests, plus warnings.txt, openapi.json and API.md.
 func generatedFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	var names []string
@@ -154,7 +160,7 @@ func generatedFiles(t *testing.T, dir string) []string {
 			n := e.Name()
 			goFile := strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go")
 			tsFile := strings.HasSuffix(n, ".ts") && !strings.HasSuffix(n, ".test.ts")
-			if !e.IsDir() && (n == "warnings.txt" || n == "openapi.json" || goFile || tsFile) {
+			if !e.IsDir() && (n == "warnings.txt" || n == "openapi.json" || n == "API.md" || goFile || tsFile) {
 				names = append(names, path.Join(sub, n))
 			}
 		}
