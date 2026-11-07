@@ -11,7 +11,9 @@ import (
 )
 
 // DefaultServerURL is the URL of the document's first server. New sends
-// requests to it unless client.WithBaseURL says otherwise.
+// requests to it unless client.WithBaseURL says otherwise; operations with
+// servers of their own go to those while it is used (see
+// client.WithOperationServers).
 const DefaultServerURL = "https://pets.example.com/v1"
 
 // Credentials are the credentials the client sends, one per security
@@ -34,7 +36,7 @@ type Client struct {
 
 // New returns a client sending creds, configured by opts.
 func New(creds Credentials, opts ...client.Option) (*Client, error) {
-	cfg, err := client.NewConfig(append([]client.Option{client.WithBaseURL(DefaultServerURL)}, opts...)...)
+	cfg, err := client.NewConfig(append([]client.Option{client.WithDefaultBaseURL(DefaultServerURL)}, opts...)...)
 	if err != nil {
 		return nil, err
 	}

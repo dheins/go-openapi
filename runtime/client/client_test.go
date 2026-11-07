@@ -202,6 +202,49 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+func TestOperationServers(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		opts   []Option
+		server string
+		want   string
+	}{
+		{"default base, absolute", []Option{WithDefaultBaseURL("https://api.example.com/v1")}, "http://other.example.com/v2", "http://other.example.com/v2/pets"},
+		{"default base, relative", []Option{WithDefaultBaseURL("https://api.example.com/v1")}, "/v2", "https://api.example.com/v2/pets"},
+		{"own base", []Option{WithDefaultBaseURL("https://api.example.com/v1"), WithBaseURL("http://localhost:8080/v1")}, "/v2", "http://localhost:8080/v1/pets"},
+		{"own base, forced on", []Option{WithBaseURL("http://localhost:8080/v1"), WithOperationServers(true)}, "/v2", "http://localhost:8080/v2/pets"},
+		{"default base, forced off", []Option{WithDefaultBaseURL("https://api.example.com/v1"), WithOperationServers(false)}, "/v2", "https://api.example.com/v1/pets"},
+		{"no server of its own", []Option{WithDefaultBaseURL("https://api.example.com/v1")}, "", "https://api.example.com/v1/pets"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := NewConfig(tc.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := NewRequest("GET")
+			r.Server(tc.server)
+			r.Path("/pets")
+			req, err := c.Build(ctx, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := req.URL.String(); got != tc.want {
+				t.Errorf("url = %s, want %s", got, tc.want)
+			}
+		})
+	}
+	c, err := NewConfig(WithDefaultBaseURL("https://api.example.com/v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewRequest("GET")
+	r.Server("http://bad host/")
+	if _, err := c.Build(ctx, r); err == nil {
+		t.Error("an unparsable operation server")
+	}
+}
+
 func TestBodiesRoundTrip(t *testing.T) {
 	// A form with nested objects and arrays reads back as sent.
 	r := NewRequest("POST")

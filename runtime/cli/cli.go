@@ -155,11 +155,13 @@ func Run[C any](app App[C], args []string, stdout, stderr io.Writer) int {
 	if server == "" {
 		server = os.Getenv(app.env("SERVER"))
 	}
+	base := client.WithBaseURL(server)
 	if server == "" {
-		server = app.Server
+		// The document's server, whose operations' own servers apply.
+		base = client.WithDefaultBaseURL(app.Server)
 	}
 	capture := &captured{}
-	opts := []client.Option{client.WithBaseURL(server), client.WithMiddleware(capture.middleware)}
+	opts := []client.Option{base, client.WithMiddleware(capture.middleware)}
 	for _, h := range g.headers {
 		name, value, ok := strings.Cut(h, ":")
 		if !ok {

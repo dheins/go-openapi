@@ -341,6 +341,53 @@ paths:
 	}
 }
 
+func TestOperationServerURL(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+servers:
+  - url: https://api.example.com/v1/
+paths:
+  /a:
+    servers:
+      - url: https://{region}.example.com/v1
+        variables:
+          region: {default: eu}
+    get:
+      operationId: pathServer
+      responses: {"204": {description: ok}}
+    post:
+      operationId: ownServer
+      servers:
+        - url: /v2
+      responses: {"204": {description: ok}}
+  /b:
+    get:
+      operationId: documentServer
+      servers:
+        - url: https://api.example.com/v1
+      responses: {"204": {description: ok}}
+    post:
+      operationId: noServer
+      responses: {"204": {description: ok}}
+`, Options{Operations: true})
+	for name, want := range map[string]string{"PathServer": "https://eu.example.com/v1", "OwnServer": "/v2", "DocumentServer": "", "NoServer": ""} {
+		if got := operationNamed(t, m, name).ServerURL; got != want {
+			t.Errorf("%s: ServerURL = %q, want %q", name, got, want)
+		}
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Location.Pointer+": "+w.Message)
+	}
+	want := []string{
+		"/paths/~1a/post/servers: operation-level servers with another base path than the document's are not used by the generated server; generated clients send to them",
+		"/paths/~1a/servers: path-level servers are not used by the generated server; generated clients send to them",
+	}
+	if !slices.Equal(warnings, want) {
+		t.Errorf("warnings = %q", warnings)
+	}
+}
+
 func TestNamedArrayParameterKeepsChecks(t *testing.T) {
 	m := build(t, `openapi: 3.2.0
 info: {title: t, version: v}

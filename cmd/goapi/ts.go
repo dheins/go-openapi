@@ -66,6 +66,9 @@ func runGenerateTS(args []string, stdout, stderr io.Writer) int {
 	}
 	model := ir.Build(res.Spec, opts)
 	for _, w := range model.Warnings {
+		if w.ServerOnly {
+			continue
+		}
 		where := w.Location.File()
 		if w.Position.IsValid() {
 			where = fmt.Sprintf("%s:%d:%d", where, w.Position.Line, w.Position.Column)

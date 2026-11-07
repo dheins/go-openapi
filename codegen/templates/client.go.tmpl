@@ -14,7 +14,9 @@ the client package.
 {{define "client"}}
 {{- if .ServerURL}}
 // DefaultServerURL is the URL of the document's first server. New sends
-// requests to it unless client.WithBaseURL says otherwise.
+// requests to it unless client.WithBaseURL says otherwise; operations with
+// servers of their own go to those while it is used (see
+// client.WithOperationServers).
 const DefaultServerURL = {{quote .ServerURL}}
 {{- end}}
 {{- if .SecuritySchemes}}
@@ -45,7 +47,7 @@ type Client struct {
 // has no absolute server URL, so client.WithBaseURL is required.{{end}}
 func New({{if .SecuritySchemes}}creds Credentials, {{end}}opts ...client.Option) (*Client, error) {
 {{- if .ServerURL}}
-	cfg, err := client.NewConfig(append([]client.Option{client.WithBaseURL(DefaultServerURL)}, opts...)...)
+	cfg, err := client.NewConfig(append([]client.Option{client.WithDefaultBaseURL(DefaultServerURL)}, opts...)...)
 {{- else}}
 	cfg, err := client.NewConfig(opts...)
 {{- end}}

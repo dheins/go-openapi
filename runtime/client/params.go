@@ -29,7 +29,9 @@ type Request struct {
 	stream      func(io.Writer) error
 	contentType string
 	accept      []string
-	err         error
+	// server is the operation's own server URL, or "".
+	server string
+	err    error
 }
 
 // NewRequest starts a request with the given method.
@@ -48,6 +50,11 @@ func (r *Request) Path(text string) { r.path.WriteString(text) }
 
 // Accept sets the media types the response may have.
 func (r *Request) Accept(mediaTypes ...string) { r.accept = mediaTypes }
+
+// Server sets the operation's own server URL, absolute or relative to the
+// base URL, which Config.Build sends to when Config.OperationServers is
+// set.
+func (r *Request) Server(url string) { r.server = url }
 
 // PathParam appends the value v of path parameter p, in its style
 // (simple, label or matrix), escaped.

@@ -94,6 +94,43 @@ func unexpected(t *testing.T, err error, status int) *client.UnexpectedResponse 
 	return u
 }
 
+// TestClientOperationServers checks where operations with servers of
+// their own (a path's for Public, an operation's relative one for Secure)
+// are sent.
+func TestClientOperationServers(t *testing.T) {
+	ctx := context.Background()
+	var sent []string
+	record := client.WithDoer(client.DoerFunc(func(r *http.Request) (*http.Response, error) {
+		sent = append(sent, r.URL.String())
+		return &http.Response{StatusCode: 204, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+	}))
+	for _, tc := range []struct {
+		name string
+		opts []client.Option
+		want []string
+	}{
+		{"document's server", nil, []string{"https://public.example.com/v1/public", "https://api.example.com/v2/secure", "https://api.example.com/v1/pets/1"}},
+		{"own base URL", []client.Option{client.WithBaseURL("http://localhost:8080/v1")}, []string{"http://localhost:8080/v1/public", "http://localhost:8080/v1/secure", "http://localhost:8080/v1/pets/1"}},
+		{"own base URL, operation servers", []client.Option{client.WithBaseURL("http://localhost:8080/v1"), client.WithOperationServers(true)}, []string{"https://public.example.com/v1/public", "http://localhost:8080/v2/secure", "http://localhost:8080/v1/pets/1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent = nil
+			c, err := newClient(petclient.Credentials{APIKey: token("good")}, append([]client.Option{record}, tc.opts...)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Only where the requests go is checked: the recorded 204 is
+			// not every operation's response.
+			_, _ = c.Public(ctx, nil)
+			_, _ = c.Secure(ctx, nil)
+			_, _ = c.DeletePet(ctx, &api.DeletePetRequest{PetID: 1})
+			if !slices.Equal(sent, tc.want) {
+				t.Errorf("sent to %q, want %q", sent, tc.want)
+			}
+		})
+	}
+}
+
 func TestClientParameters(t *testing.T) {
 	ctx := context.Background()
 	s, c := newTestClient(t, petclient.Credentials{})

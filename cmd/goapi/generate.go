@@ -167,6 +167,9 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	}
 	model := ir.Build(res.Spec, irOpts)
 	for _, w := range model.Warnings {
+		if w.ServerOnly && (target == "client" || target == "cli") {
+			continue
+		}
 		where := w.Location.File()
 		if w.Position.IsValid() {
 			where = fmt.Sprintf("%s:%d:%d", where, w.Position.Line, w.Position.Column)

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/dheins/go-openapi/oapi"
+	"github.com/dheins/go-openapi/runtime/client"
 )
 
 type color string
@@ -128,5 +129,45 @@ func TestPrint(t *testing.T) {
 	}}
 	if err := print(resp, &captured{}, &out); err == nil || err.Error() != "cut off" || out.String() != "{\"n\":0}\n{\"n\":1}\n{\"n\":2}\n" {
 		t.Errorf("stream: %q %v", out.String(), err)
+	}
+}
+
+// TestServer checks that the document's server keeps operations' own
+// servers in use, and that -server or the environment replaces both.
+func TestServer(t *testing.T) {
+	errStop := errors.New("stop")
+	for _, tc := range []struct {
+		name, env string
+		args      []string
+		base      string
+		opServers bool
+	}{
+		{"default", "", nil, "https://api.example.com/v1", true},
+		{"flag", "", []string{"-server", "http://localhost:8080/v1"}, "http://localhost:8080/v1", false},
+		{"environment", "http://env.example.com/v1", nil, "http://env.example.com/v1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PETS_SERVER", tc.env)
+			var cfg *client.Config
+			app := App[struct{}]{
+				Name:     "pets",
+				Server:   "https://api.example.com/v1",
+				Commands: []Command[struct{}]{{Name: "ping", Request: func() any { return &struct{}{} }}},
+				New: func(_ map[string]Credential, opts ...client.Option) (struct{}, error) {
+					var err error
+					if cfg, err = client.NewConfig(opts...); err != nil {
+						return struct{}{}, err
+					}
+					return struct{}{}, errStop
+				},
+			}
+			var stderr bytes.Buffer
+			if code := Run(app, append([]string{"ping"}, tc.args...), &bytes.Buffer{}, &stderr); code != ExitFailure || !strings.Contains(stderr.String(), "stop") {
+				t.Fatalf("exit code %d: %s", code, &stderr)
+			}
+			if cfg.BaseURL.String() != tc.base || cfg.OperationServers != tc.opServers {
+				t.Errorf("base URL %s, operation servers %v", cfg.BaseURL, cfg.OperationServers)
+			}
+		})
 	}
 }

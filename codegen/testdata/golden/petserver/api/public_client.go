@@ -9,10 +9,15 @@ import (
 	"github.com/dheins/go-openapi/runtime/client"
 )
 
+// PublicServerURL is the server of Public, which clients send it to while
+// they use the document's server.
+const PublicServerURL = "https://public.example.com/v1"
+
 // NewPublicRequest builds the HTTP request of Public, GET /public, to send
 // with c.
 func NewPublicRequest(ctx context.Context, c *client.Config, req *PublicRequest) (*http.Request, error) {
 	r := client.NewRequest("GET")
+	r.Server(PublicServerURL)
 	r.Path("/public")
 	return c.Build(ctx, r)
 }
