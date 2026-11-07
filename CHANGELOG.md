@@ -4,6 +4,11 @@
 
 ### Added
 
+- `goapi diff` compares `prefixItems`, `not`, `if`/`then`/`else`,
+  `patternProperties`, `dependentSchemas`, `dependentRequired`,
+  `propertyNames` and `contains` (rules `allof-changed`,
+  `exclusion-changed`, `condition-changed`, `pattern-properties-changed`,
+  `dependency-changed`), and pairs `allOf` members by what they are.
 - Generic schemas: `$dynamicRef` is resolved within its dynamic scope
   (`loader.Spec.Resource`, `Spec.ResolveDynamic`), so schemas that
   specialise a template by `$dynamicAnchor` get types of their own in Go

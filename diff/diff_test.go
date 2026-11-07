@@ -641,3 +641,82 @@ func TestServersSecurityAndCallbacks(t *testing.T) {
 		"info callback-added: GET /pets: callback onDone was added",
 	)
 }
+
+func TestAllOfAndTuples(t *testing.T) {
+	cat, dog, bird := `{$ref: "#/components/schemas/Cat"}`, `{$ref: "#/components/schemas/Dog"}`, `{$ref: "#/components/schemas/Bird"}`
+	// Reordered members are the same ones.
+	expect(t, changes(t, union("{allOf: ["+cat+", "+dog+"]}"), union("{allOf: ["+dog+", "+cat+"]}")))
+	expect(t, changes(t, union("{allOf: ["+cat+", "+dog+"]}"), union("{allOf: ["+bird+", "+cat+"]}")),
+		"warning allof-changed: GET /pets: response 200 application/json: allOf member Dog was removed",
+		"info allof-changed: GET /pets: response 200 application/json: allOf member Bird was added",
+		"info allof-changed: POST /pets: request body application/json: allOf member Dog was removed",
+		"error allof-changed: POST /pets: request body application/json: allOf member Bird was added",
+	)
+	// A tuple grows where items were any value, and shrinks where they
+	// are not allowed.
+	expect(t, changes(t, union("{type: array, prefixItems: [{type: string}]}"), union("{type: array, prefixItems: [{type: string}, {type: integer}]}")),
+		"info variants-changed: GET /pets: response 200 application/json/prefixItems/1: fewer values are accepted now",
+		"error variants-changed: POST /pets: request body application/json/prefixItems/1: fewer values are accepted now",
+	)
+	expect(t, changes(t, union("{type: array, prefixItems: [{type: string}, {type: integer}], items: false}"), union("{type: array, prefixItems: [{type: string}], items: false}")),
+		"info variants-changed: GET /pets: response 200 application/json/prefixItems/1: fewer values are accepted now",
+		"error variants-changed: POST /pets: request body application/json/prefixItems/1: fewer values are accepted now",
+	)
+	// Where items has a schema, the new position is compared with it.
+	expect(t, changes(t, union("{type: array, prefixItems: [{type: string}], items: {type: integer}}"), union("{type: array, prefixItems: [{type: string}, {type: integer, maximum: 5}], items: {type: integer}}")),
+		"error constraint-tightened: POST /pets: request body application/json/prefixItems/1: maximum 5 was added",
+	)
+}
+
+func TestConditionsAndExclusions(t *testing.T) {
+	str := func(extra string) string { return "{type: string" + extra + "}" }
+	expect(t, changes(t, union(str("")), union(str(", not: {const: x}"))),
+		"info exclusion-changed: GET /pets: response 200 application/json: not was added, excluding values",
+		"error exclusion-changed: POST /pets: request body application/json: not was added, excluding values",
+	)
+	expect(t, changes(t, union(str(", not: {const: x}")), union(str(", not: {const: y}"))),
+		"warning exclusion-changed: GET /pets: response 200 application/json: the values not excludes changed",
+		"warning exclusion-changed: POST /pets: request body application/json: the values not excludes changed",
+	)
+	cond := func(then string) string {
+		return "{type: object, if: {required: [a]}, then: " + then + "}"
+	}
+	expect(t, changes(t, union(cond("{required: [b]}")), union(cond("{required: [b], maxProperties: 3}"))),
+		"error constraint-tightened: POST /pets: request body application/json/then: maxProperties 3 was added",
+	)
+	expect(t, changes(t, union(cond("{required: [b]}")), union("{type: object, if: {required: [c]}, then: {required: [b]}}")),
+		"warning condition-changed: GET /pets: response 200 application/json: the condition (if) changed",
+		"warning condition-changed: POST /pets: request body application/json: the condition (if) changed",
+	)
+	expect(t, changes(t, union(cond("{required: [b]}")), union("{type: object}")),
+		"warning condition-changed: GET /pets: response 200 application/json: the conditional constraints (if) were removed",
+		"info condition-changed: POST /pets: request body application/json: the conditional constraints (if) were removed",
+	)
+}
+
+func TestPatternsAndDependencies(t *testing.T) {
+	expect(t, changes(t,
+		union(`{type: object, patternProperties: {"^x-": {type: string}, "^y-": {type: string}}, dependentSchemas: {a: {required: [b]}}, dependentRequired: {c: [d]}, propertyNames: {maxLength: 10}}`),
+		union(`{type: object, patternProperties: {"^x-": {type: string, maxLength: 3}, "^z-": {type: string}}, dependentRequired: {c: [d, e]}, propertyNames: {maxLength: 20}}`)),
+		"warning pattern-properties-changed: GET /pets: response 200 application/json/patternProperties/^y-: removed",
+		"info pattern-properties-changed: GET /pets: response 200 application/json/patternProperties/^z-: added",
+		"warning dependency-changed: GET /pets: response 200 application/json/dependentSchemas/a: removed",
+		`info dependency-changed: GET /pets: response 200 application/json/dependentRequired/c: "e" is required with it now`,
+		"warning constraint-loosened: GET /pets: response 200 application/json/propertyNames: maxLength is 20 instead of 10",
+		"error constraint-tightened: POST /pets: request body application/json/patternProperties/^x-: maxLength 3 was added",
+		"info pattern-properties-changed: POST /pets: request body application/json/patternProperties/^y-: removed",
+		"error pattern-properties-changed: POST /pets: request body application/json/patternProperties/^z-: added",
+		"info dependency-changed: POST /pets: request body application/json/dependentSchemas/a: removed",
+		`error dependency-changed: POST /pets: request body application/json/dependentRequired/c: "e" is required with it now`,
+	)
+	// contains, and its counts.
+	expect(t, changes(t, union("{type: array, contains: {type: string}, minContains: 1}"), union("{type: array, contains: {type: string, minLength: 2}, minContains: 2}")),
+		"error constraint-tightened: POST /pets: request body application/json: minContains is 2 instead of 1",
+		"error constraint-tightened: POST /pets: request body application/json/contains: minLength 2 was added",
+	)
+	// For servers, the sides swap.
+	expect(t, changesFor(t, Servers, union("{allOf: [{type: object}]}"), union("{allOf: [{type: object}, {required: [id]}]}")),
+		"error allof-changed: GET /pets: response 200 application/json: allOf member #1 was added",
+		"info allof-changed: POST /pets: request body application/json: allOf member #1 was added",
+	)
+}

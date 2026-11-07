@@ -264,10 +264,11 @@ expression and method; links by name. Schemas are compared after
 following references, by which way their values go: what a client sends
 may only be accepted more widely, what it receives only more narrowly.
 Parameters and headers are text, so a number becoming a string is not a
-change for them. The alternatives of `oneOf` and `anyOf` are paired by
-what they are, not where: by the discriminator value leading to them,
-else the component they refer to, else the most alike inline ones, so
-reordering them is no change.
+change for them. The alternatives of `oneOf` and `anyOf`, and the
+members of `allOf`, are paired by what they are, not where: by the
+discriminator value leading to them, else the component they refer to,
+else the most alike inline ones, so reordering them is no change. Tuples
+(`prefixItems`) are compared position by position.
 
 | | error | warning | info |
 |---|---|---|---|
@@ -284,6 +285,7 @@ reordering them is no change.
 | Discriminators | property name changed; a value removed from what a client sends | a value added to what it receives | other values |
 | Defaults | | added, removed or changed | |
 | Examples | | | added, removed or changed |
+| `allOf`, `not`, `if`, `patternProperties`, `dependentSchemas`, `dependentRequired`, `propertyNames`, `contains`, tuple positions | what a client sends: added, constraining it further | what it receives: removed, allowing more; `not` or `if` changed | the rest |
 
 **Servers.** `-for server` (`diff.DocumentsFor(old, new,
 diff.Options{For: diff.Servers})`) judges the changes for a server

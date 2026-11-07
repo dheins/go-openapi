@@ -125,9 +125,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - `goapi flatten -expand`: references into or out of schemas with an
   `$id`, and the `$dynamicRef`s inside them, which the dynamic scope
   redirects, expanded too (they are kept). — later
-- `goapi diff`: `allOf` members are compared by position, and
-  `prefixItems`, `if`/`then`/`else`, `not`, `patternProperties` and
-  `dependentSchemas` are not compared. — later
+- `goapi diff`: what a changed `not` or `if` excludes or selects is not
+  worked out (it is a warning), nor are `unevaluatedProperties`,
+  `unevaluatedItems` and `contentSchema` compared. — later
 
 ## Logging and telemetry
 
@@ -142,6 +142,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi diff`: `allOf` members paired by what they are, and tuples,
+  `not`, `if`/`then`/`else`, `patternProperties`, `dependentSchemas`,
+  `dependentRequired`, `propertyNames` and `contains` compared. (f6296dd)
 - [x] `$dynamicRef` resolved within its dynamic scope: schemas
   specialising a generic template by `$dynamicAnchor` are types of their
   own, and `goapi scan` writes Go generics as templates and instances.
