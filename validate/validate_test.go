@@ -299,6 +299,10 @@ func TestSemanticRules(t *testing.T) {
 		// A lookahead is valid ECMA-262; an unclosed group or set is not.
 		{RulePattern, 118, "pattern is not a valid regular expression"},
 		{RulePattern, 120, "pattern is not a valid regular expression"},
+		// A whole value is an expression in OpenAPI; "$5" is not one.
+		{RuleLinkNested, 126, `"$response.body#/name" is an expression inside a value`},
+		{RuleLinkNested, 126, `"for {$url}" is an expression inside a value`},
+		{RuleLinkNested, 126, `"$statusCode" is an expression inside a value`},
 	})
 }
 

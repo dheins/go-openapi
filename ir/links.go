@@ -1,8 +1,10 @@
 package ir
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,15 +54,43 @@ type LinkValue struct {
 	Pointer      string
 	// Parts, if not nil, make the value text with expressions embedded in
 	// it ("pets/{$response.body#/id}"): the text and the values in it,
-	// in order, given to a scalar parameter.
+	// in order. Given to an array, object or body, the text is read as
+	// JSON or, for a parameter, as its style writes it.
 	Parts []URLPart
+	// Fills are the members of Const, an object or array, that are
+	// expressions or text with expressions embedded, which goapi fills in
+	// (OpenAPI makes only a whole value an expression).
+	Fills []*LinkFill
+}
+
+// LinkFill is a member of a link's constant that is filled in from the
+// response or request.
+type LinkFill struct {
+	// Pointer is the member's JSON pointer in the constant, and Item says
+	// it is an item of an array rather than a property of an object.
+	Pointer string
+	Item    bool
+	// Value is the member's value: an expression, or text with
+	// expressions embedded, with neither Param nor Fills.
+	Value *LinkValue
+}
+
+// sources returns v and the values of its fills.
+func (v *LinkValue) sources() []*LinkValue {
+	out := []*LinkValue{v}
+	for _, f := range v.Fills {
+		out = append(out, f.Value)
+	}
+	return out
 }
 
 // NeedsURL says a value of l is, or has, the URL of the request the
 // link's response answers ($url).
 func (l *Link) NeedsURL() bool {
 	return slices.ContainsFunc(l.Values, func(v *LinkValue) bool {
-		return v.URL || slices.ContainsFunc(v.Parts, func(p URLPart) bool { return p.URL })
+		return slices.ContainsFunc(v.sources(), func(v *LinkValue) bool {
+			return v.URL || slices.ContainsFunc(v.Parts, func(p URLPart) bool { return p.URL })
+		})
 	})
 }
 
@@ -117,13 +147,15 @@ func linkFits(link *Link, v *Response) bool {
 	fits := func(body bool, header string) bool {
 		return !(body && (v.Body == nil || v.Kind != "json" && v.Kind != "xml")) && (header == "" || v.Header(header) != nil)
 	}
-	for _, lv := range link.Values {
-		if !fits(lv.ResponseBody, lv.Header) {
-			return false
-		}
-		for _, p := range lv.Parts {
-			if !fits(p.ResponseBody, p.Header) {
+	for _, top := range link.Values {
+		for _, lv := range top.sources() {
+			if !fits(lv.ResponseBody, lv.Header) {
 				return false
+			}
+			for _, p := range lv.Parts {
+				if !fits(p.ResponseBody, p.Header) {
+					return false
+				}
 			}
 		}
 	}
@@ -179,9 +211,6 @@ func (b *builder) link(name string, l *oas.Link, pl pendingLinks, byID map[strin
 		if why != "" {
 			return nil, fmt.Sprintf("parameter %s: %s", key, why)
 		}
-		if v.Parts != nil && (p.Array || p.Object) {
-			return nil, fmt.Sprintf("parameter %s: an expression embedded in text gives text, which %s is not", key, p.Name)
-		}
 		v.Param = p
 		link.Values = append(link.Values, v)
 	}
@@ -192,9 +221,6 @@ func (b *builder) link(name string, l *oas.Link, pl pendingLinks, byID map[strin
 		v, why := linkValue(l.RequestBody, pl.answers, pl.variants)
 		if why != "" {
 			return nil, "requestBody: " + why
-		}
-		if v.Parts != nil {
-			return nil, "requestBody: an expression embedded in text gives text, which a body is not"
 		}
 		link.Values = append(link.Values, v)
 	}
@@ -227,17 +253,25 @@ func linkParam(target *Operation, key string) (*Param, string) {
 // linkValue maps the value of a link's parameter or body: JSON, of which
 // a string starting with $ is a runtime expression over variants, the
 // response, and the request of answers, and a string with {$...} in it
-// text with such expressions embedded.
+// text with such expressions embedded. The members of an object or array
+// that are either are its fills.
 func linkValue(raw json.RawMessage, answers *Operation, variants []*Response) (*LinkValue, string) {
 	var expr string
 	if json.Unmarshal(raw, &expr) != nil {
-		return &LinkValue{Expression: string(raw), Const: raw}, ""
+		v := &LinkValue{Expression: string(raw), Const: raw}
+		var doc any
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if err := dec.Decode(&doc); err != nil {
+			return nil, err.Error()
+		}
+		return v, linkFills(v, "", doc, false, answers, variants)
 	}
 	if !strings.HasPrefix(expr, "$") {
 		if !strings.Contains(expr, "{$") {
 			return &LinkValue{Expression: string(raw), Const: raw}, ""
 		}
-		parts, why := templateParts(expr, answers, variants)
+		parts, why := templateParts(expr, answers, variants, true)
 		if why != "" {
 			return nil, why
 		}
@@ -278,4 +312,44 @@ func linkValue(raw json.RawMessage, answers *Operation, variants []*Response) (*
 		return v, ""
 	}
 	return nil, fmt.Sprintf("%s is not a value of the response or request", expr)
+}
+
+// linkFills adds the members of doc, the value at pointer in v's
+// constant, that are expressions or text with them embedded to v's
+// fills. A member that is a single expression in braces ("{$statusCode}")
+// is that expression, whose value keeps its JSON type; a string starting
+// with $ that does not begin like one ("$5") is text.
+func linkFills(v *LinkValue, pointer string, doc any, item bool, answers *Operation, variants []*Response) string {
+	switch doc := doc.(type) {
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(doc)) {
+			if why := linkFills(v, pointer+"/"+strings.NewReplacer("~", "~0", "/", "~1").Replace(k), doc[k], false, answers, variants); why != "" {
+				return why
+			}
+		}
+	case []any:
+		for i, m := range doc {
+			if why := linkFills(v, pointer+"/"+strconv.Itoa(i), m, true, answers, variants); why != "" {
+				return why
+			}
+		}
+	case string:
+		if strings.HasPrefix(doc, "{$") && strings.HasSuffix(doc, "}") && strings.Count(doc, "{") == 1 && strings.Count(doc, "}") == 1 {
+			doc = doc[1 : len(doc)-1]
+		}
+		isExpr := doc == "$url" || doc == "$method" || doc == "$statusCode" || strings.HasPrefix(doc, "$request.") || strings.HasPrefix(doc, "$response.")
+		if !isExpr && (strings.HasPrefix(doc, "$") || !strings.Contains(doc, "{$")) {
+			return ""
+		}
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			return err.Error()
+		}
+		fill, why := linkValue(raw, answers, variants)
+		if why != "" {
+			return fmt.Sprintf("%s: %s", pointer, why)
+		}
+		v.Fills = append(v.Fills, &LinkFill{Pointer: pointer, Item: item, Value: fill})
+	}
+	return ""
 }

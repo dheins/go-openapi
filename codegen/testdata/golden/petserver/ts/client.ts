@@ -80,6 +80,12 @@ const followCreatePetMirrorLink: LinkSpec = { name: "Mirror", responses: [{ stat
 
 const followCreatePetArchiveLink: LinkSpec = { name: "Archive", responses: [{ status: "201" }], values: [{ key: "petId", expression: "$response.body#/id", from: "responseBody", pointer: "/id" }] };
 
+const followCreatePetReportsLink: LinkSpec = { name: "Reports", responses: [{ status: "201" }], values: [{ key: "ids", expression: "{$response.body#/id},7", parts: [{ from: "responseBody", pointer: "/id" }, { text: ",7" }], style: { shape: "array", sep: ",", schema: { kind: "integer" } } }, { key: "fields", expression: "[\"{$response.body#/name}\", \"tag\"]", parts: [{ text: "[\"" }, { from: "responseBody", pointer: "/name" }, { text: "\", \"tag\"]" }], style: { shape: "array", sep: "|", schema: { kind: "string" } } }, { key: "filter", expression: "role,{$response.body#/name}", parts: [{ text: "role," }, { from: "responseBody", pointer: "/name" }], style: { shape: "object", sep: ",", schema: $ref(() => $m.FilterSchema) } }, { key: "xMeta", expression: "{\"role\": \"{$response.body#/name}\", \"age\": {$statusCode}}", parts: [{ text: "{\"role\": \"" }, { from: "responseBody", pointer: "/name" }, { text: "\", \"age\": " }, { from: "statusCode" }, { text: "}" }], json: true }, { key: "prefs", expression: "theme,{$response.body#/name}", parts: [{ text: "theme," }, { from: "responseBody", pointer: "/name" }], style: { shape: "object", sep: ",", schema: $ref(() => $m.PrefsSchema) } }] };
+
+const followCreatePetRenameLink: LinkSpec = { name: "Rename", responses: [{ status: "201" }], values: [{ key: "body", expression: "{\"name\":\"copy of {$response.body#/name}\",\"tag\":\"$response.body#/tag\",\"secret\":\"code {$statusCode}\"}", const: {"name":"copy of {$response.body#/name}","tag":"$response.body#/tag","secret":"code {$statusCode}"}, fills: [{ at: "/name", expression: "copy of {$response.body#/name}", parts: [{ text: "copy of " }, { from: "responseBody", pointer: "/name" }] }, { at: "/secret", expression: "code {$statusCode}", parts: [{ text: "code " }, { from: "statusCode" }] }, { at: "/tag", expression: "$response.body#/tag", from: "responseBody", pointer: "/tag" }] }] };
+
+const followCreatePetShoutLink: LinkSpec = { name: "Shout", responses: [{ status: "201" }], values: [{ key: "body", expression: "hi {$response.body#/name}", parts: [{ text: "hi " }, { from: "responseBody", pointer: "/name" }] }] };
+
 /** The inputs of getPet. */
 export interface GetPetRequest {
   petId: number;
@@ -977,6 +983,29 @@ export class Client {
   /** Follows the link "Archive" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
   async followCreatePetArchive(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
     return this.getPet(link(followCreatePetArchiveLink, resp, req) as GetPetRequest, { ...call, server: "/archive" });
+  }
+
+  /**
+   * Follows the link "Reports" of a response of createPet: sends the request of getReports it builds from resp and req, the request resp answers.
+   *
+   * Text given to arrays and objects, as JSON or as their styles write them.
+   */
+  async followCreatePetReports(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetReportsResponse> {
+    return this.getReports(link(followCreatePetReportsLink, resp, req) as GetReportsRequest, call);
+  }
+
+  /**
+   * Follows the link "Rename" of a response of createPet: sends the request of createPet it builds from resp and req, the request resp answers.
+   *
+   * Expressions inside the body, which goapi fills in.
+   */
+  async followCreatePetRename(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<CreatePetResponse> {
+    return this.createPet(link(followCreatePetRenameLink, resp, req) as CreatePetRequest, call);
+  }
+
+  /** Follows the link "Shout" of a response of createPet: sends the request of shout it builds from resp and req, the request resp answers. */
+  async followCreatePetShout(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<ShoutResponse> {
+    return this.shout(link(followCreatePetShoutLink, resp, req) as ShoutRequest, call);
   }
 
   /** GET /pets/{petId}. */

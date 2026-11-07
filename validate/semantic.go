@@ -376,6 +376,45 @@ func (c *checker) checkLinks() {
 		if l.OperationID != "" && !ids[l.OperationID] {
 			c.report(Error, RuleLinkOperation, l, []string{"operationId"}, "no operation has operationId %q", l.OperationID)
 		}
+		for key, raw := range l.Parameters.All() {
+			c.checkLinkMembers(l, []string{"parameters", key}, raw)
+		}
+		if l.RequestBody != nil {
+			c.checkLinkMembers(l, []string{"requestBody"}, l.RequestBody)
+		}
+	}
+}
+
+// checkLinkMembers warns about the members of raw, an object or array
+// value of link l at tokens, that are runtime expressions or text with
+// them embedded: goapi fills them in, but OpenAPI makes only a whole
+// value an expression.
+func (c *checker) checkLinkMembers(l *oas.Link, tokens []string, raw json.RawMessage) {
+	var doc any
+	if json.Unmarshal(raw, &doc) != nil {
+		return
+	}
+	var walk func(tokens []string, v any)
+	walk = func(tokens []string, v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			for _, k := range slices.Sorted(maps.Keys(v)) {
+				walk(append(slices.Clip(tokens), k), v[k])
+			}
+		case []any:
+			for i, m := range v {
+				walk(append(slices.Clip(tokens), strconv.Itoa(i)), m)
+			}
+		case string:
+			if v == "$url" || v == "$method" || v == "$statusCode" || strings.HasPrefix(v, "$request.") || strings.HasPrefix(v, "$response.") || strings.Contains(v, "{$") {
+				c.report(Warning, RuleLinkNested, l, tokens,
+					"%q is an expression inside a value, which goapi fills in; OpenAPI makes only a whole value an expression, so other tools send it as written", v)
+			}
+		}
+	}
+	switch doc.(type) {
+	case map[string]any, []any:
+		walk(tokens, doc)
 	}
 }
 

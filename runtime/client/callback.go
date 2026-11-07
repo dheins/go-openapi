@@ -3,12 +3,14 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/dheins/go-openapi/oapi"
+	"github.com/dheins/go-openapi/runtime/server"
 )
 
 // The functions here compute callback URLs: the values of the runtime
@@ -80,6 +82,10 @@ func textOf(v any) (string, error) {
 	return string(text), nil
 }
 
+// errNoValue is the error of valueAt for a pointer the value does not
+// have.
+var errNoValue = errors.New("has no")
+
 // valueAt returns the value at pointer, a JSON pointer ("" for the whole
 // value), in data, a JSON document, with numbers as json.Numbers.
 func valueAt(data []byte, pointer string) (any, error) {
@@ -98,16 +104,16 @@ func valueAt(data []byte, pointer string) (any, error) {
 		case map[string]any:
 			var ok bool
 			if v, ok = c[tok]; !ok {
-				return nil, fmt.Errorf("has no %s", pointer)
+				return nil, fmt.Errorf("%w %s", errNoValue, pointer)
 			}
 		case []any:
 			i, err := strconv.Atoi(tok)
 			if err != nil || i < 0 || i >= len(c) {
-				return nil, fmt.Errorf("has no %s", pointer)
+				return nil, fmt.Errorf("%w %s", errNoValue, pointer)
 			}
 			v = c[i]
 		default:
-			return nil, fmt.Errorf("has no %s", pointer)
+			return nil, fmt.Errorf("%w %s", errNoValue, pointer)
 		}
 	}
 	return v, nil
@@ -166,6 +172,177 @@ func LinkText(dst any, text string) error {
 		}
 	}
 	return err
+}
+
+// LinkParsed sets *dst, a field of the request a link leads to that is
+// not a string, to text, a value with expressions embedded in it, which
+// is JSON.
+func LinkParsed(dst any, text string) error {
+	if !json.Valid([]byte(text)) {
+		return fmt.Errorf("%q is not JSON", text)
+	}
+	return LinkConst(dst, json.RawMessage(text))
+}
+
+// LinkArray sets *dst, an array parameter of the request a link leads
+// to, to text, a value with expressions embedded in it: JSON or, if it
+// is not JSON of the array, items as p's style writes them
+// (server.Param.TextValues).
+func LinkArray[T any](dst any, text string, p server.Param) error {
+	if json.Valid([]byte(text)) && LinkConst(dst, json.RawMessage(text)) == nil {
+		return nil
+	}
+	vals, err := p.TextValues(text)
+	if err != nil {
+		return err
+	}
+	items, err := server.ParseArray[T](vals.Items)
+	if err != nil {
+		return err
+	}
+	return linkGo(dst, items)
+}
+
+// LinkObject is LinkArray for an object parameter, whose properties
+// props describes: JSON or "k,v,k,v".
+func LinkObject[T any](dst any, text string, p server.Param, props server.Property) error {
+	if json.Valid([]byte(text)) && LinkConst(dst, json.RawMessage(text)) == nil {
+		return nil
+	}
+	vals, err := p.TextValues(text)
+	if err != nil {
+		return err
+	}
+	obj, err := server.DecodeFields[T](vals.Fields, props)
+	if err != nil {
+		return err
+	}
+	return linkGo(dst, obj)
+}
+
+// linkGo sets *dst to v, a Go value of its type or of the type it
+// holds.
+func linkGo(dst, v any) error {
+	data, err := oapi.EncodeValue(v, oapi.Request)
+	if err != nil {
+		return err
+	}
+	return LinkConst(dst, data)
+}
+
+// Fill is a member of a link's constant filled in from the response or
+// request: the value at Pointer, an item of an array if Item, is Value,
+// JSON, or not there if Value is nil.
+type Fill struct {
+	Pointer string
+	Item    bool
+	Value   json.RawMessage
+}
+
+// LinkJSON returns the value at pointer ("" for all of it) in src encoded
+// as JSON in direction dir, for a member of a link's constant, or nil if
+// src has no value there.
+func LinkJSON(src any, dir oapi.Direction, pointer string) (json.RawMessage, error) {
+	data, err := oapi.EncodeValue(src, dir)
+	if err != nil {
+		return nil, err
+	}
+	v, err := valueAt(data, pointer)
+	if errors.Is(err, errNoValue) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
+}
+
+// LinkString returns text, a member of a link's constant with expressions
+// embedded in it, as JSON.
+func LinkString(text string) json.RawMessage {
+	// Marshalling a string cannot fail.
+	data, _ := json.Marshal(text)
+	return data
+}
+
+// LinkFill sets *dst, a field of the request a link leads to, to raw, a
+// JSON object or array, with fills set in it. A fill that is not there
+// leaves out an object's property; an array's item cannot be left out.
+func LinkFill(dst any, raw json.RawMessage, fills ...Fill) error {
+	var doc any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&doc); err != nil {
+		return err
+	}
+	for _, f := range fills {
+		if f.Value == nil && f.Item {
+			return fmt.Errorf("the item %s is not there", f.Pointer)
+		}
+		var v any
+		if f.Value != nil {
+			dec := json.NewDecoder(bytes.NewReader(f.Value))
+			dec.UseNumber()
+			if err := dec.Decode(&v); err != nil {
+				return err
+			}
+		}
+		var err error
+		if doc, err = setAt(doc, f.Pointer, v, f.Value == nil); err != nil {
+			return err
+		}
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	return LinkConst(dst, data)
+}
+
+// setAt sets the value at pointer in doc, a decoded JSON value, to v, or
+// deletes it if remove, and returns doc.
+func setAt(doc any, pointer string, v any, remove bool) (any, error) {
+	if pointer == "" {
+		return v, nil
+	}
+	rest := pointer[1:]
+	tok, rest, more := strings.Cut(rest, "/")
+	tok = strings.NewReplacer("~1", "/", "~0", "~").Replace(tok)
+	if more {
+		rest = "/" + rest
+	}
+	switch c := doc.(type) {
+	case map[string]any:
+		if !more && remove {
+			delete(c, tok)
+			return c, nil
+		}
+		child := c[tok]
+		if more {
+			var err error
+			if child, err = setAt(child, rest, v, remove); err != nil {
+				return nil, err
+			}
+			c[tok] = child
+			return c, nil
+		}
+		c[tok] = v
+		return c, nil
+	case []any:
+		i, err := strconv.Atoi(tok)
+		if err != nil || i < 0 || i >= len(c) {
+			return nil, fmt.Errorf("has no %s", pointer)
+		}
+		if more {
+			if c[i], err = setAt(c[i], rest, v, remove); err != nil {
+				return nil, err
+			}
+			return c, nil
+		}
+		c[i] = v
+		return c, nil
+	}
+	return nil, fmt.Errorf("has no %s", pointer)
 }
 
 // LinkConst sets *dst, a field of the request a link leads to, to the

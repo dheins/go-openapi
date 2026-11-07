@@ -145,6 +145,25 @@ paths:
                 url: /archive
               parameters:
                 petId: $response.body#/id
+            Reports:
+              operationId: getReports
+              description: Text given to arrays and objects, as JSON or as their styles write them.
+              parameters:
+                ids: "{$response.body#/id},7"
+                fields: '["{$response.body#/name}", "tag"]'
+                filter: "role,{$response.body#/name}"
+                X-Meta: '{"role": "{$response.body#/name}", "age": {$statusCode}}'
+                prefs: "theme,{$response.body#/name}"
+            Rename:
+              operationId: createPet
+              description: Expressions inside the body, which goapi fills in.
+              requestBody:
+                name: "copy of {$response.body#/name}"
+                tag: $response.body#/tag
+                secret: "code {$statusCode}"
+            Shout:
+              operationId: shout
+              requestBody: "hi {$response.body#/name}"
         4XX:
           $ref: "#/components/responses/Error"
   /pets/{petId}:

@@ -264,6 +264,57 @@ func (c *Client) FollowCreatePetArchive(ctx context.Context, resp api.CreatePetR
 	return c.GetPet(client.WithServer(ctx, api.CreatePetArchiveServerURL), next)
 }
 
+// FollowCreatePetReports follows the link "Reports" of a response of
+// CreatePet: it sends the request of GetReports that ReportsLink builds
+// from resp and req, the request resp answers.
+func (c *Client) FollowCreatePetReports(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetReportsResponse, error) {
+	linked, ok := resp.(interface {
+		ReportsLink(*api.CreatePetRequest) (*api.GetReportsRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Reports: a %T has no such link", resp)
+	}
+	next, err := linked.ReportsLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetReports(ctx, next)
+}
+
+// FollowCreatePetRename follows the link "Rename" of a response of
+// CreatePet: it sends the request of CreatePet that RenameLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetRename(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.CreatePetResponse, error) {
+	linked, ok := resp.(interface {
+		RenameLink(*api.CreatePetRequest) (*api.CreatePetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Rename: a %T has no such link", resp)
+	}
+	next, err := linked.RenameLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.CreatePet(ctx, next)
+}
+
+// FollowCreatePetShout follows the link "Shout" of a response of CreatePet:
+// it sends the request of Shout that ShoutLink builds from resp and req,
+// the request resp answers.
+func (c *Client) FollowCreatePetShout(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.ShoutResponse, error) {
+	linked, ok := resp.(interface {
+		ShoutLink(*api.CreatePetRequest) (*api.ShoutRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Shout: a %T has no such link", resp)
+	}
+	next, err := linked.ShoutLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.Shout(ctx, next)
+}
+
 // GetPet calls GET /pets/{petId}. A nil req sends no parameters or body.
 func (c *Client) GetPet(ctx context.Context, req *api.GetPetRequest) (api.GetPetResponse, error) {
 	if req == nil {

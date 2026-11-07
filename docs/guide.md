@@ -72,7 +72,9 @@ Validation runs in three phases and stops at the first that finds errors:
    reports a property that `allOf` members define with types or values no
    value has, and `oneof-ambiguous` (a warning) a `oneOf` without a
    discriminator whose object members one value can satisfy together,
-   which `oneOf` then rejects.
+   which `oneOf` then rejects. `link-nested-expression` (a warning)
+   reports an expression inside a link's object or array value, which
+   goapi's clients fill in but OpenAPI does not define.
 
    `example-schema` (a warning) reports an example that does not match its
    schema: the `example` and `examples` (`value`, and 3.2's `dataValue`)
@@ -1539,9 +1541,27 @@ pet, err = c.GetPet(ctx, next)
     method builds the request again to get it.
   - text with expressions embedded in braces, such as
     `pets/{$response.body#/id}`: the parts joined, strings as they are
-    and other values as JSON, given to a string parameter as it is and
-    parsed as a number or boolean for one of those types
-    (`client.LinkText`). An object, array or body cannot take text.
+    and other values as JSON. A string parameter or text body takes the
+    text as it is, and a number or boolean parameter parses it
+    (`client.LinkText`). An array or object parameter reads it as JSON
+    (`[{$response.body#/id}, 7]`) or, if it is not JSON of the parameter,
+    as its style writes one value, not exploded: items separated by
+    commas, spaces (`spaceDelimited`) or pipes (`pipeDelimited`), and an
+    object's `name,value` pairs (`client.LinkArray`, `client.LinkObject`).
+    Other bodies, and parameters with `content`, read it as JSON
+    (`client.LinkParsed`). Braces that do not open an expression are
+    text, so JSON can be written there.
+  - an object or array constant whose members are expressions or text
+    with them embedded, such as `requestBody: {name: "copy of
+    {$response.body#/name}", tag: $response.body#/tag}`: goapi fills them
+    in (`client.LinkFill`), which OpenAPI does not define, so
+    `goapi validate` warns (`link-nested-expression`); other tools send
+    them as written. A member that is one expression in braces
+    (`"{$statusCode}"`) keeps its value's JSON type, a value that is not
+    there leaves an object's property out (an array's item cannot be left
+    out), and a string starting with `$` that does not begin like an
+    expression (`$5`) is text. The official schemas allow only strings as
+    link `parameters`, so such constants are for `requestBody`.
 - **Missing values:** an optional value that is not set leaves the
   parameter unset when it is optional too, and is an error naming the
   link when it is required. A value the parameter cannot hold is an error
@@ -1549,9 +1569,8 @@ pet, err = c.GetPet(ctx, next)
 - **Variants:** a link reading the body is followed from the variants
   with a JSON or XML body; following a response without the link is an
   error.
-- **Not followed:** a link that gives embedded text to an object, array
-  or body, or names an unknown operation or parameter gets a warning and
-  no methods.
+- **Not followed:** a link that names an unknown operation or parameter
+  gets a warning and no methods.
 
 Each operation's client functions are also exported from its operations
 package, `api.NewGetPetRequest(ctx, cfg, req)` and
@@ -1669,7 +1688,7 @@ if (resp.status === 200) {
   - JSON Lines, server-sent event and streamed multipart bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
 - **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines and streamed parts are `items` and server-sent events `events`, all `AsyncIterable`s that stop the stream when you `break`. A `multipart/byteranges` body is a `ByteRange[]`, `{ start, end, size, contentType, data }`. The parts of a response are checked against their encodings as they are read.
-- **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. `$url` is the URL the request was sent to, built again (`requestUrl`), and embedded text is parsed for a number or boolean parameter. A value that is not there is left out, for the request's validation to report if it is required.
+- **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. `$url` is the URL the request was sent to, built again (`requestUrl`), and embedded text and expressions inside constants are read and filled in as Go clients do. A value that is not there is left out, for the request's validation to report if it is required.
 - **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
 - **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal`, `headers` and `server` (as `client.WithServer`; following a link that names a server sets it). A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.

@@ -1156,6 +1156,13 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 	if v, ok := f.gen.params[p]; ok {
 		return v
 	}
+	v := f.declareVar(lowerFirst(o.Name)+p.Field+"Param", paramLiteral(p))
+	f.gen.params[p] = v
+	return v
+}
+
+// paramLiteral returns the server.Param describing how p is serialized.
+func paramLiteral(p *ir.Param) string {
 	shape := "server.Scalar"
 	switch {
 	case p.Array:
@@ -1187,9 +1194,7 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 		fmt.Fprintf(&b, ", ItemDelimiter: %q", p.ItemDelimiter)
 	}
 	b.WriteString("}")
-	v := f.declareVar(lowerFirst(o.Name)+p.Field+"Param", b.String())
-	f.gen.params[p] = v
-	return v
+	return b.String()
 }
 
 // propertiesVar declares the property types of an object parameter.

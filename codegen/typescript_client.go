@@ -799,26 +799,87 @@ func (g *tsGen) linkSpec(o *ir.Operation, l *ir.Link) string {
 			key = tsCamel(l.Operation.Body.Fields[0].Name)
 		}
 		s := fmt.Sprintf("{ key: %s, expression: %s", jsString(key), jsString(v.Expression))
-		if v.Parts != nil {
-			var parts []string
-			for _, p := range v.Parts {
-				src := ir.LinkValue{RequestBody: p.Body, RequestParam: p.Param, URL: p.URL, StatusCode: p.StatusCode, ResponseBody: p.ResponseBody, Header: p.Header, Pointer: p.Pointer}
-				if p.IsText() {
-					parts = append(parts, "{ text: "+jsString(p.Text)+" }")
-					continue
+		switch {
+		case v.Parts != nil:
+			s += g.linkParts(o, l, v, ownKeys) + g.linkTextReading(l, v)
+		case v.Fills != nil:
+			var fills []string
+			for _, f := range v.Fills {
+				fs := "{ at: " + jsString(f.Pointer)
+				if f.Item {
+					fs += ", item: true"
 				}
-				parts = append(parts, "{ "+strings.TrimPrefix(g.linkSource(o, l, &src, ownKeys), ", ")+" }")
+				fs += ", expression: " + jsString(f.Value.Expression)
+				if f.Value.Parts != nil {
+					fs += g.linkParts(o, l, f.Value, ownKeys)
+				} else {
+					fs += g.linkSource(o, l, f.Value, ownKeys)
+				}
+				fills = append(fills, fs+" }")
 			}
-			s += ", parts: [" + strings.Join(parts, ", ") + "]"
-			if t := g.tsType(v.Param.Elem); t != "string" && !strings.HasPrefix(t, "\"") {
-				s += ", parse: true"
-			}
-		} else {
+			s += ", const: " + string(v.Const) + ", fills: [" + strings.Join(fills, ", ") + "]"
+		default:
 			s += g.linkSource(o, l, v, ownKeys)
 		}
 		values = append(values, s+" }")
 	}
 	return fmt.Sprintf("{ name: %s, responses: [%s], values: [%s] }", jsString(l.Name), strings.Join(responses, ", "), strings.Join(values, ", "))
+}
+
+// linkParts renders the parts of v, text with expressions embedded, as a
+// parts field after a comma.
+func (g *tsGen) linkParts(o *ir.Operation, l *ir.Link, v *ir.LinkValue, ownKeys map[*ir.Param]string) string {
+	var parts []string
+	for _, p := range v.Parts {
+		src := ir.LinkValue{RequestBody: p.Body, RequestParam: p.Param, URL: p.URL, StatusCode: p.StatusCode, ResponseBody: p.ResponseBody, Header: p.Header, Pointer: p.Pointer}
+		if p.IsText() {
+			parts = append(parts, "{ text: "+jsString(p.Text)+" }")
+			continue
+		}
+		parts = append(parts, "{ "+strings.TrimPrefix(g.linkSource(o, l, &src, ownKeys), ", ")+" }")
+	}
+	return ", parts: [" + strings.Join(parts, ", ") + "]"
+}
+
+// linkTextReading renders how the text of v is read, after a comma, as Go
+// clients read it: a number or boolean parsed for a scalar that is not a
+// string, JSON or the parameter's style for an array or object, and JSON
+// for a body or content that is not a string.
+func (g *tsGen) linkTextReading(l *ir.Link, v *ir.LinkValue) string {
+	p := v.Param
+	var elem *ir.Ref
+	if p != nil {
+		elem = p.Elem
+	} else {
+		elem = l.Operation.Body.Fields[0].Value
+	}
+	text := g.tsType(elem) == "string" || strings.HasPrefix(g.tsType(elem), "\"")
+	switch {
+	case p == nil || p.Content != "" || (p.Array || p.Object) && (p.In == "querystring" || p.ItemDelimiter != ""):
+		if text {
+			return ""
+		}
+		return ", json: true"
+	case p.Array || p.Object:
+		sep := ","
+		switch p.Style {
+		case "spaceDelimited":
+			sep = " "
+		case "pipeDelimited":
+			sep = "|"
+		}
+		if p.Delimiter != "" {
+			sep = p.Delimiter
+		}
+		shape := "array"
+		if p.Object {
+			shape = "object"
+		}
+		return fmt.Sprintf(", style: { shape: %q, sep: %s, schema: %s }", shape, jsString(sep), g.schema(p.Elem))
+	case !text:
+		return ", parse: true"
+	}
+	return ""
 }
 
 // linkSource renders where the value v of link l of a response of o is,

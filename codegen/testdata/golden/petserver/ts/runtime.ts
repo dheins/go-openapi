@@ -1419,11 +1419,35 @@ export interface LinkSpec {
     readonly expression: string;
     /** Text with expressions embedded in it: its text and values, in
      * order. parse makes text spelling a number or boolean that value,
-     * for a parameter that is not a string. */
+     * for a parameter that is not a string; json reads the text as JSON,
+     * for a body or content; style reads it as JSON or as an array or
+     * object parameter's style writes it. */
     readonly parts?: readonly (LinkSource & { readonly text?: string })[];
     readonly parse?: boolean;
+    readonly json?: boolean;
+    readonly style?: LinkStyle;
+    /** The members of const, an object or array, that are filled in. */
+    readonly fills?: readonly LinkFill[];
   })[];
 }
+
+/** How a link's text is read for an array or object parameter, if it is
+ * not JSON of that shape: items separated by sep, converted by the items'
+ * schema, or an object's name,value pairs by its properties'. */
+export interface LinkStyle {
+  readonly shape: "array" | "object";
+  readonly sep: string;
+  readonly schema: Schema;
+}
+
+/** A member of a link's constant, at the JSON pointer at (an array's item
+ * if item), that is an expression or text with expressions embedded. */
+export type LinkFill = LinkSource & {
+  readonly at: string;
+  readonly item?: boolean;
+  readonly expression: string;
+  readonly parts?: readonly (LinkSource & { readonly text?: string })[];
+};
 
 /** Where a value of a link is: with source the key of the header or
  * request property, and pointer a JSON pointer into a body; url is the
@@ -1449,9 +1473,76 @@ export function link(spec: LinkSpec, resp: object, req: object, url?: string): u
   }
   const out: Values = {};
   for (const v of spec.values) {
-    const value = v.parts === undefined ? linkValue(v, r, q, url) : linkText(v.parts, v.parse === true, r, q, url);
+    let value: unknown;
+    try {
+      if (v.fills !== undefined) {
+        value = fillConst(v.const, v.fills, r, q, url);
+      } else if (v.parts === undefined) {
+        value = linkValue(v, r, q, url);
+      } else {
+        value = linkText(v.parts, v.parse === true, r, q, url);
+        if (typeof value === "string" && v.style !== undefined) {
+          value = styledText(v.style, value);
+        } else if (typeof value === "string" && v.json === true) {
+          value = JSON.parse(value) as unknown;
+        }
+      }
+    } catch (e) {
+      throw new Error(`link ${spec.name}: ${v.expression}: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (value !== undefined) {
       out[v.key] = value;
+    }
+  }
+  return out;
+}
+
+// styledText reads text, given by a link to an array or object
+// parameter: JSON of that shape or, if it is not, the parameter's style's
+// text of one value, not exploded.
+function styledText(st: LinkStyle, text: string): unknown {
+  try {
+    const v = JSON.parse(text) as unknown;
+    if (st.shape === "array" ? Array.isArray(v) : isObject(v)) {
+      return v;
+    }
+  } catch {
+    // Not JSON: the style's text.
+  }
+  const items = text.split(st.sep);
+  if (st.shape === "array") {
+    return items.map((s) => scalarValue(st.schema, s));
+  }
+  if (items.length % 2 !== 0) {
+    throw new Error("expected name,value pairs");
+  }
+  const pairs: [string, string][] = [];
+  for (let i = 0; i < items.length; i += 2) {
+    pairs.push([items[i]!, items[i + 1]!]);
+  }
+  return pairsObject(st.schema, pairs);
+}
+
+// fillConst returns a copy of c, a link's constant, with its fills set
+// from the response r, the request q and the URL it was sent to. A fill
+// that is not there leaves an object's property out.
+function fillConst(c: unknown, fills: readonly LinkFill[], r: Values, q: Values, url: string | undefined): unknown {
+  const out = structuredClone(c);
+  for (const f of fills) {
+    const v = f.parts === undefined ? linkValue(f, r, q, url) : linkText(f.parts, false, r, q, url);
+    if (v === undefined && f.item === true) {
+      throw new Error(`the item ${f.at} is not there`);
+    }
+    const toks = f.at.slice(1).split("/").map((t) => t.replaceAll("~1", "/").replaceAll("~0", "~"));
+    let parent = out as Values;
+    for (const t of toks.slice(0, -1)) {
+      parent = parent[t] as Values;
+    }
+    const last = toks[toks.length - 1]!;
+    if (v === undefined) {
+      delete parent[last];
+    } else {
+      parent[last] = v;
     }
   }
   return out;
@@ -2528,6 +2619,12 @@ function objectHeader(schema: Schema, raw: string, explode: boolean): Values {
       pairs.push([items[i]!, items[i + 1]!]);
     }
   }
+  return pairsObject(schema, pairs);
+}
+
+// pairsObject makes an object of name,value pairs, converting the values
+// by the properties' schemas.
+function pairsObject(schema: Schema, pairs: readonly [string, string][]): Values {
   let s = resolve(schema);
   if (s.kind === "nullable") {
     s = resolve(s.of);

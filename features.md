@@ -45,8 +45,9 @@ shipped in.
 - Parameters and response headers with `content` other than JSON, text,
   forms and XML, and `querystring` parameters with text or XML content.
   — later
-- Expressions embedded in text given to object, array or body values of
-  links. — later
+- Link text read as a form-encoded or XML body, or as arrays of arrays
+  (`x-goapi-collection-format` item delimiters): such text is read as
+  JSON. — later
 - Links to operations of other documents, whose paths this document does
   not include: they are another API, which a client of this one has no
   method for. — not planned
@@ -138,6 +139,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Link text with expressions embedded is given to arrays, objects and
+  bodies, read as JSON or the parameter's style, and expressions inside a
+  link's object and array constants are filled in, with a
+  `link-nested-expression` warning. (431ef48, 0577ff7)
 - [x] Links that name a `server` are followed there, by the rule of
   operation servers (`client.WithServer`, `CallOptions.server`), and
   `operationRef`s into other files whose path items the document's paths

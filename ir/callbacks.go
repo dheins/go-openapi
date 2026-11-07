@@ -144,13 +144,14 @@ func operationCount(pi *oas.PathItem) int {
 // of parent. It returns why the URL cannot be computed instead, if it
 // cannot.
 func callbackURL(key string, parent *Operation) ([]URLPart, string) {
-	return templateParts(key, parent, parent.Responses)
+	return templateParts(key, parent, parent.Responses, false)
 }
 
 // templateParts parses key, text with runtime expressions in braces or a
 // single bare expression, against the request of parent and responses,
-// or says why it cannot be computed.
-func templateParts(key string, parent *Operation, responses []*Response) ([]URLPart, string) {
+// or says why it cannot be computed. With braces, a { that does not open
+// an expression ({$) is text, as JSON given to a link as text has them.
+func templateParts(key string, parent *Operation, responses []*Response, braces bool) ([]URLPart, string) {
 	var parts []URLPart
 	add := func(p URLPart) {
 		if p.IsText() {
@@ -174,6 +175,14 @@ func templateParts(key string, parent *Operation, responses []*Response) ([]URLP
 	}
 	for rest := key; rest != ""; {
 		open := strings.IndexByte(rest, '{')
+		for braces && open >= 0 && !strings.HasPrefix(rest[open:], "{$") {
+			next := strings.IndexByte(rest[open+1:], '{')
+			if next < 0 {
+				open = -1
+				break
+			}
+			open += 1 + next
+		}
 		if open < 0 {
 			add(URLPart{Text: rest})
 			break

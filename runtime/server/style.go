@@ -88,6 +88,22 @@ func (p Param) PathValues(raw string) (Values, error) {
 	}
 }
 
+// TextValues parses text, an array or object value written as p's style
+// writes it but not exploded and without a prefix: items separated by
+// commas, spaces (spaceDelimited) or pipes (pipeDelimited), or by p's
+// Delimiter, and objects as "k,v,k,v". Clients read text given to a
+// parameter by a link this way.
+func (p Param) TextValues(text string) (Values, error) {
+	sep := ","
+	switch p.Style {
+	case "spaceDelimited":
+		sep = " "
+	case "pipeDelimited":
+		sep = "|"
+	}
+	return p.delimited(text, p.sep(sep), false)
+}
+
 // delimited parses items separated by sep. Objects are "k,v,k,v" or, when
 // exploded, "k=v<sep>k=v".
 func (p Param) delimited(s, sep string, exploded bool) (Values, error) {
