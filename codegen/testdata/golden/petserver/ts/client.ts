@@ -778,6 +778,7 @@ const secureSpec: OperationSpec = {
   method: "GET",
   path: "/secure",
   params: [],
+  server: "/v2",
   responses: [{ status: "204" }],
   security: [[{ key: "apiKey", type: "apiKey", in: "header", name: "X-API-Key" }]],
 };
@@ -862,6 +863,7 @@ const publicSpec: OperationSpec = {
   method: "GET",
   path: "/public",
   params: [],
+  server: "https://public.example.com/v1",
   responses: [{ status: "204" }],
   security: [[]],
 };

@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -431,6 +432,15 @@ func guarded(w func(int, string, ...any), depth int, cond, stmt string) {
 }
 
 func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
+	if o.ServerURL != "" {
+		doc := fmt.Sprintf("%sServerURL is the server of %s, which clients send it to while they use the document's server.", o.Name, o.Name)
+		if u, err := url.Parse(o.ServerURL); err != nil || !u.IsAbs() {
+			doc += " It is relative to the base URL."
+		}
+		w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
+		w(0, "const %sServerURL = %q", o.Name, o.ServerURL)
+		w(0, "")
+	}
 	if o.Kind != ir.PathOperation {
 		w(0, "%s", strings.TrimSuffix(wrapComment(fmt.Sprintf("New%sRequest builds the HTTP request of %s, to send with c to target, an absolute URL.", o.Name, opLabel(o))), "\n"))
 		w(0, "func New%sRequest(ctx context.Context, c *client.Config, target string, req *%s) (*http.Request, error) {", o.Name, o.RequestType)
@@ -440,6 +450,9 @@ func (f *fileGen) newRequestFunc(w func(int, string, ...any), o *ir.Operation) {
 	}
 	f.requestValidation(w, o)
 	w(1, "r := client.NewRequest(%q)", o.Method)
+	if o.ServerURL != "" {
+		w(1, "r.Server(%sServerURL)", o.Name)
+	}
 	pathParams := map[string]*ir.Param{}
 	for _, p := range o.Params {
 		if p.In == "path" {

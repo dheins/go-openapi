@@ -146,8 +146,9 @@ formats without a style are kept as `x-goapi-collection-format`, which
 other tools read as csv (form fields' are read as csv); the `schemes` of
 an operation without the document's `host` are dropped for the
 document's servers; and an operation with both a body and form fields
-keeps the body. Generated clients send every operation to their base
-URL, not to an operation's own `servers`.
+keeps the body. Generated clients send an operation with `schemes` of
+its own to the servers they become, while they use the document's server
+(see [Generate a client](#generate-a-client)).
 
 A server generated from a 2.0 document serves the converted 3.1 document
 at `server.WithDocument`.
@@ -1427,9 +1428,22 @@ media type of the field that is set.
 its variables' defaults, when that URL is absolute; otherwise
 `client.WithBaseURL` is required.
 
+An operation with `servers` of its own, or on its path item, is sent to
+the first of them instead (with its variables' defaults), which the `api`
+package declares as `<Operation>ServerURL`; a relative one, such as
+`/v2`, is resolved against the base URL. That holds while the client uses
+the document's server: once `client.WithBaseURL` gives another, such as a
+test server or a proxy, every request goes there.
+`client.WithOperationServers(true)` keeps operation servers in use with
+it, and `false` sends everything to `DefaultServerURL`. The generated
+server routes only the document's servers, so `generate server` warns
+about path-level servers and operation-level ones with another base
+path.
+
 | Option | Effect |
 |---|---|
-| `client.WithBaseURL(url)` | send requests below another absolute URL |
+| `client.WithBaseURL(url)` | send requests below another absolute URL, operations with servers of their own too |
+| `client.WithOperationServers(on)` | send operations with servers of their own there (`true`) or to the base URL (`false`) |
 | `client.WithHTTPClient(hc)`, `client.WithDoer(d)` | send with another `*http.Client` or `client.Doer` (default `http.DefaultClient`) |
 | `client.WithMiddleware(mw...)` | wrap the `Doer`: retries, logging, signing, tracing; the first is outermost |
 | `client.WithHeader(name, value)` | add a header to every request that does not set it |
@@ -1568,7 +1582,8 @@ of `-out` by default).
   requests (with their problems), transport errors and undeclared
   responses 2.
 - **Server and credentials:** `-server` or `<NAME>_SERVER`, the
-  document's server by default; per security scheme a flag and an
+  document's server by default (with operations' own servers, as
+  `New` does; a server given sends everything there); per security scheme a flag and an
   environment variable named after it (`-api-key` or `PETCTL_API_KEY`;
   `-basic-auth-user` and `-basic-auth-password`, or
   `PETCTL_BASIC_AUTH_USER` and `..._PASSWORD`), so secrets can stay out
@@ -1640,7 +1655,7 @@ if (resp.status === 200) {
 - **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. A value that is not there is left out, for the request's validation to report if it is required.
 - **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
-- **Options:** `baseUrl` (the document's server by default), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal` and `headers`. A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
+- **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal` and `headers`. A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
 
 Not supported by the TypeScript client yet; `generate ts-client` warns
 about each one it leaves out:

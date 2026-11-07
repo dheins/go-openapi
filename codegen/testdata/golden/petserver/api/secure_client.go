@@ -9,10 +9,15 @@ import (
 	"github.com/dheins/go-openapi/runtime/client"
 )
 
+// SecureServerURL is the server of Secure, which clients send it to while
+// they use the document's server. It is relative to the base URL.
+const SecureServerURL = "/v2"
+
 // NewSecureRequest builds the HTTP request of Secure, GET /secure, to send
 // with c.
 func NewSecureRequest(ctx context.Context, c *client.Config, req *SecureRequest) (*http.Request, error) {
 	r := client.NewRequest("GET")
+	r.Server(SecureServerURL)
 	r.Path("/secure")
 	return c.Build(ctx, r)
 }

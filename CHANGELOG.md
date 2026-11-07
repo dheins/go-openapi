@@ -4,6 +4,13 @@
 
 ### Added
 
+- Generated Go and TypeScript clients, and the generated CLI, send
+  operations with `servers` of their own, or of their path, there while
+  they use the document's server (`<Operation>ServerURL`,
+  `client.WithDefaultBaseURL`, `client.WithOperationServers`, the
+  `operationServers` option); a base URL given with `client.WithBaseURL`
+  or `baseUrl` gets every request. `generate server` warns about
+  operation-level servers with another base path than the document's.
 - `goapi convert -version 3.2.0`, `-convert-to` for `flatten`, `mixin` and
   `serve`, and `loader.WithConvertTo`: Swagger 2.0 converted to OpenAPI
   3.2.
@@ -528,6 +535,10 @@
 
 ### Changed
 
+- Generated clients' `New` sets the document's server with
+  `client.WithDefaultBaseURL` rather than `client.WithBaseURL`, and
+  `generate client`, `cli` and `ts-client` no longer print the warnings
+  that concern only the generated server.
 - Converting Swagger 2.0 gives an operation whose `schemes` differ from
   the document's `servers` of its own, instead of a warning.
 - `goapi diff` pairs `oneOf`/`anyOf` alternatives by what they are rather

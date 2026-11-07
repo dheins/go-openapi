@@ -11,6 +11,10 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
+// LoginServerURL is the server of Login, which clients send it to while
+// they use the document's server.
+const LoginServerURL = "http://pets.example.com/api"
+
 // NewLoginRequest builds the HTTP request of Login, POST /login, to send
 // with c.
 func NewLoginRequest(ctx context.Context, c *client.Config, req *LoginRequest) (*http.Request, error) {
@@ -26,6 +30,7 @@ func NewLoginRequest(ctx context.Context, c *client.Config, req *LoginRequest) (
 		}
 	}
 	r := client.NewRequest("POST")
+	r.Server(LoginServerURL)
 	r.Path("/login")
 	r.FormBody("application/x-www-form-urlencoded", req.Body)
 	r.Accept("application/json")

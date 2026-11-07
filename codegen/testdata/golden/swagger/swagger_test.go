@@ -7,10 +7,12 @@ package swagger
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/swagger/api"
@@ -176,6 +178,25 @@ func TestSwaggerRoundTrip(t *testing.T) {
 	}
 	if got := s.seen["Login"].(*api.LoginRequest); !got.Body.Remember.Value {
 		t.Errorf("login request = %+v", got)
+	}
+}
+
+// TestSwaggerOperationSchemes checks that login's own schemes, converted
+// to servers, are where the client sends it with the document's server.
+func TestSwaggerOperationSchemes(t *testing.T) {
+	var sent string
+	c, err := swaggerclient.New(swaggerclient.Credentials{}, client.WithDoer(client.DoerFunc(func(r *http.Request) (*http.Response, error) {
+		sent = r.URL.String()
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`"hi"`)), Request: r}, nil
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Login(context.Background(), &api.LoginRequest{Body: model.LoginRequestBody{User: "ann"}}); err != nil {
+		t.Fatal(err)
+	}
+	if sent != "http://pets.example.com/api/login" {
+		t.Errorf("login sent to %s", sent)
 	}
 }
 

@@ -10,8 +10,6 @@ shipped in.
 
 - Swagger 2.0 collection formats of form fields that OpenAPI 3 has no
   style for (tsv, nested items), read as csv. — later
-- Generated clients sending operations with `servers` of their own (an
-  operation's or a path's) there, rather than to the base URL. — later
 
 ## Models
 
@@ -139,6 +137,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Generated Go and TypeScript clients send operations with `servers`
+  of their own (an operation's or its path's) there while they use the
+  document's server; `client.WithOperationServers` and
+  `operationServers` force either way. (57ca04a, e59a355)
 - [x] `goapi convert -version 3.2.0` (and `-convert-to` elsewhere):
   Swagger 2.0 converted to OpenAPI 3.2, with XML `nodeType` and
   `components.pathItems`; operation `schemes` as operation `servers`; and

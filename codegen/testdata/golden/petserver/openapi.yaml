@@ -1150,6 +1150,8 @@ paths:
   /secure:
     get:
       operationId: secure
+      servers:
+        - url: /v2
       security:
         - apiKey: []
       responses:
@@ -1233,6 +1235,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Tree"
   /public:
+    servers:
+      - url: https://public.example.com/v1
     get:
       operationId: public
       description: Open to anyone, though other operations are secured.

@@ -35,7 +35,11 @@ type Config struct {
 	// BaseURL is prefixed to every operation's path: the server URL,
 	// with any base path.
 	BaseURL *url.URL
-	Doer    Doer
+	// OperationServers sends operations with servers of their own
+	// (Request.Server) there rather than to BaseURL; see
+	// WithOperationServers.
+	OperationServers bool
+	Doer             Doer
 	// Header holds headers sent with every request.
 	Header http.Header
 	// ValidateRequests checks requests against the document before they
@@ -48,7 +52,12 @@ type Config struct {
 	Codecs map[string]Codec
 
 	middleware []func(Doer) Doer
-	err        error
+	// defaultBase says BaseURL is the document's server, from
+	// WithDefaultBaseURL; operationServers is WithOperationServers', if
+	// given.
+	defaultBase      bool
+	operationServers *bool
+	err              error
 }
 
 // Option configures a client.
@@ -82,6 +91,10 @@ func newConfig(opts []Option) (*Config, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
+	c.OperationServers = c.defaultBase
+	if c.operationServers != nil {
+		c.OperationServers = *c.operationServers
+	}
 	// The first middleware is the outermost.
 	for i := len(c.middleware) - 1; i >= 0; i-- {
 		c.Doer = c.middleware[i](c.Doer)
@@ -90,19 +103,40 @@ func newConfig(opts []Option) (*Config, error) {
 }
 
 // WithBaseURL sets the server URL requests are sent to, such as
-// https://api.example.com/v1.
+// https://api.example.com/v1. All of them go there, even those of
+// operations with servers of their own, unless WithOperationServers says
+// otherwise.
 func WithBaseURL(raw string) Option {
-	return func(c *Config) {
-		u, err := url.Parse(raw)
-		switch {
-		case err != nil:
-			c.err = fmt.Errorf("client: base URL: %w", err)
-		case !u.IsAbs():
-			c.err = fmt.Errorf("client: base URL %q is not absolute", raw)
-		default:
-			c.BaseURL = u
-		}
+	return func(c *Config) { c.setBaseURL(raw, false) }
+}
+
+// WithDefaultBaseURL sets the document's server URL, which generated
+// clients start with: operations with servers of their own are sent there
+// instead, unless WithOperationServers says otherwise.
+func WithDefaultBaseURL(raw string) Option {
+	return func(c *Config) { c.setBaseURL(raw, true) }
+}
+
+func (c *Config) setBaseURL(raw string, isDefault bool) {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		c.err = fmt.Errorf("client: base URL: %w", err)
+	case !u.IsAbs():
+		c.err = fmt.Errorf("client: base URL %q is not absolute", raw)
+	default:
+		c.BaseURL, c.defaultBase = u, isDefault
 	}
+}
+
+// WithOperationServers says whether operations with servers of their own
+// are sent there (true) or to the base URL (false). By default they are
+// while the base URL is the document's (WithDefaultBaseURL), and are not
+// once WithBaseURL sets another. A relative operation server is resolved
+// against the base URL, so with WithBaseURL and true it is sent to that
+// base URL's host.
+func WithOperationServers(on bool) Option {
+	return func(c *Config) { c.operationServers = &on }
 }
 
 // WithHTTPClient sends requests with hc.
@@ -159,7 +193,8 @@ func (c *Config) Do(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// Build turns r into an HTTP request to the base URL.
+// Build turns r into an HTTP request to the base URL, or to its
+// operation's server (Request.Server) when OperationServers is set.
 func (c *Config) Build(ctx context.Context, r *Request) (*http.Request, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -168,6 +203,13 @@ func (c *Config) Build(ctx context.Context, r *Request) (*http.Request, error) {
 		return nil, errors.New("client: no base URL; use WithBaseURL")
 	}
 	u := *c.BaseURL
+	if r.server != "" && c.OperationServers {
+		s, err := url.Parse(r.server)
+		if err != nil {
+			return nil, fmt.Errorf("client: operation server: %w", err)
+		}
+		u = *c.BaseURL.ResolveReference(s)
+	}
 	// The path's parameter values are escaped already.
 	escaped := strings.TrimSuffix(u.EscapedPath(), "/") + r.path.String()
 	path, err := url.PathUnescape(escaped)

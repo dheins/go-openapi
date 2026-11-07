@@ -66,6 +66,9 @@ type Warning struct {
 	Location loader.Location
 	Position loader.Position
 	Message  string
+	// ServerOnly says the warning concerns the generated server alone:
+	// clients do what the document says.
+	ServerOnly bool
 }
 
 // Kind is the kind of a named type.

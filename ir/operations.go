@@ -59,6 +59,11 @@ type Operation struct {
 	Callback *CallbackURL
 	// Callbacks are the operations of the callbacks this one declares.
 	Callbacks []*Operation
+	// ServerURL is the first of the operation's own servers, else of its
+	// path item's, with its variables replaced by their defaults, when it
+	// is not the document's: clients send the operation there. It may be
+	// relative, to the base URL; "" for the document's servers.
+	ServerURL string
 }
 
 // SecurityScheme is a security scheme a generated server checks through
@@ -303,6 +308,7 @@ func (b *builder) buildOperations() {
 	// Operations, webhooks and callbacks are all functions of the
 	// operations' package, so they share one namespace.
 	methods := namespace{}
+	docURL := firstServerURL(doc.Servers)
 	if doc.Paths != nil {
 		mux := http.NewServeMux()
 		for path, item := range doc.Paths.Items.All() {
@@ -312,12 +318,13 @@ func (b *builder) buildOperations() {
 			}
 			for method, op := range pi.Operations() {
 				o := b.operation(path, strings.ToUpper(method), pi, op, methods, opSite{fallback: strings.ToLower(method) + " " + path})
+				o.ServerURL = b.operationServerURL(pi, op, docURL)
 				b.oasOps[o] = op
 				b.register(mux, o)
 				b.model.Operations = append(b.model.Operations, o)
 			}
 			if len(pi.Servers) > 0 {
-				b.warnAt(pi, []string{"servers"}, "path-level servers are not used by the generated server")
+				b.warnServer(pi, []string{"servers"}, "path-level servers are not used by the generated server; generated clients send to them")
 			}
 		}
 	}
@@ -326,10 +333,40 @@ func (b *builder) buildOperations() {
 	b.model.BasePath, b.model.ServerURL = basePath(doc), serverURL(doc)
 }
 
+// operationServerURL returns the Operation.ServerURL of op, of path item
+// pi, given the document's first server URL. Operation servers with
+// another base path than the document's are a warning: the generated
+// server routes the document's.
+func (b *builder) operationServerURL(pi *oas.PathItem, op *oas.Operation, doc *url.URL) string {
+	servers := op.Servers
+	if len(servers) == 0 {
+		servers = pi.Servers
+	}
+	u := firstServerURL(servers)
+	if u == nil {
+		return ""
+	}
+	raw := strings.TrimSuffix(u.String(), "/")
+	if raw == "" {
+		raw = "/"
+	}
+	docRaw, docPath := "", ""
+	if doc != nil {
+		docRaw, docPath = strings.TrimSuffix(doc.String(), "/"), strings.TrimSuffix(doc.Path, "/")
+	}
+	if raw == docRaw {
+		return ""
+	}
+	if len(op.Servers) > 0 && strings.TrimSuffix(u.Path, "/") != docPath {
+		b.warnServer(op, []string{"servers"}, "operation-level servers with another base path than the document's are not used by the generated server; generated clients send to them")
+	}
+	return raw
+}
+
 // basePath returns the path of the first server URL, with its variables
 // replaced by their defaults, without a trailing slash.
 func basePath(doc *oas.Document) string {
-	u := firstServerURL(doc)
+	u := firstServerURL(doc.Servers)
 	if u == nil {
 		return ""
 	}
@@ -339,18 +376,20 @@ func basePath(doc *oas.Document) string {
 // serverURL returns the first server URL, with its variables replaced by
 // their defaults and without a trailing slash, if it is absolute.
 func serverURL(doc *oas.Document) string {
-	u := firstServerURL(doc)
+	u := firstServerURL(doc.Servers)
 	if u == nil || !u.IsAbs() || u.Host == "" {
 		return ""
 	}
 	return strings.TrimSuffix(u.String(), "/")
 }
 
-func firstServerURL(doc *oas.Document) *url.URL {
-	if len(doc.Servers) == 0 || doc.Servers[0] == nil {
+// firstServerURL returns the first of servers, with its variables
+// replaced by their defaults, or nil.
+func firstServerURL(servers []*oas.Server) *url.URL {
+	if len(servers) == 0 || servers[0] == nil {
 		return nil
 	}
-	s := doc.Servers[0]
+	s := servers[0]
 	raw := templateParam.ReplaceAllStringFunc(s.URL, func(m string) string {
 		if v, ok := s.Variables.Get(m[1 : len(m)-1]); ok && v != nil {
 			return v.Default
@@ -1976,6 +2015,13 @@ func (b *builder) warnAt(obj any, tokens []string, msg string) {
 	loc, _ := b.spec.Location(obj)
 	loc.Pointer = oas.JoinPointer(loc.Pointer, tokens...)
 	b.model.Warnings = append(b.model.Warnings, Warning{Location: loc, Position: b.spec.Position(loc), Message: msg})
+}
+
+// warnServer is warnAt for a warning that concerns the generated server
+// alone.
+func (b *builder) warnServer(obj any, tokens []string, msg string) {
+	b.warnAt(obj, tokens, msg)
+	b.model.Warnings[len(b.model.Warnings)-1].ServerOnly = true
 }
 
 func (b *builder) warnOperation(o *Operation, msg string) {
