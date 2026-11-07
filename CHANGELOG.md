@@ -4,6 +4,12 @@
 
 ### Added
 
+- Generic schemas: `$dynamicRef` is resolved within its dynamic scope
+  (`loader.Spec.Resource`, `Spec.ResolveDynamic`), so schemas that
+  specialise a template by `$dynamicAnchor` get types of their own in Go
+  and TypeScript, and the Markdown reference describes them; `goapi scan`
+  writes Go generic types as templates and their instances as
+  specialisations, with components named by `$id`.
 - `goapi diff -for server` (`diff.DocumentsFor`, `diff.Options`): changes
   judged for servers implementing the old document.
 - `goapi diff` compares callbacks, links, defaults, examples and
@@ -25,7 +31,7 @@
   bundled, with their paths, webhooks, components, tags, servers and
   security requirements; conflicts are reported with the first
   declaration kept, and `-fail-on-conflict` fails on them.
-- `goapi generate markdown` (`codegen.Markdown`): a document's reference
+- `goapi generate markdown` (`codegen.Markdown`, of a `loader.Spec`): a document's reference
   as one Markdown file, with its servers, security schemes, operations by
   tag, webhooks, callbacks and schemas, linked by GitHub's anchors, from
   a template `-templates` can change (`goapi templates -target
@@ -461,6 +467,12 @@
 
 ### Fixed
 
+- `$dynamicRef` was resolved statically, so generic schemas were typed as
+  their template.
+- The `Validate` of an array whose items accept nothing (`not: true`) did
+  not compile.
+- `goapi flatten` dropped components referred to by `$id` or anchor, and
+  `-hoist` moved schemas out of resources with an `$id`.
 - A streamed request of a Go client that failed (an invalid item, or an
   error of its iterator) after a full duplex server had answered was lost:
   the call succeeded, and its response only looked cut short. Reading the
