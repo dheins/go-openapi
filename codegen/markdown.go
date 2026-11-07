@@ -250,10 +250,11 @@ type MDResponse struct {
 // MDLink is a link of a response.
 type MDLink struct {
 	Name, Description string
-	// Target is a Markdown link to the operation, or its reference.
-	Target     string
-	Parameters []MDLinkValue
-	Body       string
+	// Target is a Markdown link to the operation, or its reference, and
+	// Server the server the link names, as code, or "".
+	Target, Server string
+	Parameters     []MDLinkValue
+	Body           string
 }
 
 // MDLinkValue is a parameter of a link.
@@ -693,6 +694,9 @@ func (g *mdGen) link(name string, l *oas.Link) *MDLink {
 	}
 	if len(l.RequestBody) > 0 {
 		ml.Body = linkValue(l.RequestBody)
+	}
+	if l.Server != nil {
+		ml.Server = code(l.Server.URL)
 	}
 	return ml
 }

@@ -45,9 +45,11 @@ shipped in.
 - Parameters and response headers with `content` other than JSON, text,
   forms and XML, and `querystring` parameters with text or XML content.
   — later
-- Links to operations of other documents (`operationRef` to another
-  file), links naming a `server`, and expressions embedded in text given
-  to object, array or body values of links. — later
+- Expressions embedded in text given to object, array or body values of
+  links. — later
+- Links to operations of other documents, whose paths this document does
+  not include: they are another API, which a client of this one has no
+  method for. — not planned
 - Signed webhooks (an HMAC of the body in a header): OpenAPI has no
   security scheme for them, so they are left to client and server
   middleware, as the guide shows. — not planned
@@ -136,6 +138,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Links that name a `server` are followed there, by the rule of
+  operation servers (`client.WithServer`, `CallOptions.server`), and
+  `operationRef`s into other files whose path items the document's paths
+  include are followed. (10e0e45, 6c2dd1e)
 - [x] Every runtime expression in callback URLs and links: `$url`,
   `$statusCode` and `$response.*` in callback URLs (URL functions taking
   `ctx` and `resp`), and `$url`, `$method`, `$statusCode` and expressions

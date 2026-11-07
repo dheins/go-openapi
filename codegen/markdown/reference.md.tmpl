@@ -218,7 +218,7 @@ Authorization server metadata: <{{.}}>
 {{end}}
 
 {{define "link" -}}
-- {{code .Name}} to {{.Target}}{{with .Description}}: {{oneLine .}}{{end}}
+- {{code .Name}} to {{.Target}}{{with .Server}} on {{.}}{{end}}{{with .Description}}: {{oneLine .}}{{end}}
 {{- range .Parameters}}
   - {{code .Name}} = {{.Value}}
 {{- end}}

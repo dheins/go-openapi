@@ -1443,7 +1443,7 @@ path.
 | Option | Effect |
 |---|---|
 | `client.WithBaseURL(url)` | send requests below another absolute URL, operations with servers of their own too |
-| `client.WithOperationServers(on)` | send operations with servers of their own there (`true`) or to the base URL (`false`) |
+| `client.WithOperationServers(on)` | send operations with servers of their own there (`true`) or to the base URL (`false`); a call's `client.WithServer(ctx, url)` follows the same rule |
 | `client.WithHTTPClient(hc)`, `client.WithDoer(d)` | send with another `*http.Client` or `client.Doer` (default `http.DefaultClient`) |
 | `client.WithMiddleware(mw...)` | wrap the `Doer`: retries, logging, signing, tracing; the first is outermost |
 | `client.WithHeader(name, value)` | add a header to every request that does not set it |
@@ -1518,7 +1518,16 @@ pet, err = c.GetPet(ctx, next)
 ```
 
 - **Targets:** a link leads to an operation by `operationId`, or by an
-  `operationRef` to an operation of the document's paths.
+  `operationRef` to an operation of the document's paths, in another
+  file too when the paths `$ref` its path item. An operation of another
+  document is another API, which the client has no method for.
+- **Servers:** a link that names a `server` sends the request it leads to
+  there, by the rule of operation servers: while the client uses the
+  document's server, or with `client.WithOperationServers(true)`. Its
+  `Follow` method sends with `client.WithServer(ctx, url)`, a server for
+  one call that any request can use, and the server is
+  `api.<Operation><Link>ServerURL` (`api.CreatePetMirrorServerURL`) for
+  sending the link method's request yourself.
 - **Values:** its `parameters` (by name, or qualified as `path.id` when
   several have the name) and `requestBody` are constants or runtime
   expressions:
@@ -1540,9 +1549,9 @@ pet, err = c.GetPet(ctx, next)
 - **Variants:** a link reading the body is followed from the variants
   with a JSON or XML body; following a response without the link is an
   error.
-- **Not followed:** a link that names a `server`, gives embedded text to
-  an object, array or body, or names an unknown operation or parameter
-  gets a warning and no methods.
+- **Not followed:** a link that gives embedded text to an object, array
+  or body, or names an unknown operation or parameter gets a warning and
+  no methods.
 
 Each operation's client functions are also exported from its operations
 package, `api.NewGetPetRequest(ctx, cfg, req)` and
@@ -1663,7 +1672,7 @@ if (resp.status === 200) {
 - **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. `$url` is the URL the request was sent to, built again (`requestUrl`), and embedded text is parsed for a number or boolean parameter. A value that is not there is left out, for the request's validation to report if it is required.
 - **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
-- **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal` and `headers`. A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
+- **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal`, `headers` and `server` (as `client.WithServer`; following a link that names a server sets it). A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
 
 Not supported by the TypeScript client yet; `generate ts-client` warns
 about each one it leaves out:

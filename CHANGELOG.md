@@ -4,6 +4,12 @@
 
 ### Added
 
+- Links that name a `server` are followed there, while the client uses
+  the document's server (or `client.WithOperationServers(true)`):
+  `client.WithServer(ctx, url)` and `client.ServerFrom` set and read a
+  server for one call, `api.<Operation><Link>ServerURL` names the link's,
+  TypeScript `CallOptions.server` does the same, and the Markdown
+  reference shows it.
 - Callback URLs with `$url`, `$statusCode`, `$response.body#/...` and
   `$response.header.*`: their URL functions take the handler's `ctx`
   (`server.RequestURL`) and `resp`, the response it returns. Links with
@@ -541,6 +547,9 @@
 
 ### Changed
 
+- A link whose `operationRef` leads to an operation of another document
+  warns that it is another document's, rather than that it leads to no
+  operation.
 - Generated clients' `New` sets the document's server with
   `client.WithDefaultBaseURL` rather than `client.WithBaseURL`, and
   `generate client`, `cli` and `ts-client` no longer print the warnings

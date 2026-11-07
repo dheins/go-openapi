@@ -196,9 +196,9 @@ Links:
 - `Sent` to [getPet](#get-petspetid)
   - `petId` = `$response.body#/id`
   - `session` = `$url`
-- `Mirror` to [getPet](#get-petspetid)
+- `Mirror` to [getPet](#get-petspetid) on `https://{region}.mirror.example.com/v1`
   - `petId` = `$response.body#/id`
-- `Archive` to [getPet](#get-petspetid)
+- `Archive` to [getPet](#get-petspetid) on `/archive`
   - `petId` = `$response.body#/id`
 
 `4XX`:
