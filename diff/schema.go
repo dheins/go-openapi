@@ -47,6 +47,8 @@ func (d *differ) compare(o, n *oas.Schema, where string, dir direction, text boo
 
 	d.types(o, n, where, dir, text)
 	d.enums(o, n, where, dir)
+	d.defaults(o, n, where)
+	d.examples(schemaExamples(o), schemaExamples(n), o, n, where)
 	d.constraints(o, n, where, dir)
 	d.properties(o, n, where, dir)
 	d.schema(o.Items, n.Items, where+"/items", dir)
@@ -95,6 +97,35 @@ func (d *differ) types(o, n *oas.Schema, where string, dir direction, text bool)
 			d.add(Error, RuleTypeWidened, o, n, "%s: may be %s now", where, t)
 		}
 	}
+}
+
+// defaults compares the defaults of values: a server assumes it for a
+// property a client leaves out of a request, and a client fills it in
+// when a response leaves it out, so a change may break either.
+func (d *differ) defaults(o, n *oas.Schema, where string) {
+	before, after := compact(o.Default), compact(n.Default)
+	switch {
+	case before == after:
+	case len(o.Default) == 0:
+		d.add(Warning, RuleDefaultChanged, o, n, "%s: default %s was added", where, after)
+	case len(n.Default) == 0:
+		d.add(Warning, RuleDefaultChanged, o, n, "%s: default %s was removed", where, before)
+	default:
+		d.add(Warning, RuleDefaultChanged, o, n, "%s: the default is %s instead of %s", where, after, before)
+	}
+}
+
+// schemaExamples returns the examples of a schema, by name: "example",
+// and "examples/0" and so on.
+func schemaExamples(s *oas.Schema) map[string]string {
+	out := map[string]string{}
+	if len(s.Example) > 0 {
+		out["example"] = compact(s.Example)
+	}
+	for i, v := range s.Examples {
+		out[fmt.Sprintf("examples/%d", i)] = compact(v)
+	}
+	return out
 }
 
 // enumValues returns the values of an enum, as compact JSON.

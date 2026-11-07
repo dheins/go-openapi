@@ -5,7 +5,9 @@
 package diff
 
 import (
+	"bytes"
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -110,6 +112,13 @@ const (
 	RulePropertyAdded        = "property-added"
 	RuleVariantsChanged      = "variants-changed"
 	RuleDiscriminatorChanged = "discriminator-changed"
+	RuleCallbackRemoved      = "callback-removed"
+	RuleCallbackAdded        = "callback-added"
+	RuleLinkRemoved          = "link-removed"
+	RuleLinkChanged          = "link-changed"
+	RuleLinkAdded            = "link-added"
+	RuleDefaultChanged       = "default-changed"
+	RuleExampleChanged       = "example-changed"
 )
 
 // Documents returns the changes from old to new, in the order of the
@@ -203,9 +212,16 @@ type operation struct {
 	path, method string
 	item         *oas.PathItem
 	op           *oas.Operation
+	// label names a callback's operation, with the operation declaring it.
+	label string
 }
 
-func (o operation) String() string { return strings.ToUpper(o.method) + " " + o.path }
+func (o operation) String() string {
+	if o.label != "" {
+		return o.label
+	}
+	return strings.ToUpper(o.method) + " " + o.path
+}
 
 // collect returns the operations of paths by method and path template
 // with its parameters unnamed, in document order.
@@ -281,6 +297,45 @@ func (d *differ) operation(o, n operation, webhook bool) {
 	d.responses(o.op, n.op, where, receive)
 	if !webhook {
 		d.security(o.op, n.op, where)
+		d.callbacks(o.op, n.op, where)
+	}
+}
+
+// callbacks compares the callbacks of an operation, which the API makes
+// as it does webhooks: one it no longer makes may break a client waiting
+// for it.
+func (d *differ) callbacks(o, n *oas.Operation, where string) {
+	for name, before := range o.Callbacks.All() {
+		before = before.Deref()
+		after, ok := n.Callbacks.Get(name)
+		if !ok {
+			d.add(Warning, RuleCallbackRemoved, o, n, "%s: callback %s was removed", where, name)
+			continue
+		}
+		after = after.Deref()
+		label := fmt.Sprintf("%s: callback %s", where, name)
+		oldKeys, oldOps := collect(&before.Items)
+		newKeys, newOps := collect(&after.Items)
+		for _, key := range oldKeys {
+			b := oldOps[key]
+			a, ok := newOps[key]
+			if !ok {
+				d.add(Warning, RuleCallbackRemoved, b.op, n, "%s %s was removed", label, b)
+				continue
+			}
+			b.label, a.label = label+" "+b.String(), label+" "+a.String()
+			d.operation(b, a, true)
+		}
+		for _, key := range newKeys {
+			if _, ok := oldOps[key]; !ok {
+				d.add(Info, RuleCallbackAdded, o, newOps[key].op, "%s %s was added", label, newOps[key])
+			}
+		}
+	}
+	for name, after := range n.Callbacks.All() {
+		if _, ok := o.Callbacks.Get(name); !ok {
+			d.add(Info, RuleCallbackAdded, o, after.Deref(), "%s: callback %s was added", where, name)
+		}
 	}
 }
 
@@ -343,6 +398,7 @@ func (d *differ) parameters(o, n operation, where string, dir direction) {
 		}
 		d.textSchema(before.Schema, after.Schema, label, dir)
 		d.content(before.Content, after.Content, before, after, label, dir)
+		d.examples(exampleSet(before.Example, before.Examples), exampleSet(after.Example, after.Examples), before, after, label)
 	}
 	for _, key := range newKeys {
 		if _, ok := oldParams[key]; ok {
@@ -413,6 +469,7 @@ func (d *differ) content(o, n *oas.OrderedMap[*oas.MediaType], oldObj, newObj an
 		label := where + " " + mt
 		d.schema(before.Schema, after.Schema, label, dir)
 		d.schema(before.ItemSchema, after.ItemSchema, label+" item", dir)
+		d.examples(exampleSet(before.Example, before.Examples), exampleSet(after.Example, after.Examples), before, after, label)
 	}
 	for mt, after := range n.All() {
 		if _, ok := o.Get(mt); !ok {
@@ -446,6 +503,7 @@ func (d *differ) responses(o, n *oas.Operation, where string, dir direction) {
 		after = after.Deref()
 		d.content(before.Content, after.Content, before, after, label, dir)
 		d.headers(before, after, label, dir)
+		d.links(before, after, label)
 	}
 	for status, after := range newResps.All() {
 		if _, ok := oldResps.Get(status); !ok {
@@ -470,6 +528,7 @@ func (d *differ) headers(o, n *oas.Response, where string, dir direction) {
 			}
 			d.textSchema(before.Schema, after.Schema, label, dir)
 			d.content(before.Content, after.Content, before, after, label, dir)
+			d.examples(exampleSet(before.Example, before.Examples), exampleSet(after.Example, after.Examples), before, after, label)
 		}
 	}
 	for name, after := range n.Headers.All() {
@@ -477,6 +536,110 @@ func (d *differ) headers(o, n *oas.Response, where string, dir direction) {
 			d.add(Info, RuleHeaderAdded, o, after.Deref(), "%s: header %s was added", where, name)
 		}
 	}
+}
+
+// links compares the links of a response, which clients may follow: one
+// removed or leading elsewhere may break one.
+func (d *differ) links(o, n *oas.Response, where string) {
+	for name, before := range o.Links.All() {
+		before = before.Deref()
+		after, ok := n.Links.Get(name)
+		label := fmt.Sprintf("%s: link %s", where, name)
+		if !ok {
+			d.add(Warning, RuleLinkRemoved, before, n, "%s was removed", label)
+			continue
+		}
+		after = after.Deref()
+		var changed []string
+		if before.OperationID != after.OperationID || before.OperationRef != after.OperationRef {
+			changed = append(changed, "the operation it leads to")
+		}
+		if !sameJSONMap(before.Parameters, after.Parameters) {
+			changed = append(changed, "its parameters")
+		}
+		if compact(before.RequestBody) != compact(after.RequestBody) {
+			changed = append(changed, "its request body")
+		}
+		if len(changed) > 0 {
+			d.add(Warning, RuleLinkChanged, before, after, "%s changed: %s", label, strings.Join(changed, ", "))
+		}
+	}
+	for name, after := range n.Links.All() {
+		if _, ok := o.Links.Get(name); !ok {
+			d.add(Info, RuleLinkAdded, o, after.Deref(), "%s: link %s was added", where, name)
+		}
+	}
+}
+
+// sameJSONMap reports whether two maps of JSON values hold the same
+// values by key.
+func sameJSONMap(a, b *oas.OrderedMap[json.RawMessage]) bool {
+	if a.Len() != b.Len() {
+		return false
+	}
+	for k, v := range a.All() {
+		w, ok := b.Get(k)
+		if !ok || compact(v) != compact(w) {
+			return false
+		}
+	}
+	return true
+}
+
+// compact returns a JSON value on one line, or as it is if it is not
+// valid JSON.
+func compact(v json.RawMessage) string {
+	var b bytes.Buffer
+	if json.Compact(&b, v) != nil {
+		return string(v)
+	}
+	return b.String()
+}
+
+// examples compares the examples of a parameter, header, media type or
+// schema, by name ("example" for the one of example): they only
+// document, so a change is information.
+func (d *differ) examples(o, n map[string]string, oldObj, newObj any, where string) {
+	var names []string
+	for name := range o {
+		names = append(names, name)
+	}
+	for name := range n {
+		if _, ok := o[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		before, wasThere := o[name]
+		after, isThere := n[name]
+		switch {
+		case !isThere:
+			d.add(Info, RuleExampleChanged, oldObj, newObj, "%s: example %q was removed", where, name)
+		case !wasThere:
+			d.add(Info, RuleExampleChanged, oldObj, newObj, "%s: example %q was added", where, name)
+		case before != after:
+			d.add(Info, RuleExampleChanged, oldObj, newObj, "%s: example %q was changed", where, name)
+		}
+	}
+}
+
+// exampleSet returns the examples of an object with example and examples,
+// as compact JSON (with the text of serialized and external values), by
+// name.
+func exampleSet(example json.RawMessage, examples *oas.OrderedMap[*oas.Example]) map[string]string {
+	out := map[string]string{}
+	if len(example) > 0 {
+		out["example"] = compact(example)
+	}
+	for name, e := range examples.All() {
+		e = e.Deref()
+		if e == nil {
+			continue
+		}
+		out[name] = compact(e.DataValue) + "|" + compact(e.Value) + "|" + e.SerializedValue + "|" + e.ExternalValue
+	}
+	return out
 }
 
 // headerNamed returns the header of a name, which is not case-sensitive.

@@ -419,3 +419,96 @@ func TestDiscriminators(t *testing.T) {
 		"info variants-changed: POST /pets: request body application/json: oneOf alternative Dog was added",
 	)
 }
+
+func TestCallbacks(t *testing.T) {
+	doc := func(callbacks string) string {
+		return `paths:
+  /subscriptions:
+    post:
+      ` + ok + `
+      callbacks:
+` + callbacks
+	}
+	event := func(schema string) string {
+		return `        onEvent:
+          "{$request.body#/url}":
+            post:
+              requestBody: {content: {application/json: {schema: ` + schema + `}}}
+              responses: {"204": {description: ok}}
+`
+	}
+	expect(t, changes(t, doc(event("{type: object, properties: {id: {type: string}}}")+`        onPing:
+          "{$request.body#/ping}":
+            get: {`+ok+`}
+`), doc(event("{type: object, required: [id], properties: {id: {type: string}, at: {type: string}}}")+`        onDone:
+          "{$request.body#/done}":
+            post: {`+ok+`}
+`)),
+		// The API sends the callback's request, so a client receives it.
+		"info property-added: POST /subscriptions: callback onEvent POST {$request.body#/url}: request body application/json/at: the property was added",
+		"warning callback-removed: POST /subscriptions: callback onPing was removed",
+		"info callback-added: POST /subscriptions: callback onDone was added",
+	)
+	expect(t, changes(t, doc(event("{type: string}")), doc(`        onEvent:
+          "{$request.body#/url}":
+            put: {`+ok+`}
+`)),
+		"warning callback-removed: POST /subscriptions: callback onEvent POST {$request.body#/url} was removed",
+		"info callback-added: POST /subscriptions: callback onEvent PUT {$request.body#/url} was added",
+	)
+}
+
+func TestLinks(t *testing.T) {
+	doc := func(links string) string {
+		return `paths:
+  /pets:
+    post:
+      operationId: createPet
+      responses:
+        "201":
+          description: created
+          links:
+` + links + `
+  /pets/{id}:
+    get: {operationId: getPet, ` + ok + `}
+    delete: {operationId: deletePet, ` + ok + `}
+`
+	}
+	expect(t, changes(t, doc(`            Get: {operationId: getPet, parameters: {id: $response.body#/id}}
+            Delete: {operationId: deletePet}
+            Same: {operationId: getPet, parameters: {id: $response.body#/id}}`), doc(`            Get: {operationId: deletePet, parameters: {id: $response.body#/petId}}
+            Same: {operationId: getPet, parameters: {id: $response.body#/id}}
+            New: {operationId: getPet}`)),
+		"warning link-changed: POST /pets: response 201: link Get changed: the operation it leads to, its parameters",
+		"warning link-removed: POST /pets: response 201: link Delete was removed",
+		"info link-added: POST /pets: response 201: link New was added",
+	)
+}
+
+func TestDefaultsAndExamples(t *testing.T) {
+	doc := func(limitDefault, example, schema string) string {
+		return `paths:
+  /pets:
+    get:
+      parameters:
+        - {name: limit, in: query, schema: {type: integer` + limitDefault + `}` + example + `}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: ` + schema + `
+`
+	}
+	expect(t, changes(t,
+		doc(", default: 10", ", examples: {few: {value: 2}, many: {value: 50}}", "{type: object, properties: {sort: {type: string, default: name}, tag: {type: string, example: cat}}}"),
+		doc(", default: 20", ", examples: {few: {value: 3}, none: {value: 0}}", "{type: object, properties: {sort: {type: string}, tag: {type: string, example: dog, default: none}}}")),
+		`warning default-changed: GET /pets: query parameter "limit": the default is 20 instead of 10`,
+		`info example-changed: GET /pets: query parameter "limit": example "few" was changed`,
+		`info example-changed: GET /pets: query parameter "limit": example "many" was removed`,
+		`info example-changed: GET /pets: query parameter "limit": example "none" was added`,
+		`warning default-changed: GET /pets: response 200 application/json/sort: default "name" was removed`,
+		`warning default-changed: GET /pets: response 200 application/json/tag: default "none" was added`,
+		`info example-changed: GET /pets: response 200 application/json/tag: example "example" was changed`,
+	)
+}
