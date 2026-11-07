@@ -2,9 +2,13 @@ package ir
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/dheins/go-openapi/loader"
 )
 
 const linksDoc = `openapi: 3.1.0
@@ -69,10 +73,12 @@ func TestLinks(t *testing.T) {
 		"CreatePet201JSONResponse byBody ByBodyLink GetPet [path.id=$response.body#/id header.mode=\"fast\"]",
 		"CreatePet201JSONResponse byHeader ByHeaderLink GetPet [path.id=$response.header.x-id]",
 		"CreatePet201JSONResponse byRequest ByRequestLink GetPet [path.id=$request.body#/name]",
+		"CreatePet201JSONResponse server ServerLink GetPet []",
 		"CreatePet201JSONResponse byRequestFacts ByRequestFactsLink GetPet [path.id=$statusCode query.mode=$method header.mode=$url]",
 		"CreatePet201JSONResponse embedded EmbeddedLink GetPet [path.id={$response.body#/id} query.mode={$method} {$url}?s={$statusCode}&h={$response.header.X-Id}]",
 		"CreatePet201TextResponse byHeader ByHeaderLink GetPet [path.id=$response.header.x-id]",
 		"CreatePet201TextResponse byRequest ByRequestLink GetPet [path.id=$request.body#/name]",
+		"CreatePet201TextResponse server ServerLink GetPet []",
 		"CreatePet201TextResponse byRequestFacts ByRequestFactsLink GetPet [path.id=$statusCode query.mode=$method header.mode=$url]",
 	}
 	if !slices.Equal(got, want) {
@@ -92,8 +98,12 @@ func TestLinks(t *testing.T) {
 				t.Errorf("embedded mode = %+v", p)
 			}
 		case "byBody":
-			if l.NeedsURL() {
-				t.Error("byBody needs the URL")
+			if l.NeedsURL() || l.ServerURL != "" {
+				t.Errorf("byBody needs the URL or has a server: %+v", l)
+			}
+		case "server":
+			if l.ServerURL != "https://other.example.com" {
+				t.Errorf("server link's server = %q", l.ServerURL)
 			}
 		}
 	}
@@ -106,7 +116,6 @@ func TestLinks(t *testing.T) {
 	}
 	for _, w := range []string{
 		`the link "ambiguous" of response 201 of CreatePet: mode is the name of several parameters`,
-		`the link "server" of response 201 of CreatePet: it names a server`,
 		`the link "nowhere" of response 201 of CreatePet: it leads to no operation`,
 		`the link "unknownParam" of response 201 of CreatePet: GetPet has no parameter color`,
 		`the link "badExpression" of response 201 of CreatePet: parameter id: $foo is not a value of the response or request`,
@@ -126,5 +135,63 @@ func TestLinks(t *testing.T) {
 		if len(r.Links) > 0 {
 			t.Errorf("%s keeps links to GetPet: %v", r.TypeName, r.Links)
 		}
+	}
+}
+
+func TestLinkOperationRefToOtherFile(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"openapi.yaml": `openapi: 3.1.0
+info: {title: t, version: v}
+paths:
+  /pets:
+    post:
+      operationId: createPet
+      responses:
+        "201":
+          description: ok
+          content: {application/json: {schema: {type: object, properties: {id: {type: integer}}}}}
+          links:
+            reached: {operationRef: "other.yaml#/paths/~1pets~1{id}/get", parameters: {id: $response.body#/id}}
+            elsewhere: {operationRef: "other.yaml#/paths/~1owners/get"}
+  /pets/{id}:
+    $ref: "other.yaml#/paths/~1pets~1{id}"
+`,
+		"other.yaml": `openapi: 3.1.0
+info: {title: other, version: v}
+paths:
+  /pets/{id}:
+    get:
+      operationId: getPet
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer}}
+      responses: {"200": {description: ok}}
+  /owners:
+    get:
+      operationId: listOwners
+      responses: {"200": {description: ok}}
+`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec, err := loader.Load(filepath.Join(dir, "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Build(spec, Options{Operations: true})
+	links := operationNamed(t, m, "CreatePet").Responses[0].Links
+	if len(links) != 1 || links[0].Name != "reached" || links[0].Operation.Name != "GetPet" {
+		t.Errorf("links = %+v", links)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Message)
+	}
+	want := `the link "elsewhere" of response 201 of CreatePet: it leads to an operation of another document, which this client has no method for; no method follows it`
+	if !slices.Contains(warnings, want) {
+		t.Errorf("no warning %q in:\n%s", want, strings.Join(warnings, "\n"))
 	}
 }

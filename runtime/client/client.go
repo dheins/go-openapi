@@ -193,8 +193,26 @@ func (c *Config) Do(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// Build turns r into an HTTP request to the base URL, or to its
-// operation's server (Request.Server) when OperationServers is set.
+type serverKey struct{}
+
+// WithServer returns ctx with a server for the requests sent with it: an
+// absolute URL, or one relative to the base URL. It takes the place of
+// operations' own servers, under the same rule (see
+// WithOperationServers): a client whose base URL is not the document's
+// sends to its base URL. Following a link that names a server uses it.
+func WithServer(ctx context.Context, url string) context.Context {
+	return context.WithValue(ctx, serverKey{}, url)
+}
+
+// ServerFrom returns the server WithServer put in ctx.
+func ServerFrom(ctx context.Context) (string, bool) {
+	s, ok := ctx.Value(serverKey{}).(string)
+	return s, ok
+}
+
+// Build turns r into an HTTP request to the base URL or, when
+// OperationServers is set, to the server of ctx (WithServer) or of its
+// operation (Request.Server).
 func (c *Config) Build(ctx context.Context, r *Request) (*http.Request, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -203,8 +221,12 @@ func (c *Config) Build(ctx context.Context, r *Request) (*http.Request, error) {
 		return nil, errors.New("client: no base URL; use WithBaseURL")
 	}
 	u := *c.BaseURL
-	if r.server != "" && c.OperationServers {
-		s, err := url.Parse(r.server)
+	server := r.server
+	if s, ok := ServerFrom(ctx); ok {
+		server = s
+	}
+	if server != "" && c.OperationServers {
+		s, err := url.Parse(server)
 		if err != nil {
 			return nil, fmt.Errorf("client: operation server: %w", err)
 		}

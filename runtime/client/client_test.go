@@ -245,6 +245,43 @@ func TestOperationServers(t *testing.T) {
 	}
 }
 
+func TestContextServer(t *testing.T) {
+	ctx := WithServer(context.Background(), "https://links.example.com/v3")
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		// Over the operation's own server.
+		{"default base", []Option{WithDefaultBaseURL("https://api.example.com/v1")}, "https://links.example.com/v3/pets"},
+		{"own base", []Option{WithBaseURL("http://localhost:8080/v1")}, "http://localhost:8080/v1/pets"},
+		{"own base, forced on", []Option{WithBaseURL("http://localhost:8080/v1"), WithOperationServers(true)}, "https://links.example.com/v3/pets"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := NewConfig(tc.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := NewRequest("GET")
+			r.Server("/v2")
+			r.Path("/pets")
+			req, err := c.Build(ctx, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := req.URL.String(); got != tc.want {
+				t.Errorf("url = %s, want %s", got, tc.want)
+			}
+		})
+	}
+	if s, ok := ServerFrom(ctx); !ok || s != "https://links.example.com/v3" {
+		t.Errorf("ServerFrom = %q %v", s, ok)
+	}
+	if _, ok := ServerFrom(context.Background()); ok {
+		t.Error("a server in an empty context")
+	}
+}
+
 func TestBodiesRoundTrip(t *testing.T) {
 	// A form with nested objects and arrays reads back as sent.
 	r := NewRequest("POST")

@@ -24,6 +24,11 @@ type Link struct {
 	// Values set the linked request's parameters and body, in document
 	// order.
 	Values []*LinkValue
+	// ServerURL is the link's server, with its variables replaced by their
+	// defaults: clients send the request there as they do to an
+	// operation's own server. It may be relative to the base URL; "" for
+	// none.
+	ServerURL string
 }
 
 // LinkValue is the value a link gives a parameter of the linked
@@ -139,9 +144,6 @@ func (r *Response) Header(name string) *Header {
 // link resolves the link l of a response of pl.answers, or says why it
 // cannot be followed.
 func (b *builder) link(name string, l *oas.Link, pl pendingLinks, byID map[string]*Operation) (*Link, string) {
-	if l.Server != nil {
-		return nil, "it names a server, which the client does not switch to"
-	}
 	var target *Operation
 	switch {
 	case l.OperationID != "":
@@ -154,12 +156,20 @@ func (b *builder) link(name string, l *oas.Link, pl pendingLinks, byID map[strin
 		}
 	}
 	switch {
+	case target == nil && l.Operation != nil:
+		return nil, "it leads to an operation of another document, which this client has no method for"
 	case target == nil:
 		return nil, "it leads to no operation of the document's paths"
 	case target.Unsupported != "":
 		return nil, fmt.Sprintf("the operation it leads to, %s, is not generated", target.Name)
 	}
 	link := &Link{Name: name, Doc: strings.TrimSpace(l.Description), Operation: target}
+	if u := firstServerURL([]*oas.Server{l.Server}); u != nil {
+		link.ServerURL = strings.TrimSuffix(u.String(), "/")
+		if link.ServerURL == "" {
+			link.ServerURL = "/"
+		}
+	}
 	for key, raw := range l.Parameters.All() {
 		p, why := linkParam(target, key)
 		if why != "" {

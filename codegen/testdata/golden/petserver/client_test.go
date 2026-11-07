@@ -131,6 +131,47 @@ func TestClientOperationServers(t *testing.T) {
 	}
 }
 
+// TestFollowLinkServers checks that following a link naming a server
+// sends there, by the rule of operation servers.
+func TestFollowLinkServers(t *testing.T) {
+	ctx := context.Background()
+	var sent []string
+	record := client.WithDoer(client.DoerFunc(func(r *http.Request) (*http.Response, error) {
+		sent = append(sent, r.URL.String())
+		return &http.Response{StatusCode: 404, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+	}))
+	created := api.CreatePet201JSONResponse{Body: model.Pet{ID: 7, Name: "Rex"}}
+	req := &api.CreatePetRequest{Body: model.Pet{Name: "Rex"}}
+	for _, tc := range []struct {
+		name string
+		opts []client.Option
+		want []string
+	}{
+		{"document's server", nil, []string{"https://eu.mirror.example.com/v1/pets/7", "https://api.example.com/archive/pets/7", "https://api.example.com/v1/pets/7"}},
+		{"own base URL", []client.Option{client.WithBaseURL("http://localhost:8080/v1")}, []string{"http://localhost:8080/v1/pets/7", "http://localhost:8080/v1/pets/7", "http://localhost:8080/v1/pets/7"}},
+		{"own base URL, operation servers", []client.Option{client.WithBaseURL("http://localhost:8080/v1"), client.WithOperationServers(true)},
+			[]string{"https://eu.mirror.example.com/v1/pets/7", "http://localhost:8080/archive/pets/7", "http://localhost:8080/v1/pets/7"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent = nil
+			c, err := newClient(petclient.Credentials{}, append([]client.Option{record}, tc.opts...)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, follow := range []func(context.Context, api.CreatePetResponse, *api.CreatePetRequest) (api.GetPetResponse, error){
+				c.FollowCreatePetMirror, c.FollowCreatePetArchive, c.FollowCreatePetGetPet,
+			} {
+				if r, err := follow(ctx, created, req); err != nil || r != (api.GetPet404Response{}) {
+					t.Errorf("follow: %+v %v", r, err)
+				}
+			}
+			if !slices.Equal(sent, tc.want) {
+				t.Errorf("sent to %q, want %q", sent, tc.want)
+			}
+		})
+	}
+}
+
 func TestClientParameters(t *testing.T) {
 	ctx := context.Background()
 	s, c := newTestClient(t, petclient.Credentials{})
