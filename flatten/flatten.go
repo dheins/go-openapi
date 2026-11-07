@@ -4,6 +4,7 @@
 package flatten
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -26,6 +27,15 @@ type Options struct {
 	// request bodies, headers, links, callbacks, path items and media
 	// types, and security schemes no security requirement names.
 	RemoveUnused bool
+	// Expand replaces every reference within the document by a copy of
+	// what it points to, but for references to an object being copied
+	// (recursive schemas), into or out of a schema with an $id, and
+	// $dynamicRef. Keywords next to a reference are laid over the copy,
+	// merged into it or, when that would change what they check, put with
+	// it in an allOf (ignored in a 3.0 document, as 3.0 says). The
+	// components nothing refers to then are dropped, but for security
+	// schemes. It cannot be used with Hoist, which does the opposite.
+	Expand bool
 }
 
 // Document returns spec as one JSON document, as loader.Spec.Bundle
@@ -41,7 +51,10 @@ func Document(spec *loader.Spec, opts Options) ([]byte, error) {
 
 // finish makes the changes opts asks for to a bundled document.
 func finish(data []byte, opts Options) ([]byte, error) {
-	if !opts.Hoist && !opts.RemoveUnused {
+	if opts.Hoist && opts.Expand {
+		return nil, errors.New("expanding references and hoisting schemas into components cannot be combined")
+	}
+	if !opts.Hoist && !opts.RemoveUnused && !opts.Expand {
 		return data, nil
 	}
 	root, err := parse(data)
@@ -53,8 +66,11 @@ func finish(data []byte, opts Options) ([]byte, error) {
 			return nil, err
 		}
 	}
+	if opts.Expand {
+		root = expand(root)
+	}
 	if opts.RemoveUnused {
-		removeUnused(root)
+		removeUnused(root, false)
 	}
 	return root.json(), nil
 }
@@ -164,8 +180,9 @@ func rewriteRefs(n *node, moves []move) {
 var componentKinds = []string{"schemas", "responses", "parameters", "examples", "requestBodies", "headers", "links", "callbacks", "pathItems", "mediaTypes"}
 
 // removeUnused drops the components nothing outside them refers to,
-// directly or through components that are used.
-func removeUnused(root *node) {
+// directly or through components that are used, and the security schemes
+// no requirement names unless keepSchemes.
+func removeUnused(root *node, keepSchemes bool) {
 	components := root.get("components")
 	if components == nil || components.kind != '{' {
 		return
@@ -229,7 +246,11 @@ func removeUnused(root *node) {
 		queue = queue[1:]
 		components.get(e.kind).get(e.name).walk(visit)
 	}
-	for _, kind := range append(slices.Clone(componentKinds), "securitySchemes") {
+	kinds := slices.Clone(componentKinds)
+	if !keepSchemes {
+		kinds = append(kinds, "securitySchemes")
+	}
+	for _, kind := range kinds {
 		section := components.get(kind)
 		if section == nil || section.kind != '{' {
 			continue
