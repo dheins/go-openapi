@@ -854,6 +854,21 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   generated a `Validate` with an unused variable.
 - *Not done*: see [features.md](../features.md).
 
+### M44 – Every keyword in goapi diff ✅
+- [x] `allOf` members paired by what they are; tuples position by
+  position
+- [x] `not`, `if`/`then`/`else`, `patternProperties`, `dependentSchemas`,
+  `dependentRequired`, `propertyNames`, `contains` and its counts
+
+**How it went**
+- *Two verbs*: every new keyword is a constraint added or removed, so
+  "narrowed" (an error for the side sending) and "widened" (a warning for
+  the side receiving) carry them, and `-for server` follows for free.
+- *Absent, true and false*: a subschema that is missing accepts anything,
+  like `true`; comparing one with a schema says which way it moved before
+  comparing schemas.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
