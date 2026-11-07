@@ -73,10 +73,10 @@ func accepts(types oas.Types, t string) bool {
 func (d *differ) types(o, n *oas.Schema, where string, dir direction, text bool) {
 	// As text, any value a client sends is a string, and any it receives
 	// as a string reads as one.
-	if text && (dir == request && accepts(n.Type, "string") || dir == response && accepts(o.Type, "string")) {
+	if text && (d.sends(dir) && accepts(n.Type, "string") || !d.sends(dir) && accepts(o.Type, "string")) {
 		return
 	}
-	if dir == request {
+	if d.sends(dir) {
 		if len(n.Type) > 0 && len(o.Type) == 0 {
 			d.add(Error, RuleTypeNarrowed, o, n, "%s: only %s is accepted now", where, strings.Join(n.Type, ", "))
 			return
@@ -156,24 +156,24 @@ func (d *differ) enums(o, n *oas.Schema, where string, dir direction) {
 	switch {
 	case len(before) == 0 && len(after) == 0:
 	case len(before) == 0:
-		if dir == request {
+		if d.sends(dir) {
 			d.add(Error, RuleEnumNarrowed, o, n, "%s: only %s are accepted now", where, strings.Join(after, ", "))
 		}
 	case len(after) == 0:
-		if dir == response {
+		if !d.sends(dir) {
 			d.add(Warning, RuleEnumWidened, o, n, "%s: may be any value now, not only %s", where, strings.Join(before, ", "))
 		}
 	default:
 		if removed := missing(before, after); len(removed) > 0 {
 			sev := Info
-			if dir == request {
+			if d.sends(dir) {
 				sev = Error
 			}
 			d.add(sev, RuleEnumNarrowed, o, n, "%s: %s removed from the enum", where, strings.Join(removed, ", "))
 		}
 		if added := missing(after, before); len(added) > 0 {
 			sev := Info
-			if dir == response {
+			if !d.sends(dir) {
 				// Clients may switch on the values they know.
 				sev = Warning
 			}
@@ -226,12 +226,12 @@ var bounds = []bound{
 // more may surprise a client receiving it.
 func (d *differ) constraints(o, n *oas.Schema, where string, dir direction) {
 	tightened := func(what string, args ...any) {
-		if dir == request {
+		if d.sends(dir) {
 			d.add(Error, RuleConstraintTightened, o, n, "%s: "+what, append([]any{where}, args...)...)
 		}
 	}
 	loosened := func(what string, args ...any) {
-		if dir == response {
+		if !d.sends(dir) {
 			d.add(Warning, RuleConstraintLoosened, o, n, "%s: "+what, append([]any{where}, args...)...)
 		}
 	}
@@ -291,7 +291,7 @@ func (d *differ) properties(o, n *oas.Schema, where string, dir direction) {
 		wasRequired, isRequired := slices.Contains(o.Required, name), slices.Contains(n.Required, name)
 		if !ok {
 			switch {
-			case dir == response:
+			case !d.sends(dir):
 				d.add(Error, RulePropertyRemoved, before, n, "%s: the property was removed", label)
 			case closed(n):
 				d.add(Error, RulePropertyRemoved, before, n, "%s: the property was removed, and others are not allowed", label)
@@ -301,9 +301,9 @@ func (d *differ) properties(o, n *oas.Schema, where string, dir direction) {
 			continue
 		}
 		switch {
-		case dir == request && !wasRequired && isRequired:
+		case d.sends(dir) && !wasRequired && isRequired:
 			d.add(Error, RulePropertyRequired, before, after, "%s: the property is required now", label)
-		case dir == response && wasRequired && !isRequired:
+		case !d.sends(dir) && wasRequired && !isRequired:
 			d.add(Error, RulePropertyOptional, before, after, "%s: the property may be left out now", label)
 		}
 		d.schema(before, after, label, dir)
@@ -313,13 +313,13 @@ func (d *differ) properties(o, n *oas.Schema, where string, dir direction) {
 			continue
 		}
 		label := where + "/" + name
-		if dir == request && slices.Contains(n.Required, name) {
+		if d.sends(dir) && slices.Contains(n.Required, name) {
 			d.add(Error, RulePropertyRequired, o, after, "%s: a required property was added", label)
 		} else {
 			d.add(Info, RulePropertyAdded, o, after, "%s: the property was added", label)
 		}
 	}
-	if dir == request && !closed(o) && closed(n) {
+	if d.sends(dir) && !closed(o) && closed(n) {
 		d.add(Error, RuleConstraintTightened, o, n, "%s: properties not listed are not allowed now", where)
 	}
 }
@@ -336,14 +336,14 @@ func (d *differ) variants(keyword string, before, after []*oas.Schema, o, n *oas
 	}
 	for _, i := range removed {
 		sev := Info
-		if dir == request {
+		if d.sends(dir) {
 			sev = Error
 		}
 		d.add(sev, RuleVariantsChanged, before[i], n, "%s: %s alternative %s was removed", where, keyword, variantName(before[i], i))
 	}
 	for _, i := range added {
 		sev := Info
-		if dir == response {
+		if !d.sends(dir) {
 			sev = Warning
 		}
 		d.add(sev, RuleVariantsChanged, o, after[i], "%s: %s alternative %s was added", where, keyword, variantName(after[i], i))
@@ -524,14 +524,14 @@ func (d *differ) discriminator(o, n *oas.Schema, where string, dir direction) {
 	}
 	if len(removed) > 0 {
 		sev := Info
-		if dir == request {
+		if d.sends(dir) {
 			sev = Error
 		}
 		d.add(sev, RuleDiscriminatorChanged, o, n, "%s: discriminator value %s removed from the mapping", where, quoteList(removed))
 	}
 	if len(added) > 0 {
 		sev := Info
-		if dir == response {
+		if !d.sends(dir) {
 			sev = Warning
 		}
 		d.add(sev, RuleDiscriminatorChanged, o, n, "%s: discriminator value %s added to the mapping", where, quoteList(added))

@@ -19,7 +19,8 @@ func loadFile(t *testing.T, file string) *loader.Spec {
 	return res.Spec
 }
 
-// TestSameDocument checks that a document has no changes from itself.
+// TestSameDocument checks that a document has no changes from itself,
+// for either side.
 func TestSameDocument(t *testing.T) {
 	files, err := filepath.Glob("../codegen/testdata/golden/*/openapi.yaml")
 	if err != nil {
@@ -27,8 +28,10 @@ func TestSameDocument(t *testing.T) {
 	}
 	files = append(files, "../loader/testdata/multi/openapi.yaml", "../loader/testdata/swagger2/kitchen.yaml")
 	for _, file := range files {
-		if changes := Documents(loadFile(t, file), loadFile(t, file)); len(changes) > 0 {
-			t.Errorf("%s: %v", file, changes)
+		for _, side := range []Side{Clients, Servers} {
+			if changes := DocumentsFor(loadFile(t, file), loadFile(t, file), Options{For: side}); len(changes) > 0 {
+				t.Errorf("%s, side %d: %v", file, side, changes)
+			}
 		}
 	}
 }
@@ -510,5 +513,131 @@ func TestDefaultsAndExamples(t *testing.T) {
 		`warning default-changed: GET /pets: response 200 application/json/sort: default "name" was removed`,
 		`warning default-changed: GET /pets: response 200 application/json/tag: default "none" was added`,
 		`info example-changed: GET /pets: response 200 application/json/tag: example "example" was changed`,
+	)
+}
+
+// changesFor returns the changes from old to new judged for side, as
+// changes does.
+func changesFor(t *testing.T, side Side, old, new string) []string {
+	t.Helper()
+	load := func(name, body string) *loader.Spec {
+		src, err := loader.ParseBytes([]byte(head+body), "file:///"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec, err := loader.LoadSource(src)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return spec
+	}
+	var out []string
+	for _, c := range DocumentsFor(load("old.yaml", old), load("new.yaml", new), Options{For: side}) {
+		out = append(out, c.Severity.String()+" "+c.Rule+": "+c.Message)
+	}
+	return out
+}
+
+func TestServers(t *testing.T) {
+	old := `paths:
+  /pets:
+    get:
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, maxLength: 10}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Next: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {type: object, required: [id], properties: {id: {type: integer}, tag: {type: string}}}
+        "404": {description: none}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {name: {type: string}}}}}}
+      ` + ok + `
+  /old:
+    get: {` + ok + `}
+`
+	new := `paths:
+  /pets:
+    get:
+      deprecated: true
+      parameters:
+        - {name: q, in: query, schema: {type: string}}
+        - {name: page, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Next: {required: true, schema: {type: string}}
+            X-Total: {required: true, schema: {type: integer}}
+          content:
+            application/json:
+              schema: {type: object, required: [id, tag], properties: {id: {type: integer}, tag: {type: string, maxLength: 5}}}
+        "201": {description: created}
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object, properties: {name: {type: [string, integer]}}}}
+          application/xml: {schema: {type: object}}
+      ` + ok + `
+  /new:
+    get: {` + ok + `}
+`
+	expect(t, changesFor(t, Servers, old, new),
+		"info operation-deprecated: GET /pets is deprecated",
+		`error parameter-optional: GET /pets: query parameter "q" is optional now`,
+		// What a server receives may only be narrower: maxLength removed
+		// is wider.
+		`warning constraint-loosened: GET /pets: query parameter "q": maxLength 10 was removed`,
+		`warning parameter-added: GET /pets: query parameter "page" was added`,
+		// What it sends may only be accepted more widely.
+		"error property-required: GET /pets: response 200 application/json/tag: the property is required now",
+		"error constraint-tightened: GET /pets: response 200 application/json/tag: maxLength 5 was added",
+		"error response-header-required: GET /pets: response 200: header X-Next is required now",
+		"error response-header-added: GET /pets: response 200: header X-Total was added",
+		"warning response-removed: GET /pets: response 404 was removed",
+		"info response-added: GET /pets: response 201 was added, which clients may not expect",
+		"error type-widened: POST /pets: request body application/json/name: may be integer now",
+		"error media-type-added: POST /pets: request body: media type application/xml was added",
+		"info operation-removed: operation GET /old was removed",
+		"error operation-added: operation GET /new was added",
+	)
+}
+
+func TestServersSecurityAndCallbacks(t *testing.T) {
+	const schemes = `components:
+  securitySchemes:
+    key: {type: apiKey, in: header, name: X-Key}
+    basic: {type: http, scheme: basic}
+`
+	doc := func(security, callbacks string) string {
+		return `paths:
+  /pets:
+    get:
+      security: ` + security + `
+      ` + ok + `
+      callbacks:
+` + callbacks + schemes
+	}
+	ping := `        onPing:
+          "{$request.query.url}":
+            post: {` + ok + `}
+`
+	done := `        onDone:
+          "{$request.query.url}":
+            post: {` + ok + `}
+`
+	expect(t, changesFor(t, Servers, doc("[{key: []}]", ping), doc("[{key: []}, {basic: []}]", done)),
+		"error security-relaxed: GET /pets: security requirement {basic} was added",
+		"info callback-removed: GET /pets: callback onPing was removed",
+		"error callback-added: GET /pets: callback onDone was added",
+	)
+	expect(t, changesFor(t, Clients, doc("[{key: []}]", ping), doc("[{key: []}, {basic: []}]", done)),
+		"info security-relaxed: GET /pets: security requirement {basic} was added",
+		"warning callback-removed: GET /pets: callback onPing was removed",
+		"info callback-added: GET /pets: callback onDone was added",
 	)
 }

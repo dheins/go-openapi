@@ -10,7 +10,7 @@
 //	goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
 //	goapi generate markdown [-out file] [-paths patterns] [-tags tags] file
 //	goapi convert [-out file] [-format yaml|json] file
-//	goapi diff [-format text|json] [-fail-on error|warning] old new
+//	goapi diff [-format text|json] [-fail-on error|warning] [-for client|server] old new
 //	goapi flatten [-out file] [-format yaml|json] [-hoist|-expand] [-remove-unused] file
 //	goapi mixin [-out file] [-format yaml|json] [-fail-on-conflict] file file...
 //	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
@@ -100,7 +100,7 @@ Usage:
   goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
   goapi generate markdown [-out file] [-paths patterns] [-tags tags] file
   goapi convert [-out file] [-format yaml|json] file
-  goapi diff [-format text|json] [-fail-on error|warning] old new
+  goapi diff [-format text|json] [-fail-on error|warning] [-for client|server] old new
   goapi flatten [-out file] [-format yaml|json] [-hoist|-expand] [-remove-unused] file
   goapi mixin [-out file] [-format yaml|json] [-fail-on-conflict] file file...
   goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]

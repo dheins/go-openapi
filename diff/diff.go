@@ -1,7 +1,8 @@
 // Package diff compares two versions of an OpenAPI document and reports
-// what changed, judged from the side of the API's clients: a change that
-// breaks callers written against the old version is an error, one that
-// may break them a warning, and others are information.
+// what changed, judged from the side of the API's clients or, with
+// Options.For, of its servers: a change that breaks clients (or servers)
+// written against the old version is an error, one that may break them a
+// warning, and others are information.
 package diff
 
 import (
@@ -96,6 +97,7 @@ const (
 	RuleHeaderRemoved        = "response-header-removed"
 	RuleHeaderOptional       = "response-header-optional"
 	RuleHeaderAdded          = "response-header-added"
+	RuleHeaderRequired       = "response-header-required"
 	RuleSecurityChanged      = "security-changed"
 	RuleSecurityRelaxed      = "security-relaxed"
 	RuleSchemeChanged        = "security-scheme-changed"
@@ -121,10 +123,35 @@ const (
 	RuleExampleChanged       = "example-changed"
 )
 
-// Documents returns the changes from old to new, in the order of the
-// documents' paths, webhooks, security and servers.
+// Side is whom changes are judged for.
+type Side int
+
+const (
+	// Clients are written against the old document: what they send may
+	// only be accepted more widely, what they receive only more narrowly.
+	Clients Side = iota
+	// Servers implement the old document: what they receive may only be
+	// narrower, what they send only accepted more widely, and they must
+	// serve new operations.
+	Servers
+)
+
+// Options configures Documents.
+type Options struct {
+	// For is whom the changes are judged for; clients by default.
+	For Side
+}
+
+// Documents returns the changes from old to new, judged for clients, in
+// the order of the documents' paths, webhooks, security and servers.
 func Documents(old, new *loader.Spec) []Change {
-	d := &differ{old: old, new: new, seen: map[schemaPair]bool{}}
+	return DocumentsFor(old, new, Options{})
+}
+
+// DocumentsFor returns the changes from old to new, judged for whom opts
+// says.
+func DocumentsFor(old, new *loader.Spec, opts Options) []Change {
+	d := &differ{old: old, new: new, side: opts.For, seen: map[schemaPair]bool{}}
 	d.operations(old.Document.Paths, new.Document.Paths, false)
 	if o, n := old.Document.Webhooks, new.Document.Webhooks; o != nil || n != nil {
 		d.webhooks(o, n)
@@ -150,10 +177,25 @@ type schemaPair struct {
 
 type differ struct {
 	old, new *loader.Spec
+	side     Side
 	changes  []Change
 	// seen are the pairs of schemas compared already, which recursive
 	// schemas meet again.
 	seen map[schemaPair]bool
+}
+
+// sends reports whether the side judged sends a value going in dir,
+// which is as the client sees it.
+func (d *differ) sends(dir direction) bool {
+	return dir == request == (d.side == Clients)
+}
+
+// pick returns the severity of a change for the side judged.
+func (d *differ) pick(clients, servers Severity) Severity {
+	if d.side == Servers {
+		return servers
+	}
+	return clients
 }
 
 // add records a change at oldObj and newObj, objects of each document,
@@ -269,14 +311,15 @@ func (d *differ) compareOps(o, n *oas.OrderedMap[*oas.PathItem], webhook bool) {
 		before := oldOps[key]
 		after, ok := newOps[key]
 		if !ok {
-			d.add(Error, RuleOperationRemoved, before.op, nil, "%s %s was removed", what, before)
+			d.add(d.pick(Error, Info), RuleOperationRemoved, before.op, nil, "%s %s was removed", what, before)
 			continue
 		}
 		d.operation(before, after, webhook)
 	}
 	for _, key := range newKeys {
 		if _, ok := oldOps[key]; !ok {
-			d.add(Info, RuleOperationAdded, nil, newOps[key].op, "%s %s was added", what, newOps[key])
+			// A server must serve a new operation, and send a new webhook.
+			d.add(d.pick(Info, Error), RuleOperationAdded, nil, newOps[key].op, "%s %s was added", what, newOps[key])
 		}
 	}
 }
@@ -284,7 +327,7 @@ func (d *differ) compareOps(o, n *oas.OrderedMap[*oas.PathItem], webhook bool) {
 func (d *differ) operation(o, n operation, webhook bool) {
 	where := n.String()
 	if !o.op.Deprecated && n.op.Deprecated {
-		d.add(Warning, RuleOperationDeprecated, o.op, n.op, "%s is deprecated", where)
+		d.add(d.pick(Warning, Info), RuleOperationDeprecated, o.op, n.op, "%s is deprecated", where)
 	}
 	// What the client sends and receives: for a webhook, the API sends the
 	// request and the client the response.
@@ -309,7 +352,7 @@ func (d *differ) callbacks(o, n *oas.Operation, where string) {
 		before = before.Deref()
 		after, ok := n.Callbacks.Get(name)
 		if !ok {
-			d.add(Warning, RuleCallbackRemoved, o, n, "%s: callback %s was removed", where, name)
+			d.add(d.pick(Warning, Info), RuleCallbackRemoved, o, n, "%s: callback %s was removed", where, name)
 			continue
 		}
 		after = after.Deref()
@@ -320,7 +363,7 @@ func (d *differ) callbacks(o, n *oas.Operation, where string) {
 			b := oldOps[key]
 			a, ok := newOps[key]
 			if !ok {
-				d.add(Warning, RuleCallbackRemoved, b.op, n, "%s %s was removed", label, b)
+				d.add(d.pick(Warning, Info), RuleCallbackRemoved, b.op, n, "%s %s was removed", label, b)
 				continue
 			}
 			b.label, a.label = label+" "+b.String(), label+" "+a.String()
@@ -328,13 +371,13 @@ func (d *differ) callbacks(o, n *oas.Operation, where string) {
 		}
 		for _, key := range newKeys {
 			if _, ok := oldOps[key]; !ok {
-				d.add(Info, RuleCallbackAdded, o, newOps[key].op, "%s %s was added", label, newOps[key])
+				d.add(d.pick(Info, Error), RuleCallbackAdded, o, newOps[key].op, "%s %s was added", label, newOps[key])
 			}
 		}
 	}
 	for name, after := range n.Callbacks.All() {
 		if _, ok := o.Callbacks.Get(name); !ok {
-			d.add(Info, RuleCallbackAdded, o, after.Deref(), "%s: callback %s was added", where, name)
+			d.add(d.pick(Info, Error), RuleCallbackAdded, o, after.Deref(), "%s: callback %s was added", where, name)
 		}
 	}
 }
@@ -381,7 +424,7 @@ func (d *differ) parameters(o, n operation, where string, dir direction) {
 		after, ok := newParams[key]
 		label := fmt.Sprintf("%s: %s parameter %q", where, before.In, before.Name)
 		if !ok {
-			d.add(Warning, RuleParameterRemoved, before, nil, "%s was removed", label)
+			d.add(d.pick(Warning, Info), RuleParameterRemoved, before, nil, "%s was removed", label)
 			continue
 		}
 		if before.Name != after.Name {
@@ -389,9 +432,10 @@ func (d *differ) parameters(o, n operation, where string, dir direction) {
 		}
 		switch {
 		case !before.Required && after.Required:
-			d.add(Error, RuleParameterRequired, before, after, "%s is required now", label)
+			d.add(d.pick(Error, Info), RuleParameterRequired, before, after, "%s is required now", label)
 		case before.Required && !after.Required:
-			d.add(Info, RuleParameterOptional, before, after, "%s is optional now", label)
+			// A server may rely on getting it.
+			d.add(d.pick(Info, Error), RuleParameterOptional, before, after, "%s is optional now", label)
 		}
 		if os, ns := style(before), style(after); os != ns {
 			d.add(Error, RuleParameterStyle, before, after, "%s is serialized as %s instead of %s", label, ns, os)
@@ -406,9 +450,10 @@ func (d *differ) parameters(o, n operation, where string, dir direction) {
 		}
 		p := newParams[key]
 		if p.Required {
-			d.add(Error, RuleParameterAdded, nil, p, "%s: required %s parameter %q was added", where, p.In, p.Name)
+			d.add(d.pick(Error, Info), RuleParameterAdded, nil, p, "%s: required %s parameter %q was added", where, p.In, p.Name)
 		} else {
-			d.add(Info, RuleParameterAdded, nil, p, "%s: %s parameter %q was added", where, p.In, p.Name)
+			// A server ignores it, which clients sending it may not expect.
+			d.add(d.pick(Info, Warning), RuleParameterAdded, nil, p, "%s: %s parameter %q was added", where, p.In, p.Name)
 		}
 	}
 }
@@ -436,20 +481,21 @@ func (d *differ) body(o, n *oas.RequestBody, oldOp, newOp *oas.Operation, where 
 		return
 	case o == nil:
 		if n.Required {
-			d.add(Error, RuleBodyAdded, nil, n, "%s: a required request body was added", where)
+			d.add(d.pick(Error, Info), RuleBodyAdded, nil, n, "%s: a required request body was added", where)
 		} else {
-			d.add(Info, RuleBodyAdded, nil, n, "%s: a request body was added", where)
+			d.add(d.pick(Info, Warning), RuleBodyAdded, nil, n, "%s: a request body was added", where)
 		}
 		return
 	case n == nil:
-		d.add(Warning, RuleBodyRemoved, o, newOp, "%s: the request body was removed", where)
+		d.add(d.pick(Warning, Info), RuleBodyRemoved, o, newOp, "%s: the request body was removed", where)
 		return
 	}
 	switch {
 	case !o.Required && n.Required:
-		d.add(Error, RuleBodyRequired, o, n, "%s: the request body is required now", where)
+		d.add(d.pick(Error, Info), RuleBodyRequired, o, n, "%s: the request body is required now", where)
 	case o.Required && !n.Required:
-		d.add(Info, RuleBodyOptional, o, n, "%s: the request body is optional now", where)
+		// A server may rely on getting it.
+		d.add(d.pick(Info, Error), RuleBodyOptional, o, n, "%s: the request body is optional now", where)
 	}
 	d.content(o.Content, n.Content, o, n, where+": request body", dir)
 }
@@ -457,12 +503,17 @@ func (d *differ) body(o, n *oas.RequestBody, oldOp, newOp *oas.Operation, where 
 // content compares the media types of bodies, or of parameters and
 // headers with content. A removed one breaks a client either way: it
 // sends that type, or asks for it. A new one is information, since
-// clients ask for the types they know.
+// clients ask for the types they know. A server breaks on a type it
+// must accept now, or one it sends that is gone.
 func (d *differ) content(o, n *oas.OrderedMap[*oas.MediaType], oldObj, newObj any, where string, dir direction) {
+	removed, added := Error, Info
+	if d.side == Servers && !d.sends(dir) {
+		removed, added = Info, Error
+	}
 	for mt, before := range o.All() {
 		after, ok := n.Get(mt)
 		if !ok {
-			d.add(Error, RuleMediaTypeRemoved, before, newObj, "%s: media type %s was removed", where, mt)
+			d.add(removed, RuleMediaTypeRemoved, before, newObj, "%s: media type %s was removed", where, mt)
 			continue
 		}
 		before, after = before.Deref(), after.Deref()
@@ -473,7 +524,7 @@ func (d *differ) content(o, n *oas.OrderedMap[*oas.MediaType], oldObj, newObj an
 	}
 	for mt, after := range n.All() {
 		if _, ok := o.Get(mt); !ok {
-			d.add(Info, RuleMediaTypeAdded, oldObj, after, "%s: media type %s was added", where, mt)
+			d.add(added, RuleMediaTypeAdded, oldObj, after, "%s: media type %s was added", where, mt)
 		}
 	}
 }
@@ -492,8 +543,9 @@ func (d *differ) responses(o, n *oas.Operation, where string, dir direction) {
 		label := fmt.Sprintf("%s: response %s", where, status)
 		if !ok {
 			// A client may rely on a success; an error response it no
-			// longer gets is one it no longer handles.
-			sev := Info
+			// longer gets is one it no longer handles. A server still
+			// sends it.
+			sev := d.pick(Info, Warning)
 			if strings.HasPrefix(status, "2") {
 				sev = Error
 			}
@@ -507,7 +559,7 @@ func (d *differ) responses(o, n *oas.Operation, where string, dir direction) {
 	}
 	for status, after := range newResps.All() {
 		if _, ok := oldResps.Get(status); !ok {
-			d.add(Warning, RuleResponseAdded, o, after.Deref(), "%s: response %s was added, which clients may not expect", where, status)
+			d.add(d.pick(Warning, Info), RuleResponseAdded, o, after.Deref(), "%s: response %s was added, which clients may not expect", where, status)
 		}
 	}
 }
@@ -519,12 +571,15 @@ func (d *differ) headers(o, n *oas.Response, where string, dir direction) {
 		label := fmt.Sprintf("%s: header %s", where, name)
 		switch {
 		case !ok && before.Required:
-			d.add(Error, RuleHeaderRemoved, before, n, "%s, which was required, was removed", label)
+			d.add(d.pick(Error, Info), RuleHeaderRemoved, before, n, "%s, which was required, was removed", label)
 		case !ok:
-			d.add(Warning, RuleHeaderRemoved, before, n, "%s was removed", label)
+			d.add(d.pick(Warning, Info), RuleHeaderRemoved, before, n, "%s was removed", label)
 		default:
 			if before.Required && !after.Required {
-				d.add(Error, RuleHeaderOptional, before, after, "%s is optional now", label)
+				d.add(d.pick(Error, Info), RuleHeaderOptional, before, after, "%s is optional now", label)
+			}
+			if !before.Required && after.Required && d.side == Servers {
+				d.add(Error, RuleHeaderRequired, before, after, "%s is required now", label)
 			}
 			d.textSchema(before.Schema, after.Schema, label, dir)
 			d.content(before.Content, after.Content, before, after, label, dir)
@@ -533,7 +588,12 @@ func (d *differ) headers(o, n *oas.Response, where string, dir direction) {
 	}
 	for name, after := range n.Headers.All() {
 		if _, ok := headerNamed(o.Headers, name); !ok {
-			d.add(Info, RuleHeaderAdded, o, after.Deref(), "%s: header %s was added", where, name)
+			sev := Info
+			if after.Deref().Required {
+				// A server must send it.
+				sev = d.pick(Info, Error)
+			}
+			d.add(sev, RuleHeaderAdded, o, after.Deref(), "%s: header %s was added", where, name)
 		}
 	}
 }
@@ -546,7 +606,7 @@ func (d *differ) links(o, n *oas.Response, where string) {
 		after, ok := n.Links.Get(name)
 		label := fmt.Sprintf("%s: link %s", where, name)
 		if !ok {
-			d.add(Warning, RuleLinkRemoved, before, n, "%s was removed", label)
+			d.add(d.pick(Warning, Info), RuleLinkRemoved, before, n, "%s was removed", label)
 			continue
 		}
 		after = after.Deref()
@@ -561,7 +621,7 @@ func (d *differ) links(o, n *oas.Response, where string) {
 			changed = append(changed, "its request body")
 		}
 		if len(changed) > 0 {
-			d.add(Warning, RuleLinkChanged, before, after, "%s changed: %s", label, strings.Join(changed, ", "))
+			d.add(d.pick(Warning, Info), RuleLinkChanged, before, after, "%s changed: %s", label, strings.Join(changed, ", "))
 		}
 	}
 	for name, after := range n.Links.All() {
@@ -699,18 +759,19 @@ func (d *differ) security(o, n *oas.Operation, where string) {
 	}
 	for _, req := range before {
 		if !met(after, req) {
-			d.add(Error, RuleSecurityChanged, o, n, "%s: clients meeting security requirement %s no longer meet any", where, formatRequirement(req))
+			d.add(d.pick(Error, Info), RuleSecurityChanged, o, n, "%s: clients meeting security requirement %s no longer meet any", where, formatRequirement(req))
 		}
 	}
 	if len(before) == 0 {
 		if len(after) > 0 && !met(after, requirement{}) {
-			d.add(Error, RuleSecurityChanged, o, n, "%s: security is required now", where)
+			d.add(d.pick(Error, Info), RuleSecurityChanged, o, n, "%s: security is required now", where)
 		}
 		return
 	}
 	for _, req := range after {
 		if !met(before, req) {
-			d.add(Info, RuleSecurityRelaxed, o, n, "%s: security requirement %s was added", where, formatRequirement(req))
+			// A server must accept it.
+			d.add(d.pick(Info, Error), RuleSecurityRelaxed, o, n, "%s: security requirement %s was added", where, formatRequirement(req))
 		}
 	}
 }
@@ -781,7 +842,7 @@ func (d *differ) servers() {
 		if len(d.new.Document.Servers) > 0 {
 			n = d.new.Document.Servers[0]
 		}
-		d.add(Warning, RuleServersChanged, o, n, "the servers are %s instead of %s", quoteList(after), quoteList(before))
+		d.add(d.pick(Warning, Info), RuleServersChanged, o, n, "the servers are %s instead of %s", quoteList(after), quoteList(before))
 	}
 }
 
