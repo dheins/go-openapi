@@ -51,6 +51,6 @@ const {{.Method}}Link: LinkSpec = {{.Spec}};
 {{/* "linkMethod" gets a link: Link (*ir.Link), Method, Source and Target (*ir.Operation), SourceMethod, TargetMethod and Spec. */}}
 {{define "linkMethod"}}
 {{tsDoc "  " (linkDoc .) false}}  async {{.Method}}(resp: {{.Source.ResponseType}}, req: {{.Source.RequestType}}, call?: CallOptions): Promise<{{.Target.ResponseType}}> {
-    return this.{{.TargetMethod}}(link({{.Method}}Link, resp, req) as {{.Target.RequestType}}, call);
+    return this.{{.TargetMethod}}(link({{.Method}}Link, resp, req{{if .Link.NeedsURL}}, requestUrl(this.#cfg, {{.SourceMethod}}Spec, req){{end}}) as {{.Target.RequestType}}, call);
   }
 {{end}}

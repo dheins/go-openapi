@@ -68,8 +68,8 @@ type URLPart struct {
 	Header       string
 }
 
-// isText says p is text rather than a value.
-func (p URLPart) isText() bool {
+// IsText says p is text rather than a value.
+func (p URLPart) IsText() bool {
 	return p.Param == nil && !p.Body && !p.URL && !p.StatusCode && !p.ResponseBody && p.Header == ""
 }
 
@@ -153,11 +153,11 @@ func callbackURL(key string, parent *Operation) ([]URLPart, string) {
 func templateParts(key string, parent *Operation, responses []*Response) ([]URLPart, string) {
 	var parts []URLPart
 	add := func(p URLPart) {
-		if p.isText() {
+		if p.IsText() {
 			if p.Text == "" {
 				return
 			}
-			if n := len(parts); n > 0 && parts[n-1].isText() {
+			if n := len(parts); n > 0 && parts[n-1].IsText() {
 				parts[n-1].Text += p.Text
 				return
 			}
