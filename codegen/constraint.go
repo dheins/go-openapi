@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -207,14 +208,28 @@ func (v *validator) items(expr, path string, elem *ir.Ref, prefix []*ir.Constrai
 	if inner.b.Len() == 0 {
 		return
 	}
-	if len(prefix) == 0 {
-		v.line(depth, "for %s, %s := range %s {", index, item, expr)
-	} else {
+	used := usedOrBlank(inner.b.String(), item)
+	switch {
+	case len(prefix) == 0:
+		v.line(depth, "for %s, %s := range %s {", index, used, expr)
+	default:
 		v.line(depth, "for %s := %d; %s < len(%s); %s++ {", index, len(prefix), index, expr, index)
-		v.line(depth+1, "%s := %s[%s]", item, expr, index)
+		if used != "_" {
+			v.line(depth+1, "%s := %s[%s]", item, expr, index)
+		}
 	}
 	v.b.WriteString(inner.b.String())
 	v.line(depth, "}")
+}
+
+// usedOrBlank returns name if the statements body use it, else "_": the
+// checks of an item that accepts nothing (not: true) report every item
+// without reading it.
+func usedOrBlank(body, name string) string {
+	if regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(body) {
+		return name
+	}
+	return "_"
 }
 
 func (v *validator) guardedConstraint(cond, expr, path string, inner *ir.Ref, c *ir.Constraint, depth int) {

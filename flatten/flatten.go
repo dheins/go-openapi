@@ -101,7 +101,7 @@ func hoist(root *node, data []byte) error {
 			continue
 		}
 		tokens, err := splitPointer(t.Location.Pointer)
-		if err != nil || len(tokens) == 3 && tokens[0] == "components" && tokens[1] == "schemas" || typedEvents(tokens) {
+		if err != nil || len(tokens) == 3 && tokens[0] == "components" && tokens[1] == "schemas" || typedEvents(tokens) || inResource(root, tokens) {
 			continue
 		}
 		if !seen[t.Location.Pointer] {
@@ -140,6 +140,22 @@ func hoist(root *node, data []byte) error {
 	}
 	rewriteRefs(root, moves)
 	return nil
+}
+
+// inResource reports whether the schema at tokens is inside a schema with
+// an $id, whose references, and those into it, resolve against that $id:
+// moving it out would break them.
+func inResource(root *node, tokens []string) bool {
+	cur := root
+	for _, t := range tokens[:len(tokens)-1] {
+		if cur = cur.child(t); cur == nil {
+			return false
+		}
+		if id := cur.get("$id"); id != nil && id.kind == 's' {
+			return true
+		}
+	}
+	return false
 }
 
 // typedEvents reports whether tokens point at the itemSchema of a
@@ -239,6 +255,15 @@ func removeUnused(root *node, keepSchemes bool) {
 		if key != "components" {
 			visit(key, root.vals[i])
 			root.vals[i].walk(visit)
+		}
+	}
+	// A schema with an $id may be referred to by it, from any resource,
+	// which is not followed here: it is kept.
+	if schemas := components.get("schemas"); schemas != nil && schemas.kind == '{' {
+		for i, name := range schemas.keys {
+			if id := schemas.vals[i].get("$id"); id != nil && id.kind == 's' {
+				use("schemas", name)
+			}
 		}
 	}
 	for len(queue) > 0 {

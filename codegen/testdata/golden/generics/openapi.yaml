@@ -1,0 +1,140 @@
+openapi: 3.1.0
+info:
+  title: Generic pages
+  version: "1.0"
+  description: Schemas of JSON Schema 2020-12 generics, a template of an item that $dynamicAnchor specialises.
+servers:
+  - url: https://example.com/v1
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        "200":
+          description: A page of pets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetPage"
+    post:
+      operationId: putPets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PetPage"
+      responses:
+        "204":
+          description: Stored.
+  /tags:
+    get:
+      operationId: listTags
+      responses:
+        "200":
+          description: A page of tags.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagPage"
+  /owners:
+    get:
+      operationId: listOwners
+      responses:
+        "200":
+          description: A page of owners, specialised where it is used.
+          content:
+            application/json:
+              schema:
+                $id: https://example.com/owner-page
+                $ref: page
+                $defs:
+                  item:
+                    $dynamicAnchor: item
+                    $ref: owner
+  /trees:
+    get:
+      operationId: getTree
+      responses:
+        "200":
+          description: A tree, recursive through a $dynamicRef.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tree"
+components:
+  schemas:
+    Pet:
+      $id: https://example.com/pet
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+    Owner:
+      $id: https://example.com/owner
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    Page:
+      $id: https://example.com/page
+      description: A page of items; the item is given by $dynamicAnchor item.
+      $defs:
+        item:
+          $dynamicAnchor: item
+          not: true
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $dynamicRef: "#item"
+        first:
+          $dynamicRef: "#item"
+        meta:
+          type: object
+          properties:
+            total:
+              type: integer
+              minimum: 0
+            sample:
+              $dynamicRef: "#item"
+        links:
+          type: object
+          properties:
+            next:
+              type: string
+              format: uri
+    PetPage:
+      $id: https://example.com/pet-page
+      description: A page of pets.
+      $ref: page
+      $defs:
+        item:
+          $dynamicAnchor: item
+          $ref: pet
+    TagPage:
+      $id: https://example.com/tag-page
+      $ref: page
+      $defs:
+        item:
+          $dynamicAnchor: item
+          type: string
+          maxLength: 20
+    Tree:
+      $id: https://example.com/tree
+      $dynamicAnchor: node
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        children:
+          type: array
+          items:
+            $dynamicRef: "#node"

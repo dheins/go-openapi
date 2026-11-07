@@ -32,8 +32,13 @@ type builder struct {
 	// document's x-go-formats.
 	formats map[string]*Ref
 	model   *Model
-	named   map[*oas.Schema]*Type
+	named   map[namedKey]*Type
 	names   namespace
+	// scope is the dynamic scope of the schema being built: the schema
+	// resources entered, outermost first. dynamic are the $dynamicRefs
+	// the values of schemas may meet, by schema (see dynamicRefs).
+	scope   []string
+	dynamic map[*oas.Schema]map[string]*oas.Schema
 	// following guards against $ref chains that loop without ever
 	// reaching an object or other concrete schema.
 	following map[*oas.Schema]bool
@@ -64,7 +69,8 @@ func Build(spec *loader.Spec, opts Options) *Model {
 		opts:      opts,
 		formats:   formatTypes(spec, opts),
 		model:     &Model{},
-		named:     make(map[*oas.Schema]*Type),
+		named:     make(map[namedKey]*Type),
+		dynamic:   make(map[*oas.Schema]map[string]*oas.Schema),
 		names:     namespace{},
 		following: make(map[*oas.Schema]bool),
 
@@ -126,15 +132,20 @@ func (b *builder) declare(s *oas.Schema, hint string, root *Type) *Type {
 	t.Location, _ = b.spec.Location(s)
 	t.Doc = describeSchema(s)
 	t.Deprecated = s.Deprecated
-	b.named[s] = t
+	b.named[namedKey{s, b.scopeKey(s)}] = t
 	b.model.Types = append(b.model.Types, t)
 	return t
 }
 
-// fill decides what kind of type t is and builds its contents.
+// fill decides what kind of type t is and builds its contents, within the
+// dynamic scope of t's schema.
 func (b *builder) fill(t *Type) {
 	s := t.Schema
-	if target := refTarget(s); target != nil {
+	defer b.enter(s)()
+	if target := b.refTarget(s); target != nil {
+		if b.specialise(t, target) {
+			return
+		}
 		t.Kind = Alias
 		t.Underlying = b.follow(s, target, t.Name)
 		return
@@ -190,19 +201,22 @@ func (b *builder) fill(t *Type) {
 // named types for objects and enums as needed. hint names such types;
 // root is the type they are derived from.
 func (b *builder) use(s *oas.Schema, hint string, root *Type) *Ref {
-	if b.fileParts[s] && b.named[s] == nil && refTarget(s) == nil {
+	if _, named := b.namedType(s); b.fileParts[s] && !named && refTarget(s) == nil {
 		return fileRef()
 	}
 	if s == nil || s.Bool != nil {
 		return anyRef(nil)
 	}
-	if t, ok := b.named[s]; ok {
+	if t, ok := b.namedType(s); ok {
 		return namedRef(t)
 	}
 	if r := goTypeOverride(s); r != nil {
 		return r
 	}
-	if target := refTarget(s); target != nil {
+	if target := b.refTarget(s); target != nil {
+		if r := b.specialised(s, target, hint, root); r != nil {
+			return r
+		}
 		return b.follow(s, target, hint)
 	}
 	if inner := nullableInner(s); inner != nil {
@@ -215,11 +229,22 @@ func (b *builder) use(s *oas.Schema, hint string, root *Type) *Ref {
 		return namedRef(t)
 	}
 	b.warnUnionKeywords(s)
+	leave := b.enter(s)
 	r := b.inline(s, types, hint, root)
+	leave()
 	if nullable {
 		r = wrapNullable(r)
 	}
 	return r
+}
+
+// refTarget is refTarget with a $dynamicRef resolved in the current
+// dynamic scope.
+func (b *builder) refTarget(s *oas.Schema) *oas.Schema {
+	if s.Ref == "" && s.DynamicRef != "" {
+		return b.dynamicTarget(s)
+	}
+	return refTarget(s)
 }
 
 // follow returns the type for s, which refers to target, either by $ref
@@ -520,7 +545,7 @@ func (b *builder) fillStruct(t *Type) {
 	for _, m := range unionMembers {
 		// A component union names the field; an inline one is named after
 		// its keyword, like the struct's own.
-		_, component := b.named[m]
+		_, component := b.namedType(m)
 		keyword := "OneOf"
 		if len(m.OneOf) == 0 {
 			keyword = "AnyOf"
@@ -801,7 +826,8 @@ func (b *builder) fillPolymorphic(t *Type) {
 	for _, sub := range b.subtypesOf(s) {
 		ref := stripNullable(b.use(sub, b.hintFor(sub, t.Name+"Subtype"), nil))
 		if b.polymorphic(sub) {
-			ref = &Ref{Kind: Named, Type: b.baseOf(b.named[sub])}
+			subtype, _ := b.namedType(sub)
+			ref = &Ref{Kind: Named, Type: b.baseOf(subtype)}
 		}
 		t.Variants = append(t.Variants, &Variant{Name: fields.claim(variantName(ref, len(t.Variants))), Type: ref})
 		targets = append(targets, sub)
@@ -1202,7 +1228,8 @@ func documentFormats(spec *loader.Spec) map[string]string {
 }
 
 // refTarget returns the schema s stands for when it only refers to
-// another: a $ref, a $dynamicRef (resolved statically), or a lone allOf
+// another: a $ref, a $dynamicRef (resolved statically; see
+// builder.refTarget for the dynamic scope), or a lone allOf
 // member with nothing else of its own (the 3.0 idiom for annotating a
 // reference).
 func refTarget(s *oas.Schema) *oas.Schema {
@@ -1244,6 +1271,9 @@ func hasConstraints(s *oas.Schema) bool {
 	c.Deprecated, c.ReadOnly, c.WriteOnly = false, false, false
 	c.Default, c.Example, c.Examples = nil, nil, nil
 	c.ExternalDocs, c.Extra = nil, nil
+	// Identifiers and definitions say where schemas are, not what values
+	// are.
+	c.Schema, c.ID, c.Anchor, c.DynamicAnchor, c.Defs = "", "", "", "", nil
 	return !reflect.DeepEqual(c, oas.Schema{})
 }
 
