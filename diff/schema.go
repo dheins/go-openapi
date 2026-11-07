@@ -52,16 +52,11 @@ func (d *differ) compare(o, n *oas.Schema, where string, dir direction, text boo
 	d.constraints(o, n, where, dir)
 	d.properties(o, n, where, dir)
 	d.schema(o.Items, n.Items, where+"/items", dir)
-	for i := range min(len(o.PrefixItems), len(n.PrefixItems)) {
-		d.schema(o.PrefixItems[i], n.PrefixItems[i], fmt.Sprintf("%s/prefixItems/%d", where, i), dir)
-	}
 	d.schema(o.AdditionalProperties, n.AdditionalProperties, where+"/additionalProperties", dir)
 	d.discriminator(o, n, where, dir)
 	d.variants("oneOf", o.OneOf, n.OneOf, o, n, where, dir)
 	d.variants("anyOf", o.AnyOf, n.AnyOf, o, n, where, dir)
-	for i := range min(len(o.AllOf), len(n.AllOf)) {
-		d.schema(o.AllOf[i], n.AllOf[i], fmt.Sprintf("%s/allOf/%d", where, i), dir)
-	}
+	d.keywords(o, n, where, dir)
 }
 
 // accepts reports whether a value of JSON type t is one of types, an
@@ -219,6 +214,8 @@ var bounds = []bound{
 	{"maxItems", false, func(s *oas.Schema) *big.Rat { return count(s.MaxItems) }},
 	{"minProperties", true, func(s *oas.Schema) *big.Rat { return count(s.MinProperties) }},
 	{"maxProperties", false, func(s *oas.Schema) *big.Rat { return count(s.MaxProperties) }},
+	{"minContains", true, func(s *oas.Schema) *big.Rat { return count(s.MinContains) }},
+	{"maxContains", false, func(s *oas.Schema) *big.Rat { return count(s.MaxContains) }},
 }
 
 // constraints compares the limits, patterns and formats of values: one

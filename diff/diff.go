@@ -121,6 +121,11 @@ const (
 	RuleLinkAdded            = "link-added"
 	RuleDefaultChanged       = "default-changed"
 	RuleExampleChanged       = "example-changed"
+	RuleAllOfChanged         = "allof-changed"
+	RuleConditionChanged     = "condition-changed"
+	RuleExclusionChanged     = "exclusion-changed"
+	RulePatternChanged       = "pattern-properties-changed"
+	RuleDependencyChanged    = "dependency-changed"
 )
 
 // Side is whom changes are judged for.
