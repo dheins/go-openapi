@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"slices"
 	"testing"
@@ -98,17 +99,36 @@ func TestSwaggerRoundTrip(t *testing.T) {
 	key := swaggerclient.Credentials{Key: func(context.Context) (string, error) { return "good", nil }}
 	s, c := newClient(t, key)
 
-	// Query arrays in the 2.0 collection formats: csv, multi and pipes.
+	// Query arrays in the 2.0 collection formats: csv, multi and pipes,
+	// and tsv and nested ones, by x-goapi-collection-format.
 	req := &api.ListPetsRequest{Tags: oapi.Some([]string{"a", "b"}), IDs: oapi.Some([]int64{1, 2}),
-		Fields: oapi.Some([]string{"id", "name"}), Limit: 5, XRequestID: oapi.Some("r1")}
+		Fields: oapi.Some([]string{"id", "name"}), Words: oapi.Some([]string{"a b", "c,d"}), Grid: oapi.Some([][]int32{{1, 2}, {3}}),
+		XTags: oapi.Some([]string{"x y", "z"}), Limit: 5, XRequestID: oapi.Some("r1")}
 	resp, err := c.ListPets(ctx, req)
 	list, ok := resp.(api.ListPets200JSONResponse)
 	if err != nil || !ok || len(list.Body) != 1 || list.XTotal.Value != 1 {
 		t.Fatalf("list: %+v %v", resp, err)
 	}
 	if got := s.seen["ListPets"].(*api.ListPetsRequest); !slices.Equal(got.Tags.Value, req.Tags.Value) || !slices.Equal(got.IDs.Value, req.IDs.Value) ||
-		!slices.Equal(got.Fields.Value, req.Fields.Value) || got.Limit != 5 || got.XRequestID.Value != "r1" {
+		!slices.Equal(got.Fields.Value, req.Fields.Value) || got.Limit != 5 || got.XRequestID.Value != "r1" ||
+		!slices.Equal(got.Words.Value, req.Words.Value) || !slices.EqualFunc(got.Grid.Value, req.Grid.Value, slices.Equal[[]int32]) ||
+		!slices.Equal(got.XTags.Value, req.XTags.Value) {
 		t.Errorf("list request = %+v", got)
+	}
+	// On the wire: tabs, and pipes inside commas.
+	srv := httptest.NewServer(NewServer(s, auth{}, server.WithLogger(slog.New(slog.DiscardHandler))))
+	t.Cleanup(srv.Close)
+	wire, err := http.NewRequest(http.MethodGet, srv.URL+BasePath+"/pets?words=a%09b&grid=1|2,3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire.Header.Set("X-Tags", "p\tq")
+	if r, err := http.DefaultClient.Do(wire); err != nil || r.StatusCode != 200 {
+		t.Fatalf("wire: %v %v", r, err)
+	}
+	if got := s.seen["ListPets"].(*api.ListPetsRequest); !slices.Equal(got.Words.Value, []string{"a", "b"}) ||
+		!slices.EqualFunc(got.Grid.Value, [][]int32{{1, 2}, {3}}, slices.Equal[[]int32]) || !slices.Equal(got.XTags.Value, []string{"p", "q"}) {
+		t.Errorf("wire request = %+v", got)
 	}
 	// The 2.0 default, now a 3.x one.
 	if _, err := c.ListPets(ctx, nil); err != nil {

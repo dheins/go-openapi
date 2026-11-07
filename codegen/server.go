@@ -1089,6 +1089,8 @@ func (f *fileGen) bindParam(w func(int, string, ...any), o *ir.Operation, p *ir.
 		convert = f.decodeContent(p.ContentKind, elem, "raw", func() string { return f.propertiesVar(o, p) }, p.XML, lowerFirst(o.Name)+p.Field, "Request")
 	case p.Object:
 		convert = fmt.Sprintf("server.DecodeFields[%s](vals.Fields, %s)", elem, f.propertiesVar(o, p))
+	case p.Array && p.ItemDelimiter != "":
+		convert = fmt.Sprintf("server.ParseNested[%s](vals.Items, %q)", f.goType(p.Elem.Elem), p.ItemDelimiter)
 	case p.Array:
 		convert = fmt.Sprintf("server.ParseArray[%s](vals.Items)", elem)
 	default:
@@ -1177,6 +1179,12 @@ func (f *fileGen) paramVar(o *ir.Operation, p *ir.Param) string {
 		// An empty string is no number, boolean or object: the empty
 		// value means the parameter is not given.
 		b.WriteString(", EmptyIsAbsent: true")
+	}
+	if p.Delimiter != "" {
+		fmt.Fprintf(&b, ", Delimiter: %q", p.Delimiter)
+	}
+	if p.ItemDelimiter != "" {
+		fmt.Fprintf(&b, ", ItemDelimiter: %q", p.ItemDelimiter)
 	}
 	b.WriteString("}")
 	v := f.declareVar(lowerFirst(o.Name)+p.Field+"Param", b.String())

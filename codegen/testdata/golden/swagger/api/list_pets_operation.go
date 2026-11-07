@@ -18,6 +18,12 @@ type ListPetsRequest struct {
 	IDs oapi.Optional[[]int64]
 	// Fields is the query parameter "fields".
 	Fields oapi.Optional[[]string]
+	// Words is the query parameter "words".
+	Words oapi.Optional[[]string]
+	// Grid is the query parameter "grid".
+	Grid oapi.Optional[[][]int32]
+	// XTags is the header parameter "X-Tags".
+	XTags oapi.Optional[[]string]
 	// Limit is the query parameter "limit".
 	Limit int32
 	// XRequestID is the header parameter "X-Request-ID".

@@ -4,6 +4,14 @@
 
 ### Added
 
+- `goapi convert -version 3.2.0`, `-convert-to` for `flatten`, `mixin` and
+  `serve`, and `loader.WithConvertTo`: Swagger 2.0 converted to OpenAPI
+  3.2.
+- `x-goapi-collection-format`: array parameters with tab-separated items,
+  other delimiters outside queries, and arrays of arrays
+  (`server.Param.Delimiter`, `ItemDelimiter`, `server.ParseNested`),
+  which the Swagger 2.0 conversion writes for collection formats without
+  an OpenAPI 3 style.
 - `goapi diff` compares `prefixItems`, `not`, `if`/`then`/`else`,
   `patternProperties`, `dependentSchemas`, `dependentRequired`,
   `propertyNames` and `contains` (rules `allof-changed`,
@@ -520,6 +528,8 @@
 
 ### Changed
 
+- Converting Swagger 2.0 gives an operation whose `schemes` differ from
+  the document's `servers` of its own, instead of a warning.
 - `goapi diff` pairs `oneOf`/`anyOf` alternatives by what they are rather
   than by position, reporting each one removed or added by name instead of
   how many there are.

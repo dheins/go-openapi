@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/dheins/go-openapi/flatten"
+	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/validate"
 )
 
@@ -22,6 +23,7 @@ func runFlatten(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("out", "", "file to write the document to (default: standard output)")
 	format := fs.String("format", "", "output format, yaml or json (default: from the -out extension, else the input's)")
+	convertTo := fs.String("convert-to", loader.Convert31, "OpenAPI version Swagger 2.0 documents are converted to: 3.1.0 or 3.2.0")
 	hoist := fs.Bool("hoist", false, "move the inline schemas that become Go types into components.schemas, named as those types")
 	removeUnused := fs.Bool("remove-unused", false, "drop the components nothing refers to")
 	expand := fs.Bool("expand", false, "replace every reference by a copy of what it points to, but for recursive schemas, and drop the components nothing refers to then")
@@ -30,6 +32,9 @@ func runFlatten(args []string, stdout, stderr io.Writer) int {
 			return exitOK
 		}
 		return exitFailure
+	}
+	if err := checkConvertTo(*convertTo); err != nil {
+		return fail("%v", err)
 	}
 	if fs.NArg() != 1 {
 		return fail("expected one document")
@@ -42,7 +47,7 @@ func runFlatten(args []string, stdout, stderr io.Writer) int {
 		return fail("unknown format %q", *format)
 	}
 
-	res, err := validate.File(file)
+	res, err := validate.File(file, loader.WithConvertTo(*convertTo))
 	if err != nil {
 		return fail("%v", err)
 	}

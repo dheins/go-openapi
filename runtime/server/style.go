@@ -40,7 +40,25 @@ type Param struct {
 	// (numbers, booleans, objects). Otherwise an empty value is an error.
 	AllowEmptyValue bool
 	EmptyIsAbsent   bool
+	// Delimiter, if set, separates the items of an array that is not
+	// exploded instead of the style's, and ItemDelimiter the items of
+	// each item, an array too (x-goapi-collection-format, from Swagger
+	// 2.0's collectionFormat).
+	Delimiter, ItemDelimiter string
 }
+
+// sep returns the delimiter of the items of an array not exploded: the
+// parameter's own, else def.
+func (p Param) sep(def string) string {
+	if p.Delimiter != "" {
+		return p.Delimiter
+	}
+	return def
+}
+
+// Sep returns the delimiter of the items of an array not exploded in the
+// style whose delimiter is def, as Sep says: for clients writing it.
+func (p Param) Sep(def string) string { return p.sep(def) }
 
 // Values is a parsed parameter value: Items for a scalar (one item) or an
 // array, Fields for an object.
@@ -66,7 +84,7 @@ func (p Param) PathValues(raw string) (Values, error) {
 	case "matrix":
 		return p.matrix(raw)
 	default:
-		return p.delimited(raw, ",", p.Explode)
+		return p.delimited(raw, p.sep(","), p.Explode)
 	}
 }
 
@@ -191,7 +209,7 @@ func (p Param) QueryValues(q url.Values) (Values, bool, error) {
 	case "pipeDelimited":
 		sep = "|"
 	}
-	v, err := p.delimited(vals[0], sep, false)
+	v, err := p.delimited(vals[0], p.sep(sep), false)
 	return v, true, err
 }
 
@@ -207,6 +225,10 @@ func (p Param) HeaderValues(h http.Header) (Values, bool, error) {
 	}
 	var items []string
 	for _, v := range vals {
+		if p.Delimiter != "" && p.Shape == Array {
+			items = append(items, strings.Split(v, p.Delimiter)...)
+			continue
+		}
 		items = append(items, splitHeaderList(v)...)
 	}
 	v, err := p.fromParts(items, p.Explode)
@@ -240,7 +262,7 @@ func (p Param) CookieValues(r *http.Request) (Values, bool, error) {
 	if len(cookies) != 1 {
 		return Values{}, true, fmt.Errorf("expected a single cookie, got %d", len(cookies))
 	}
-	v, err := p.delimited(cookies[0].Value, ",", false)
+	v, err := p.delimited(cookies[0].Value, p.sep(","), false)
 	return v, true, err
 }
 

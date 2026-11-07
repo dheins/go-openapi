@@ -149,6 +149,19 @@ func ParseArray[T any](vals []string) ([]T, error) {
 	return out, errs.Err()
 }
 
+// ParseNested converts the items of an array whose items are arrays,
+// each written with its items separated by sep, to [][]T.
+func ParseNested[T any](vals []string, sep string) ([][]T, error) {
+	out := make([][]T, len(vals))
+	var errs oapi.ValidationErrors
+	for i, s := range vals {
+		items, err := ParseArray[T](split(s, sep))
+		out[i] = items
+		errs.Nested(oapi.Index("", i), err)
+	}
+	return out, errs.Err()
+}
+
 func parseInto(s string, dst any) error {
 	if u, ok := dst.(encoding.TextUnmarshaler); ok {
 		if err := u.UnmarshalText([]byte(s)); err != nil {

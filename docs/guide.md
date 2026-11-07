@@ -107,11 +107,18 @@ becomes. To migrate for good, write the converted document out:
 ```sh
 goapi convert swagger.yaml > openapi.yaml
 goapi convert -out openapi.json swagger.yaml   # JSON, from the extension
+goapi convert -version 3.2.0 swagger.yaml      # OpenAPI 3.2
 ```
 
 `goapi convert` writes YAML or JSON (`-format`, or the extension of `-out`
 or of the input), keeps the document's order, and copies the objects of
 other files the document refers to into it, so the result is one file.
+`-version 3.2.0` converts to OpenAPI 3.2 instead: XML attributes and
+wrapped arrays are written as `nodeType` (`attribute`, `element`), which
+3.2 prefers, and path items of other files go to `components.pathItems`.
+`goapi flatten`, `mixin` and `serve` take `-convert-to 3.2.0` for the
+2.0 documents they read, and `loader.WithConvertTo(loader.Convert32)`
+does it from Go.
 
 A 2.0 document is first checked against the official Swagger 2.0 JSON
 Schema, so structural errors are reported in 2.0 terms. Diagnostics point
@@ -121,21 +128,26 @@ conversion does:
 | Swagger 2.0 | OpenAPI 3.1 |
 |---|---|
 | `host`, `basePath`, `schemes` | a `servers` URL per scheme (https without `schemes`), or the base path alone |
+| the `schemes` of an operation, other than the document's | the operation's own `servers`, with the document's host and base path |
 | `definitions`, `responses`, `securityDefinitions` | `components/schemas`, `/responses`, `/securitySchemes`, with references rewritten |
 | `parameters` | `components/parameters`; body parameters become `components/requestBodies`, form fields are copied where they are used |
 | a body parameter | a `requestBody` with a media type per `consumes` (`application/json` by default) |
 | `formData` parameters | a `requestBody` with an object schema, as `application/x-www-form-urlencoded`, or `multipart/form-data` when `consumes` says so or a field is a file |
 | `type`, `items`, `format`, `default` and the constraints of other parameters and headers | their `schema` |
 | `collectionFormat` csv, ssv, pipes, multi | `style` and `explode` (csv, the 2.0 default, is `explode: false` in a query) |
+| `collectionFormat` tsv, ssv and pipes outside a query, and of nested items | [`x-goapi-collection-format`](extensions.md#x-goapi-collection-format), which goapi's servers and clients read (arrays of arrays too) |
 | response `schema` and `examples` | `content` per `produces`, with the examples |
 | `basic`, `apiKey`, `oauth2` flows | `http` basic, `apiKey`, `oauth2` `flows` (`application` → `clientCredentials`, `accessCode` → `authorizationCode`) |
 | `x-nullable`, `x-isnullable`, `discriminator: name`, `type: file`, `example` | `null` in `type`, `discriminator.propertyName`, a binary string, `examples` |
 
 Some 2.0 features have no OpenAPI 3 equivalent. The conversion reports
-them as `conversion` warnings and does the closest thing:
-`collectionFormat: tsv` and formats of nested items are read as csv, the
-`schemes` of an operation are dropped for the document's servers, and an
-operation with both a body and form fields keeps the body.
+them as `conversion` warnings and does the closest thing: collection
+formats without a style are kept as `x-goapi-collection-format`, which
+other tools read as csv (form fields' are read as csv); the `schemes` of
+an operation without the document's `host` are dropped for the
+document's servers; and an operation with both a body and form fields
+keeps the body. Generated clients send every operation to their base
+URL, not to an operation's own `servers`.
 
 A server generated from a 2.0 document serves the converted 3.1 document
 at `server.WithDocument`.

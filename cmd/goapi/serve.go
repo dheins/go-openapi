@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/runtime/server"
 	"github.com/dheins/go-openapi/validate"
 )
@@ -29,11 +30,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	addr := fs.String("addr", "localhost:8080", "address to listen on")
 	uiName := fs.String("ui", "swagger", "page to render the document with, swagger or redoc")
 	assets := fs.String("assets", "", "base URL of the page's scripts and stylesheets, instead of jsDelivr")
+	convertTo := fs.String("convert-to", loader.Convert31, "OpenAPI version Swagger 2.0 documents are converted to: 3.1.0 or 3.2.0")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
 		}
 		return exitFailure
+	}
+	if err := checkConvertTo(*convertTo); err != nil {
+		return fail("%v", err)
 	}
 	if fs.NArg() != 1 {
 		return fail("expected one document")
@@ -42,7 +47,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return fail("unknown page %q; use swagger or redoc", *uiName)
 	}
-	h, err := serveHandler(fs.Arg(0), ui, *assets, stderr)
+	h, err := serveHandler(fs.Arg(0), ui, *assets, *convertTo, stderr)
 	if errors.Is(err, errInvalid) {
 		fmt.Fprintln(stderr, "goapi serve: the document cannot be loaded")
 		return exitInvalid
@@ -80,8 +85,8 @@ var errInvalid = errors.New("the document cannot be loaded")
 // that loads is served as it is, for its page to help fix them, and one
 // that does not (structurally invalid, or with broken references) is an
 // errInvalid.
-func serveHandler(file string, ui server.UI, assets string, stderr io.Writer) (http.Handler, error) {
-	res, err := validate.File(file)
+func serveHandler(file string, ui server.UI, assets, convertTo string, stderr io.Writer) (http.Handler, error) {
+	res, err := validate.File(file, loader.WithConvertTo(convertTo))
 	if err != nil {
 		return nil, err
 	}

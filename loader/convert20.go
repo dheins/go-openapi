@@ -12,10 +12,6 @@ import (
 	"github.com/dheins/go-openapi/oas"
 )
 
-// convertedVersion is the "openapi" value given to converted Swagger 2.0
-// documents, as to upgraded 3.0 ones.
-const convertedVersion = upgradedVersion
-
 // converter rewrites Swagger 2.0 content into its OpenAPI 3.1 equivalent,
 // in place: the root document (document), then the objects of other files
 // that references lead to (fragment). Nodes that are moved keep their
@@ -43,10 +39,19 @@ type converter struct {
 	// renamed are the new references of renamed components, by their
 	// unescaped old ones.
 	renamed map[string]string
+	// version is the OpenAPI version converted to (Convert31 or
+	// Convert32).
+	version string
+	// host and basePath are the root's, and serverURLs the URLs of its
+	// servers, which operations with schemes of their own use too.
+	host, basePath string
+	serverURLs     []string
+	// schemes are the root's schemes.
+	schemes []string
 }
 
-func newConverter(lookup func(base, ref string) *yaml.Node) *converter {
-	return &converter{seen: map[*yaml.Node]bool{}, lookup: lookup, forms: map[string]*yaml.Node{}, bodies: map[string]*yaml.Node{}}
+func newConverter(lookup func(base, ref string) *yaml.Node, version string) *converter {
+	return &converter{seen: map[*yaml.Node]bool{}, lookup: lookup, forms: map[string]*yaml.Node{}, bodies: map[string]*yaml.Node{}, version: version}
 }
 
 func (c *converter) warn(at *yaml.Node, format string, args ...any) {
@@ -204,7 +209,7 @@ func (c *converter) document(n *yaml.Node, uri string) {
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == "swagger" {
 			n.Content[i].Value = "openapi"
-			n.Content[i+1] = str(convertedVersion, n.Content[i+1])
+			n.Content[i+1] = str(c.version, n.Content[i+1])
 		}
 	}
 	c.servers(n)
@@ -308,6 +313,12 @@ func (c *converter) servers(n *yaml.Node) {
 	if basePath != nil {
 		path = strings.TrimSuffix(basePath.Value, "/")
 	}
+	if host != nil {
+		c.host = host.Value
+	}
+	c.schemes = stringsOf(schemes)
+	c.basePath = path
+	defer func() { c.serverURLs = serverURLs(n) }()
 	var urls []string
 	switch {
 	case host != nil:
@@ -333,6 +344,46 @@ func (c *converter) servers(n *yaml.Node) {
 		list.Content = append(list.Content, mapping(at, str("url", at), str(u, at)))
 	}
 	n.Content = slices.Insert(n.Content, min(place, len(n.Content)), str("servers", at), list)
+}
+
+// serverURLs returns the URLs of the servers of a converted document.
+func serverURLs(n *yaml.Node) []string {
+	var urls []string
+	if list := resolveAlias(mappingValue(n, "servers")); list != nil {
+		for _, s := range list.Content {
+			if u := mappingValue(s, "url"); u != nil {
+				urls = append(urls, u.Value)
+			}
+		}
+	}
+	return urls
+}
+
+// operationServers returns the servers of an operation with schemes of
+// its own: the document's host and base path with each, or nil when they
+// are the document's servers. Without a host there is none, since a
+// server URL cannot say the scheme alone; that is reported.
+func (c *converter) operationServers(schemes *yaml.Node) *yaml.Node {
+	names := stringsOf(schemes)
+	if len(names) == 0 || slices.Equal(names, c.schemes) {
+		return nil
+	}
+	if c.host == "" {
+		c.warn(schemes, "the schemes of an operation need the document's host to become its servers; it uses the document's servers")
+		return nil
+	}
+	var urls []string
+	for _, s := range names {
+		urls = append(urls, s+"://"+c.host+c.basePath)
+	}
+	if slices.Equal(urls, c.serverURLs) {
+		return nil
+	}
+	list := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Line: schemes.Line, Column: schemes.Column}
+	for _, u := range urls {
+		list.Content = append(list.Content, mapping(schemes, str("url", schemes), str(u, schemes)))
+	}
+	return list
 }
 
 // componentParameters sorts the parameters of #/parameters: bodies become
@@ -451,7 +502,9 @@ func (c *converter) operation(op *yaml.Node, inherited []*yaml.Node) {
 		produces = stringsOf(v)
 	}
 	if s := removeKey(op, "schemes"); s != nil {
-		c.warn(s, "the schemes of an operation are not converted; it uses the document's servers")
+		if servers := c.operationServers(s); servers != nil {
+			set(op, "servers", servers)
+		}
 	}
 
 	place := keyIndex(op, "parameters")
@@ -686,7 +739,18 @@ func (c *converter) paramSchema(p *yaml.Node, in string) (*yaml.Node, *yaml.Node
 		switch k {
 		case "items":
 			items, _ := c.paramSchema(v, "items")
-			if cf := mappingValue(v, "collectionFormat"); cf != nil && cf.Value != "csv" {
+			if t := mappingValue(v, "type"); t != nil && t.Value == "array" && in != "formData" {
+				// Items that are arrays themselves: how they are joined
+				// has no OpenAPI 3 equivalent.
+				format, at := "csv", t
+				if cf := mappingValue(v, "collectionFormat"); cf != nil {
+					format, at = cf.Value, cf
+				}
+				set(items, collectionFormatKey, str(format, at))
+				if format != "csv" {
+					c.warn(at, "collectionFormat %s of nested items has no OpenAPI 3 equivalent; goapi reads it by %s, other tools as csv", format, collectionFormatKey)
+				}
+			} else if cf := mappingValue(v, "collectionFormat"); cf != nil && cf.Value != "csv" {
 				c.warn(cf, "collectionFormat %s of nested items has no OpenAPI 3 equivalent; the items are read as csv", cf.Value)
 			}
 			schema.Content = append(schema.Content, str(k, v), items)
@@ -730,12 +794,25 @@ func (c *converter) paramSchema(p *yaml.Node, in string) (*yaml.Node, *yaml.Node
 	case format == "pipes" && in == "query":
 		return schema, style("pipeDelimited", false)
 	}
-	c.warn(at, "collectionFormat %s has no OpenAPI 3 equivalent in %s; the values are read as csv", format, in)
-	if in == "query" || in == "formData" {
+	if in == "formData" || !slices.Contains([]string{"csv", "ssv", "tsv", "pipes"}, format) {
+		c.warn(at, "collectionFormat %s has no OpenAPI 3 equivalent in %s; the values are read as csv", format, in)
+		if in == "formData" {
+			return schema, style("form", false)
+		}
+		return schema, nil
+	}
+	c.warn(at, "collectionFormat %s has no OpenAPI 3 equivalent in %s; goapi reads it by %s, other tools as csv", format, in, collectionFormatKey)
+	set(schema, collectionFormatKey, str(format, at))
+	if in == "query" {
 		return schema, style("form", false)
 	}
 	return schema, nil
 }
+
+// collectionFormatKey is the extension keeping a Swagger 2.0
+// collectionFormat that OpenAPI 3 has no style for: tsv, or ssv and pipes
+// outside a query, or the format of nested items.
+const collectionFormatKey = "x-goapi-collection-format"
 
 // boolNode returns a boolean scalar at the position of at.
 func boolNode(b bool, at *yaml.Node) *yaml.Node {
@@ -831,6 +908,9 @@ func (c *converter) schema(n *yaml.Node) {
 		}
 	}
 	upgradeSchemaFields(n)
+	if c.version == Convert32 {
+		xmlNodeType(mappingValue(n, "xml"))
+	}
 	eachEntry(mappingValue(n, "properties"), c.schema)
 	c.schema(mappingValue(n, "additionalProperties"))
 	c.schema(mappingValue(n, "not"))
@@ -843,6 +923,23 @@ func (c *converter) schema(n *yaml.Node) {
 	}
 	for _, k := range []string{"allOf", "anyOf", "oneOf"} {
 		eachItem(mappingValue(n, k), c.schema)
+	}
+}
+
+// xmlNodeType writes the attribute and wrapped fields of an XML object,
+// which 3.2 deprecates, as its nodeType: an attribute, or the element
+// wrapping an array.
+func xmlNodeType(x *yaml.Node) {
+	x = resolveAlias(x)
+	if x == nil || x.Kind != yaml.MappingNode {
+		return
+	}
+	attribute, wrapped := removeKey(x, "attribute"), removeKey(x, "wrapped")
+	switch {
+	case attribute != nil && attribute.Value == "true":
+		set(x, "nodeType", str("attribute", attribute))
+	case wrapped != nil && wrapped.Value == "true":
+		set(x, "nodeType", str("element", wrapped))
 	}
 }
 

@@ -129,6 +129,10 @@ type Param struct {
 	// Default is the JSON literal of the default value, used when the
 	// parameter is absent, or "".
 	Default string
+	// Delimiter separates the items of an array instead of the style's,
+	// and ItemDelimiter, for an array whose items are arrays of Elem, the
+	// items of each (x-goapi-collection-format); "" for the style's.
+	Delimiter, ItemDelimiter string
 }
 
 // ParamProperty is a property of an object parameter or form body: its
@@ -544,11 +548,22 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 			// array's own constraints.
 			ref = ref.Type.Underlying
 		}
+		param.Delimiter = b.collectionDelimiter(schema)
+		var itemDelim string
+		if s := deref(schema); s != nil {
+			itemDelim = b.collectionDelimiter(s.Items)
+		}
+		nested := ref.Kind == Slice && stripNullable(ref.Elem).Kind == Slice
 		switch {
 		case isScalar(ref):
 			param.Elem = ref
 		case ref.Kind == Slice && isScalar(stripNullable(ref.Elem)):
 			param.Array = true
+			param.Elem = stripNullable(ref.Elem)
+		case nested && itemDelim != "" && isScalar(stripNullable(stripNullable(ref.Elem).Elem)):
+			// Items that are arrays, with a delimiter of their own.
+			param.Array = true
+			param.ItemDelimiter = itemDelim
 			param.Elem = stripNullable(ref.Elem)
 		case b.objectParam(param, ref):
 			param.Elem = ref
@@ -581,6 +596,27 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 	}
 	param.Field = fields.claim(GoName(p.Name))
 	return param, ""
+}
+
+// collectionFormats are the delimiters of x-goapi-collection-format.
+var collectionFormats = map[string]string{"csv": ",", "ssv": " ", "tsv": "\t", "pipes": "|"}
+
+// collectionDelimiter returns the delimiter the x-goapi-collection-format
+// of an array schema (or of the one it refers to) gives its items, or ""
+// without one; an unknown format is a warning.
+func (b *builder) collectionDelimiter(s *oas.Schema) string {
+	for _, c := range []*oas.Schema{s, deref(s)} {
+		format := extensionString(c, "x-goapi-collection-format")
+		if format == "" {
+			continue
+		}
+		if delim, ok := collectionFormats[format]; ok {
+			return delim
+		}
+		b.warn(c, []string{"x-goapi-collection-format"}, fmt.Sprintf("x-goapi-collection-format %q is not one of csv, ssv, tsv and pipes; the style's delimiter is used", format))
+		return ""
+	}
+	return ""
 }
 
 // styles lists the styles each location supports and the value shapes

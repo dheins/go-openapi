@@ -17,6 +17,12 @@ var listPetsIDsParam = server.Param{Name: "ids", Style: "form", Explode: true, S
 
 var listPetsFieldsParam = server.Param{Name: "fields", Style: "pipeDelimited", Explode: false, Shape: server.Array}
 
+var listPetsWordsParam = server.Param{Name: "words", Style: "form", Explode: false, Shape: server.Array, Delimiter: "\t"}
+
+var listPetsGridParam = server.Param{Name: "grid", Style: "form", Explode: false, Shape: server.Array, ItemDelimiter: "|"}
+
+var listPetsXTagsParam = server.Param{Name: "X-Tags", Style: "simple", Explode: false, Shape: server.Array, Delimiter: "\t"}
+
 var listPetsLimitParam = server.Param{Name: "limit", Style: "form", Explode: true, Shape: server.Scalar}
 
 var listPetsXRequestIDParam = server.Param{Name: "X-Request-ID", Style: "simple", Explode: false, Shape: server.Scalar}
@@ -50,6 +56,15 @@ func NewListPetsRequest(ctx context.Context, c *client.Config, req *ListPetsRequ
 	}
 	if req.Fields.Set {
 		r.QueryParam(listPetsFieldsParam, req.Fields.Value)
+	}
+	if req.Words.Set {
+		r.QueryParam(listPetsWordsParam, req.Words.Value)
+	}
+	if req.Grid.Set {
+		r.QueryParam(listPetsGridParam, req.Grid.Value)
+	}
+	if req.XTags.Set {
+		r.HeaderParam(listPetsXTagsParam, req.XTags.Value)
 	}
 	if !client.IsZero(req.Limit) {
 		r.QueryParam(listPetsLimitParam, req.Limit)

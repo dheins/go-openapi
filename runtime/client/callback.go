@@ -22,7 +22,7 @@ func ParamValue(v any) (string, error) {
 	if k := reflect.ValueOf(v).Kind(); k != reflect.Slice && k != reflect.Array {
 		return scalar(v)
 	}
-	items, err := arrayItems(v)
+	items, err := arrayItems(v, "")
 	if err != nil {
 		return "", err
 	}

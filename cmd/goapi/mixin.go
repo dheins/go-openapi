@@ -22,6 +22,7 @@ func runMixin(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("out", "", "file to write the document to (default: standard output)")
 	format := fs.String("format", "", "output format, yaml or json (default: from the -out extension, else the first input's)")
+	convertTo := fs.String("convert-to", loader.Convert31, "OpenAPI version Swagger 2.0 documents are converted to: 3.1.0 or 3.2.0")
 	hoist := fs.Bool("hoist", false, "move the inline schemas that become Go types into components.schemas, named as those types")
 	removeUnused := fs.Bool("remove-unused", false, "drop the components nothing refers to")
 	expand := fs.Bool("expand", false, "replace every reference by a copy of what it points to, but for recursive schemas, and drop the components nothing refers to then")
@@ -31,6 +32,9 @@ func runMixin(args []string, stdout, stderr io.Writer) int {
 			return exitOK
 		}
 		return exitFailure
+	}
+	if err := checkConvertTo(*convertTo); err != nil {
+		return fail("%v", err)
 	}
 	if fs.NArg() < 2 {
 		return fail("expected two documents or more: the first, and those to merge into it")
@@ -45,7 +49,7 @@ func runMixin(args []string, stdout, stderr io.Writer) int {
 
 	var specs []*loader.Spec
 	for _, file := range files {
-		res, err := validate.File(file)
+		res, err := validate.File(file, loader.WithConvertTo(*convertTo))
 		if err != nil {
 			return fail("%v", err)
 		}
