@@ -230,6 +230,10 @@ type Field struct {
 	// oapi.Optional or a pointer, and an absent property decodes to the
 	// zero value, which Validate does not check.
 	AlwaysWrite bool
+	// JSONString means the value, an integer, number or boolean, is
+	// written and read as a JSON string holding it (x-go-json-string),
+	// as encoding/json's ",string" option does.
+	JSONString bool
 	// Tags are struct tags to add after the json tag, from
 	// x-go-custom-tag (`db:"name" yaml:"name"`), or "".
 	Tags string

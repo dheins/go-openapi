@@ -628,6 +628,24 @@ func (c *Client) PutNotes(ctx context.Context, req *api.PutNotesRequest) (api.Pu
 	return api.ReadPutNotesResponse(c.cfg, resp)
 }
 
+// PutCounter calls PUT /counters. A nil req sends no parameters or body.
+//
+// A counter whose numbers and boolean are sent as strings (x-go-json-string), echoed.
+func (c *Client) PutCounter(ctx context.Context, req *api.PutCounterRequest) (api.PutCounterResponse, error) {
+	if req == nil {
+		req = &api.PutCounterRequest{}
+	}
+	hreq, err := api.NewPutCounterRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutCounterResponse(c.cfg, resp)
+}
+
 // SubmitForm calls POST /pets/form. A nil req sends no parameters or body.
 func (c *Client) SubmitForm(ctx context.Context, req *api.SubmitFormRequest) (api.SubmitFormResponse, error) {
 	if req == nil {

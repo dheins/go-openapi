@@ -38,6 +38,7 @@ Version `1.0`
   - [`POST` `/pets/batch`](#post-petsbatch)
   - [`POST` `/bundle`](#post-bundle)
   - [`PUT` `/memos`](#put-memos)
+  - [`PUT` `/counters`](#put-counters)
   - [`POST` `/pets/form`](#post-petsform)
   - [`POST` `/notes`](#post-notes)
   - [`GET` `/export`](#get-export)
@@ -71,6 +72,7 @@ Version `1.0`
   - [Note](#note)
   - [Filter](#filter)
   - [Tag](#tag)
+  - [Counter](#counter)
   - [Ranked](#ranked)
   - [Settings](#settings)
   - [Size](#size)
@@ -868,6 +870,32 @@ Pets as positional JSON parts.
 | --- | --- |
 | `204` | Stored. |
 
+### `PUT` `/counters`
+
+A counter whose numbers and boolean are sent as strings (x-go-json-string), echoed.
+
+- Operation ID: `putCounter`
+
+**Request body** (required)
+
+- `application/json`: [Counter](#counter)
+
+- `application/x-www-form-urlencoded`: [Counter](#counter)
+
+- `application/xml`: [Counter](#counter)
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `200` | The counter. |
+
+`200`:
+
+- `application/json`: [Counter](#counter)
+
+- `application/xml`: [Counter](#counter)
+
 ### `POST` `/pets/form`
 
 - Operation ID: `submitForm`
@@ -1383,6 +1411,16 @@ Variant 2:
 | `note` | string | no | minLength: `2` |
 | `labels` | array of string | no |  |
 | `alias` | string, nullable | no |  |
+
+### Counter
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `count` | integer | yes | minimum: `0` |
+| `ratio` | number | no |  |
+| `enabled` | boolean | no | default: `true` |
+| `limit` | integer, nullable | no |  |
+| `label` | string | no |  |
 
 ### Ranked
 

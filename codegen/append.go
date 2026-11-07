@@ -61,7 +61,11 @@ func (f *fileGen) appendStmts(t *ir.Type) string {
 			w(depth, "} else {")
 			depth++
 		}
-		if f.appendValue(w, depth, value, r, fd.JSONName) {
+		appendValue := f.appendValue
+		if fd.JSONString {
+			appendValue = f.appendQuoted
+		}
+		if appendValue(w, depth, value, r, fd.JSONName) {
 			fallible = true
 		}
 		if fd.AlwaysWrite && empty != "" {
@@ -81,6 +85,11 @@ func (f *fileGen) appendStmts(t *ir.Type) string {
 			var lit bytes.Buffer
 			if err := json.Compact(&lit, []byte(fd.Default)); err == nil {
 				name, _ := json.Marshal(fd.JSONName)
+				if fd.JSONString {
+					quoted, _ := json.Marshal(lit.String())
+					lit.Reset()
+					lit.Write(quoted)
+				}
 				w(1, "if dir == oapi.Response && !(%s) {", set)
 				w(2, "dst = append(dst, %s...)", strconv.Quote(string(name)+":"+lit.String()+","))
 				w(1, "}")
@@ -172,6 +181,28 @@ func (f *fileGen) appendValue(w func(int, string, ...any), depth int, expr strin
 	w(depth, "if dst, err = oapi.AppendValue(dst, %s, dir); err != nil {", expr)
 	fail()
 	return true
+}
+
+// appendQuoted writes the statements appending expr, an integer, number
+// or boolean of type r (nullable or not), as a JSON string holding it
+// (x-go-json-string), reporting whether they can fail.
+func (f *fileGen) appendQuoted(w func(int, string, ...any), depth int, expr string, r *ir.Ref, name string) bool {
+	if r.Kind == ir.Nullable || r.Kind == ir.Pointer {
+		null, elem := "!"+expr+".Valid", expr+".Value"
+		if r.Kind == ir.Pointer {
+			null, elem = expr+" == nil", "(*"+expr+")"
+		}
+		w(depth, "if %s {", null)
+		w(depth+1, "dst = append(dst, \"null\"...)")
+		w(depth, "} else {")
+		fallible := f.appendQuoted(w, depth+1, elem, r.Elem, name)
+		w(depth, "}")
+		return fallible
+	}
+	w(depth, "dst = append(dst, '\"')")
+	fallible := f.appendValue(w, depth, expr, r, name)
+	w(depth, "dst = append(dst, '\"')")
+	return fallible
 }
 
 // scalarBase returns the builtin string, integer, boolean or number type

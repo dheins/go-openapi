@@ -142,6 +142,17 @@ export interface Tag {
 /** The schema of Tag, for validation and encoding. */
 export const TagSchema: $Schema = { kind: "object", properties: { code: { schema: { kind: "string", format: "pet-code" }, required: true }, color: { schema: { kind: "string", format: "color" } }, slug: { schema: { kind: "string", minLength: 2, format: "slug" } }, note: { schema: { kind: "string", minLength: 2 }, zeroIsAbsent: true }, labels: { schema: { kind: "array", items: { kind: "string" } }, zeroIsAbsent: true }, alias: { schema: { kind: "nullable", of: { kind: "string" } } } } };
 
+export interface Counter {
+  count: number;
+  ratio?: number;
+  enabled?: boolean;
+  limit?: number | null;
+  label?: string;
+}
+
+/** The schema of Counter, for validation and encoding. */
+export const CounterSchema: $Schema = { kind: "object", properties: { count: { schema: { kind: "integer", minimum: 0 }, required: true }, ratio: { schema: { kind: "number" } }, enabled: { schema: { kind: "boolean" }, default: true }, limit: { schema: { kind: "nullable", of: { kind: "integer" } } }, label: { schema: { kind: "string" } } } };
+
 /** Properties put in order by x-order; those without one follow. */
 export interface Ranked {
   name?: string;

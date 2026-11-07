@@ -660,6 +660,10 @@ func objectShape(ref *Ref, files bool, seen map[*Type]*bool) (ParamProperty, boo
 		if !ok {
 			return ParamProperty{}, false
 		}
+		if f.JSONString {
+			// Its text is the string the model reads.
+			prop.Type = "string"
+		}
 		prop.Name = f.JSONName
 		obj.Properties = append(obj.Properties, prop)
 	}

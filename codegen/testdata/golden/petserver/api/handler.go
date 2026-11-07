@@ -102,6 +102,10 @@ type Handler interface {
 	UploadBundle(ctx context.Context, req *UploadBundleRequest) (UploadBundleResponse, error)
 	// PutNotes handles PUT /memos.
 	PutNotes(ctx context.Context, req *PutNotesRequest) (PutNotesResponse, error)
+	// PutCounter handles PUT /counters.
+	//
+	// A counter whose numbers and boolean are sent as strings (x-go-json-string), echoed.
+	PutCounter(ctx context.Context, req *PutCounterRequest) (PutCounterResponse, error)
 	// SubmitForm handles POST /pets/form.
 	SubmitForm(ctx context.Context, req *SubmitFormRequest) (SubmitFormResponse, error)
 	// Shout handles POST /notes.

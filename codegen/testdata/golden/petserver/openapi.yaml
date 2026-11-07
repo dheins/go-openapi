@@ -921,6 +921,32 @@ paths:
       responses:
         "204":
           description: Stored.
+  /counters:
+    put:
+      operationId: putCounter
+      description: A counter whose numbers and boolean are sent as strings (x-go-json-string), echoed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Counter"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Counter"
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/Counter"
+      responses:
+        "200":
+          description: The counter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Counter"
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Counter"
   /pets/form:
     post:
       operationId: submitForm
@@ -1525,6 +1551,28 @@ components:
         alias:
           type: string
           x-isnullable: true
+    Counter:
+      type: object
+      xml:
+        name: counter
+      required: [count]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+          x-go-json-string: true
+        ratio:
+          type: number
+          x-go-json-string: true
+        enabled:
+          type: boolean
+          default: true
+          x-go-json-string: true
+        limit:
+          type: [integer, "null"]
+          x-go-json-string: true
+        label:
+          type: string
     Ranked:
       description: Properties put in order by x-order; those without one follow.
       type: object

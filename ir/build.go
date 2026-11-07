@@ -426,6 +426,13 @@ func (b *builder) fillStruct(t *Type) {
 				f.Default = defaultLiteral(p.schema)
 			}
 		}
+		if extensionTrue(p.schema, "x-go-json-string") {
+			if quotable(r) {
+				f.JSONString = true
+			} else {
+				b.warn(p.schema, []string{"x-go-json-string"}, "x-go-json-string applies to integers, numbers and booleans; the value is written as it is")
+			}
+		}
 		f.AlwaysWrite = !f.Required && extensionFalse(p.schema, "x-omitempty")
 		if !f.Required && !f.AlwaysWrite {
 			r = b.optional(r)
@@ -2036,6 +2043,34 @@ func (b *builder) propertyOrder(s *oas.Schema) *int64 {
 		return nil
 	}
 	return &n
+}
+
+// quotable reports whether values of r are integers, numbers or booleans
+// (enums and defined types of them, nullable or not), which
+// x-go-json-string writes as strings.
+func quotable(r *Ref) bool {
+	for {
+		switch {
+		case r.Kind == Optional || r.Kind == Nullable || r.Kind == Pointer:
+			r = r.Elem
+		case r.Kind == Named && r.Type.Kind == Enum:
+			r = r.Type.Base
+		case r.Kind == Named && (r.Type.Kind == Defined || r.Type.Kind == Alias) && r.Type.Underlying != nil:
+			r = r.Type.Underlying
+		default:
+			return r.Kind == Builtin && slices.Contains([]string{"int64", "int32", "float64", "float32", "bool"}, r.Name)
+		}
+	}
+}
+
+// extensionTrue reports whether the extension key of s is true.
+func extensionTrue(s *oas.Schema, key string) bool {
+	if s == nil {
+		return false
+	}
+	raw, ok := s.Extra.Get(key)
+	var v bool
+	return ok && json.Unmarshal(raw, &v) == nil && v
 }
 
 // extensionFalse reports whether the extension key of s is false.

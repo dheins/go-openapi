@@ -287,5 +287,19 @@ func (o *ObjectDecoder) Decode(dst any, nullable bool, dir Direction) error {
 	return err
 }
 
+// DecodeString decodes the current member's value, a JSON string holding
+// an integer, number or boolean, into dst like DecodeJSONString. A syntax
+// error ends the object; other problems are returned.
+func (o *ObjectDecoder) DecodeString(dst any, nullable bool, dir Direction) error {
+	raw, err := o.dec.ReadValue()
+	if err != nil {
+		if o.err == nil {
+			o.err, o.done = err, true
+		}
+		return nil
+	}
+	return DecodeJSONString(raw, dst, nullable, dir)
+}
+
 // Err returns the error that ended reading the object, if any.
 func (o *ObjectDecoder) Err() error { return o.err }
