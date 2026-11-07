@@ -19,17 +19,51 @@ type SubscribeRequest struct {
 }
 
 // SubscribeResponse is one of the responses of Subscribe:
-//   - [Subscribe201Response]
+//   - [Subscribe201JSONResponse]
+//   - [SubscribeDefaultResponse]
 type SubscribeResponse interface {
 	writeSubscribeResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error
 }
 
-// Subscribe201Response is the 201 response of Subscribe.
+// Subscribe201JSONResponse is the 201 response of Subscribe.
 //
 // Subscribed.
-type Subscribe201Response struct {
+type Subscribe201JSONResponse struct {
+	Body model.Subscribe201ResponseBody
+	// Location is sent as the header "Location".
+	Location oapi.Optional[string]
 }
 
-func (r Subscribe201Response) writeSubscribeResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
-	return server.WriteEmpty(w, 201, nil)
+func (r Subscribe201JSONResponse) writeSubscribeResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
+	if c.ValidateResponses {
+		var errs oapi.ValidationErrors
+		errs.Nested("", r.Body.Validate())
+		if err := errs.Err(); err != nil {
+			return &server.InvalidResponse{Status: 201, Err: err}
+		}
+	}
+	header := make(http.Header)
+	if r.Location.Set {
+		h0, err := server.FormatScalar(r.Location.Value)
+		if err != nil {
+			return err
+		}
+		header.Set("Location", h0)
+	}
+	return c.WriteJSON(w, 201, "application/json", r.Body, header)
+}
+
+// SubscribeDefaultResponse is the default response of Subscribe.
+//
+// Refused.
+type SubscribeDefaultResponse struct {
+	// StatusCode is the status code to send, for any status not declared separately.
+	StatusCode int
+}
+
+func (r SubscribeDefaultResponse) writeSubscribeResponse(w http.ResponseWriter, req *http.Request, c *server.Config) error {
+	if err := server.CheckStatus(r.StatusCode, "default"); err != nil {
+		return err
+	}
+	return server.WriteEmpty(w, r.StatusCode, nil)
 }

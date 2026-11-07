@@ -121,9 +121,21 @@ func (s *store) Public(context.Context, *api.PublicRequest) (api.PublicResponse,
 	return api.Public204Response{}, nil
 }
 
-func (s *store) Subscribe(_ context.Context, req *api.SubscribeRequest) (api.SubscribeResponse, error) {
+func (s *store) Subscribe(ctx context.Context, req *api.SubscribeRequest) (api.SubscribeResponse, error) {
 	s.seen["Subscribe"] = req
-	return api.Subscribe201Response{}, nil
+	resp := api.Subscribe201JSONResponse{Body: model.Subscribe201ResponseBody{ID: "s1"}, Location: oapi.Some("/subscriptions/s1")}
+	// The URLs of the callbacks over the response, kept with the
+	// subscription.
+	status, err := api.SubscribeStatusCallbackURL(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	moved, err := api.SubscribeMovedCallbackURL(ctx, req, resp)
+	if err != nil {
+		return nil, err
+	}
+	s.seen["SubscribeURLs"] = []string{status, moved}
+	return resp, nil
 }
 
 func (s *store) GetFile(_ context.Context, req *api.GetFileRequest) (api.GetFileResponse, error) {

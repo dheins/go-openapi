@@ -338,6 +338,13 @@ export interface SubscribeRequestBody {
 /** The schema of SubscribeRequestBody, for validation and encoding. */
 export const SubscribeRequestBodySchema: $Schema = { kind: "object", properties: { url: { schema: { kind: "string", format: "uri" }, required: true } } };
 
+export interface Subscribe201ResponseBody {
+  id: string;
+}
+
+/** The schema of Subscribe201ResponseBody, for validation and encoding. */
+export const Subscribe201ResponseBodySchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "string" }, required: true } } };
+
 export type SubscribePetEventCallbackXEvent = "created" | "deleted";
 
 /** The values of SubscribePetEventCallbackXEvent. */

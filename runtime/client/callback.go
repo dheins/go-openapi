@@ -13,7 +13,7 @@ import (
 
 // The functions here compute callback URLs: the values of the runtime
 // expressions in them, from the request of the operation declaring the
-// callback. Values are put in the URL as they are, not escaped: a
+// callback and the response its handler returns. Values are put in the URL as they are, not escaped: a
 // callback URL is often an expression on its own, holding a whole URL.
 
 // ParamValue returns the text of v, a parameter's value: a scalar as
@@ -30,16 +30,32 @@ func ParamValue(v any) (string, error) {
 }
 
 // BodyValue returns the value at pointer, a JSON pointer ("" for the
-// whole value), in body encoded as JSON: a string as it is, other values
-// as JSON.
+// whole value), in body, a request body, encoded as JSON: a string as it
+// is, other values as JSON.
 func BodyValue(body any, pointer string) (string, error) {
-	data, err := oapi.EncodeRequest(body)
+	return bodyText(body, oapi.Request, pointer, "body")
+}
+
+// ResponseValue is BodyValue for body, a response body.
+func ResponseValue(body any, pointer string) (string, error) {
+	return bodyText(body, oapi.Response, pointer, "response body")
+}
+
+// MissingResponseValue reports a runtime expression over the response
+// that resp, a response variant, does not have, such as a header that
+// only another status declares.
+func MissingResponseValue(expr string, resp any) error {
+	return fmt.Errorf("callback URL: %s is not in a %T", expr, resp)
+}
+
+func bodyText(body any, dir oapi.Direction, pointer, what string) (string, error) {
+	data, err := oapi.EncodeValue(body, dir)
 	if err != nil {
-		return "", fmt.Errorf("callback URL: body: %w", err)
+		return "", fmt.Errorf("callback URL: %s: %w", what, err)
 	}
 	v, err := valueAt(data, pointer)
 	if err != nil {
-		return "", fmt.Errorf("callback URL: the body %w", err)
+		return "", fmt.Errorf("callback URL: the %s %w", what, err)
 	}
 	switch v := v.(type) {
 	case string:
@@ -49,7 +65,7 @@ func BodyValue(body any, pointer string) (string, error) {
 	}
 	text, err := json.Marshal(v)
 	if err != nil {
-		return "", fmt.Errorf("callback URL: body: %w", err)
+		return "", fmt.Errorf("callback URL: %s: %w", what, err)
 	}
 	return string(text), nil
 }

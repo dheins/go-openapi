@@ -534,19 +534,43 @@ func opLabel(o *ir.Operation) string {
 }
 
 // callbackURLFunc writes the function computing the URL of callback o
-// from the request of the operation declaring it.
+// from the request of the operation declaring it: from req, and from ctx
+// (its URL) and resp (the response its handler returns) when the URL has
+// their values.
 func (f *fileGen) callbackURLFunc(w func(int, string, ...any), o *ir.Operation) {
 	cb := o.Callback
 	parent := cb.Operation
-	doc := fmt.Sprintf("%sURL returns the URL of the callback %q of %s for the request req of %s: %s.",
-		o.Name, cb.Name, parent.Name, parent.Name, cb.Expression)
+	var args []string
+	given := "the request req of " + parent.Name
+	if cb.NeedsURL() {
+		args = append(args, "ctx "+f.imp("context", "context")+".Context")
+		given = "the request of " + parent.Name + " that ctx is the context of, req,"
+	}
+	args = append(args, "req *"+parent.RequestType)
+	if cb.NeedsResponse() {
+		args = append(args, "resp "+parent.ResponseType)
+		given += " and resp, the response to it,"
+	}
+	doc := fmt.Sprintf("%sURL returns the URL of the callback %q of %s for %s: %s.",
+		o.Name, cb.Name, parent.Name, strings.TrimSuffix(given, ","), cb.Expression)
 	w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
-	w(0, "func %sURL(req *%s) (string, error) {", o.Name, parent.RequestType)
+	w(0, "func %sURL(%s) (string, error) {", o.Name, strings.Join(args, ", "))
 	var terms []string
 	for i, p := range cb.Parts {
 		v := "v" + strconv.Itoa(i)
 		var cond, value, expr, call string
 		switch {
+		case p.URL:
+			w(1, "%s, ok := %s.RequestURL(ctx)", v, f.imp(serverImport, "server"))
+			w(1, "if !ok {")
+			w(2, "return \"\", client.MissingValue(\"$url\")")
+			w(1, "}")
+			terms = append(terms, v)
+			continue
+		case p.StatusCode || p.ResponseBody || p.Header != "":
+			f.responseURLPart(w, parent, p, v)
+			terms = append(terms, v)
+			continue
 		case p.Body:
 			field := parent.Body.Fields[0]
 			cond, value = present("req."+field.Name, field.Type)
@@ -576,6 +600,65 @@ func (f *fileGen) callbackURLFunc(w func(int, string, ...any), o *ir.Operation) 
 	}
 	w(1, "return %s, nil", strings.Join(terms, " + "))
 	w(0, "}")
+}
+
+// responseURLPart writes the statements setting v to the value of p, a
+// part of a callback URL over resp, a response of parent: by the variant
+// resp is, with an error for a variant without the value.
+func (f *fileGen) responseURLPart(w func(int, string, ...any), parent *ir.Operation, p ir.URLPart, v string) {
+	expr := "$statusCode"
+	switch {
+	case p.ResponseBody:
+		expr = "$response.body"
+		if p.Pointer != "" {
+			expr += "#" + p.Pointer
+		}
+	case p.Header != "":
+		expr = "$response.header." + p.Header
+	}
+	var b strings.Builder
+	bound := false
+	for _, r := range parent.Responses {
+		var stmts []string
+		switch {
+		case p.StatusCode && r.Code != 0:
+			stmts = []string{fmt.Sprintf("%s = %q", v, strconv.Itoa(r.Code))}
+		case p.StatusCode:
+			stmts = []string{fmt.Sprintf("%s = %s.Itoa(r.StatusCode)", v, f.imp("strconv", "strconv"))}
+			bound = true
+		case p.ResponseBody && r.HasValueBody():
+			cond, value := present("r.Body", r.Body)
+			if cond != "" {
+				stmts = append(stmts, fmt.Sprintf("if !(%s) {", cond), fmt.Sprintf("\treturn \"\", client.MissingValue(%q)", expr), "}")
+			}
+			stmts = append(stmts, fmt.Sprintf("text, err := client.ResponseValue(%s, %q)", value, p.Pointer), "if err != nil {", "\treturn \"\", err", "}", v+" = text")
+			bound = true
+		case p.Header != "" && r.Header(p.Header) != nil:
+			h := r.Header(p.Header)
+			cond, value := present("r."+h.Field, h.Type)
+			if cond != "" {
+				stmts = append(stmts, fmt.Sprintf("if !(%s) {", cond), fmt.Sprintf("\treturn \"\", client.MissingValue(%q)", expr), "}")
+			}
+			stmts = append(stmts, fmt.Sprintf("text, err := client.ParamValue(%s)", value), "if err != nil {", "\treturn \"\", err", "}", v+" = text")
+			bound = true
+		default:
+			continue
+		}
+		fmt.Fprintf(&b, "\tcase %s:\n", r.TypeName)
+		for _, s := range stmts {
+			fmt.Fprintf(&b, "\t\t%s\n", s)
+		}
+	}
+	w(1, "var %s string", v)
+	if bound {
+		w(1, "switch r := resp.(type) {")
+	} else {
+		w(1, "switch resp.(type) {")
+	}
+	b.WriteString("\tdefault:\n")
+	fmt.Fprintf(&b, "\t\treturn \"\", client.MissingResponseValue(%q, resp)\n", expr)
+	b.WriteString("\t}\n")
+	w(0, "%s", strings.TrimSuffix(b.String(), "\n"))
 }
 
 // requestValidation writes the checks of the request's parameters and

@@ -33,6 +33,12 @@ type WebhookHandler interface {
 // error: a *problem.Problem is sent as it is, anything else is logged and
 // answered with 500 Internal Server Error.
 type CallbackHandler interface {
+	// SubscribeStatusCallback handles the callback "status" of Subscribe (POST
+	// {$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode}).
+	SubscribeStatusCallback(ctx context.Context, req *SubscribeStatusCallbackRequest) (SubscribeStatusCallbackResponse, error)
+	// SubscribeMovedCallback handles the callback "moved" of Subscribe (POST
+	// {$url}/moved?to={$response.header.Location}).
+	SubscribeMovedCallback(ctx context.Context, req *SubscribeMovedCallbackRequest) (SubscribeMovedCallbackResponse, error)
 	// SubscribePetEventCallback handles the callback "petEvent" of Subscribe
 	// (POST {$request.body#/url}/pets/{$method}).
 	SubscribePetEventCallback(ctx context.Context, req *SubscribePetEventCallbackRequest) (SubscribePetEventCallbackResponse, error)

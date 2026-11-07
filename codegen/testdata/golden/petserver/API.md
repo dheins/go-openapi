@@ -1226,8 +1226,39 @@ Asks for pet events, sent to the URL in the body, and pings, sent to the URL in 
 | Status | Description |
 | --- | --- |
 | `201` | Subscribed. |
+| `default` | Refused. |
+
+`201`:
+
+- `application/json`: object
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes |  |
+
+Headers:
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `Location` | string | no |  |
 
 **Callbacks**
+
+**`status`: `POST` `{$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode}`**
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `204` | Received. |
+
+**`moved`: `POST` `{$url}/moved?to={$response.header.Location}`**
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `204` | Received. |
 
 **`petEvent`: `POST` `{$request.body#/url}/pets/{$method}`**
 

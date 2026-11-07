@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -452,6 +453,20 @@ func TestRequestContext(t *testing.T) {
 	got, ok := HTTPRequest(RequestContext(r))
 	if !ok || got != r {
 		t.Error("request not found in context")
+	}
+}
+
+func TestRequestURL(t *testing.T) {
+	r := httptest.NewRequest("GET", "http://pets.test/v1/subs?x=1%202", nil)
+	if got, ok := RequestURL(RequestContext(r)); !ok || got != "http://pets.test/v1/subs?x=1%202" {
+		t.Errorf("url = %q %v", got, ok)
+	}
+	tls := httptest.NewRequest("GET", "https://pets.test/a", nil)
+	if got, _ := RequestURL(RequestContext(tls)); got != "https://pets.test/a" {
+		t.Errorf("TLS url = %q", got)
+	}
+	if _, ok := RequestURL(context.Background()); ok {
+		t.Error("a URL outside a request")
 	}
 }
 

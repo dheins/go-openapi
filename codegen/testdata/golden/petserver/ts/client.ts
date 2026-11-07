@@ -876,14 +876,15 @@ export interface SubscribeRequest {
 
 /** The responses of subscribe. */
 export type SubscribeResponse =
-  | { status: 201 };
+  | { status: 201; body: $m.Subscribe201ResponseBody; headers: { location?: string } }
+  | { status: number };
 
 const subscribeSpec: OperationSpec = {
   method: "POST",
   path: "/subscriptions",
   params: [{ key: "xCallback", name: "X-Callback", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string", format: "uri" } }],
   body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "body", schema: $ref(() => $m.SubscribeRequestBodySchema) }] },
-  responses: [{ status: "201" }],
+  responses: [{ status: "201", mediaType: "application/json", kind: "json", schema: $ref(() => $m.Subscribe201ResponseBodySchema), headers: [{ key: "location", name: "Location", schema: { kind: "string" } }] }, { status: "default" }],
 };
 
 /** A client of the API, with a method per operation. */

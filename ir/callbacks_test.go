@@ -112,7 +112,7 @@ components:
 		`onEvent POST SubscribeOnEventPostCallback true [body/url "/events/POST"] "" ""`,
 		`onEvent DELETE SubscribeOnEventDeleteCallback true [body/url "/events/POST"] "" ""`,
 		`onEvent PUT ReplayCallback true [query:cb] "" ""`,
-		`audit POST SubscribeAuditCallback true [] "$response.body#/id is not part of the request type" ""`,
+		`audit POST SubscribeAuditCallback true [] "$response.body#/id refers to a response body, which no response has" ""`,
 		`audit POST SubscribeAuditCallback2 true [] "$request.query.missing refers to a query parameter the operation does not declare" "a webhook or callback has no path parameters"`,
 	}
 	if !slices.Equal(got, want) {
@@ -127,7 +127,7 @@ components:
 		warnings = append(warnings, w.Location.Pointer+": "+w.Message)
 	}
 	for _, w := range []string{
-		`/paths/~1subscriptions~1{tenant}/post/callbacks/audit/https:~1~1{$request.path.tenant}.example.com~1{$request.header.x-hook}?s={$response.body#~1id}/post: the URL "https://{$request.path.tenant}.example.com/{$request.header.x-hook}?s={$response.body#/id}" of callback "audit": $response.body#/id is not part of the request type; it is not computed, so the sender passes it`,
+		`/paths/~1subscriptions~1{tenant}/post/callbacks/audit/https:~1~1{$request.path.tenant}.example.com~1{$request.header.x-hook}?s={$response.body#~1id}/post: the URL "https://{$request.path.tenant}.example.com/{$request.header.x-hook}?s={$response.body#/id}" of callback "audit": $response.body#/id refers to a response body, which no response has; it is not computed, so the sender passes it`,
 	} {
 		if !slices.Contains(warnings, w) {
 			t.Errorf("missing warning %s\nhave:\n%s", w, strings.Join(warnings, "\n"))
@@ -138,6 +138,9 @@ components:
 func TestCallbackURL(t *testing.T) {
 	parent := &Operation{Method: "POST", Body: &Body{}, Params: []*Param{
 		{In: "query", Name: "cb"}, {In: "header", Name: "X-Token"}, {In: "path", Name: "id"},
+	}, Responses: []*Response{
+		{Status: "201", Code: 201, Kind: "json", Body: &Ref{}, Headers: []*Header{{Name: "Location"}}},
+		{Status: "202", Code: 202, Kind: "jsonl", Body: &Ref{}, Item: &Ref{}},
 	}}
 	tests := []struct {
 		key, want, why string
@@ -151,8 +154,12 @@ func TestCallbackURL(t *testing.T) {
 		{"{$request.body#/a~1b%20c}", "body/a~1b c", ""},
 		{"{$request.body#a}", "", "$request.body#a does not end in a JSON pointer"},
 		{"{$request.query.cb", "", "an expression is not closed with }"},
-		{"{$url}/x", "", "$url is not part of the request type"},
-		{"{$statusCode}", "", "$statusCode is not part of the request type"},
+		{"{$url}/x", `url "/x"`, ""},
+		{"{$request.query.cb}?s={$statusCode}", `query:cb "?s=" status`, ""},
+		{"{$response.header.location}/{$response.body#/id}", `header:Location "/" response/id`, ""},
+		{"{$response.header.X-Other}", "", "$response.header.X-Other refers to a header no response declares"},
+		{"{$response.body#id}", "", "$response.body#id does not end in a JSON pointer"},
+		{"{$response.headers}", "", `"$response.headers" is not a runtime expression`},
 		{"{$request.cookie.c}", "", `"$request.cookie.c" is not a runtime expression`},
 		{"{$foo}", "", `"$foo" is not a runtime expression`},
 		{"{$request.header.Other}", "", "$request.header.Other refers to a header parameter the operation does not declare"},
@@ -164,6 +171,14 @@ func TestCallbackURL(t *testing.T) {
 			switch {
 			case p.Body:
 				got = append(got, "body"+p.Pointer)
+			case p.URL:
+				got = append(got, "url")
+			case p.StatusCode:
+				got = append(got, "status")
+			case p.ResponseBody:
+				got = append(got, "response"+p.Pointer)
+			case p.Header != "":
+				got = append(got, "header:"+p.Header)
 			case p.Param != nil:
 				got = append(got, p.Param.In+":"+p.Param.Name)
 			default:
@@ -176,6 +191,11 @@ func TestCallbackURL(t *testing.T) {
 	}
 	if _, why := callbackURL("{$request.body}", &Operation{}); why != "$request.body refers to the body, which the operation does not have" {
 		t.Errorf("no body: %q", why)
+	}
+	// A stream is not a value to put in a URL.
+	streams := &Operation{Responses: parent.Responses[1:]}
+	if _, why := callbackURL("{$response.body}", streams); why != "$response.body refers to a response body, which no response has" {
+		t.Errorf("stream body: %q", why)
 	}
 }
 

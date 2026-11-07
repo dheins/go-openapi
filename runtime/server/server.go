@@ -346,3 +346,20 @@ func HTTPRequest(ctx context.Context) (*http.Request, bool) {
 	r, ok := ctx.Value(requestKey{}).(*http.Request)
 	return r, ok
 }
+
+// RequestURL returns the full URL of the request a handler is serving:
+// the $url of runtime expressions. The scheme is https for a request over
+// TLS, else http, and the host is the request's Host; headers a proxy
+// adds, such as X-Forwarded-Proto, are not trusted, so behind one a
+// handler should build the URL itself.
+func RequestURL(ctx context.Context) (string, bool) {
+	r, ok := HTTPRequest(ctx)
+	if !ok {
+		return "", false
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host + r.URL.RequestURI(), true
+}

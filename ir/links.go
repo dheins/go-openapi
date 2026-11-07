@@ -213,7 +213,7 @@ func linkValue(raw json.RawMessage, answers *Operation) (*LinkValue, string) {
 		v.Header = strings.TrimPrefix(expr, "$response.header.")
 		return v, ""
 	case strings.HasPrefix(expr, "$request."):
-		part, why := urlExpression(expr, answers)
+		part, why := urlExpression(expr, answers, nil)
 		if why != "" {
 			return nil, why
 		}

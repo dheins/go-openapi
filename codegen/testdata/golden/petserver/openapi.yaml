@@ -1269,7 +1269,33 @@ paths:
       responses:
         "201":
           description: Subscribed.
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: string
+        default:
+          description: Refused.
       callbacks:
+        status:
+          "{$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode}":
+            post:
+              responses:
+                "204":
+                  description: Received.
+        moved:
+          "{$url}/moved?to={$response.header.Location}":
+            post:
+              responses:
+                "204":
+                  description: Received.
         petEvent:
           "{$request.body#/url}/pets/{$method}":
             post:

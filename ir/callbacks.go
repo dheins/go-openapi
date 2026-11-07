@@ -3,6 +3,7 @@ package ir
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/dheins/go-openapi/oas"
@@ -31,21 +32,45 @@ type CallbackURL struct {
 	// Operation is the operation declaring the callback, whose request
 	// the expressions refer to.
 	Operation *Operation
-	// Parts are the URL's text and the request values in it, in order.
+	// Parts are the URL's text and the values in it, in order.
 	Parts []URLPart
-	// Unsupported says why the URL cannot be computed from the request,
-	// or "".
+	// Unsupported says why the URL cannot be computed, or "".
 	Unsupported string
 }
 
-// URLPart is text of a callback URL, or a value of the request: the
+// NeedsResponse says the URL has values of the response of the operation
+// declaring the callback ($statusCode, $response.*), and NeedsURL its
+// request's URL ($url).
+func (c *CallbackURL) NeedsResponse() bool {
+	return slices.ContainsFunc(c.Parts, func(p URLPart) bool { return p.StatusCode || p.ResponseBody || p.Header != "" })
+}
+
+// NeedsURL says the URL has the URL of the request of the operation
+// declaring the callback ($url).
+func (c *CallbackURL) NeedsURL() bool {
+	return slices.ContainsFunc(c.Parts, func(p URLPart) bool { return p.URL })
+}
+
+// URLPart is text of a callback URL, or a value: of the request, the
 // parameter Param or, with Body, the value at Pointer (a JSON pointer, ""
-// for the whole body) in the request body.
+// for the whole body) in its body, or with URL its URL; of the response,
+// with StatusCode its status code, with ResponseBody the value at
+// Pointer in its body, or the header named Header.
 type URLPart struct {
 	Text    string
 	Param   *Param
 	Body    bool
 	Pointer string
+	URL     bool
+
+	StatusCode   bool
+	ResponseBody bool
+	Header       string
+}
+
+// isText says p is text rather than a value.
+func (p URLPart) isText() bool {
+	return p.Param == nil && !p.Body && !p.URL && !p.StatusCode && !p.ResponseBody && p.Header == ""
 }
 
 // opSite says where an operation is declared, which decides its kind and
@@ -115,17 +140,17 @@ func operationCount(pi *oas.PathItem) int {
 }
 
 // callbackURL parses key, a callback URL with runtime expressions in
-// braces or a single bare expression, against the request of parent. It
-// returns why the URL cannot be computed from the request instead, if it
+// braces or a single bare expression, against the request and responses
+// of parent. It returns why the URL cannot be computed instead, if it
 // cannot.
 func callbackURL(key string, parent *Operation) ([]URLPart, string) {
 	var parts []URLPart
 	add := func(p URLPart) {
-		if p.Param == nil && !p.Body {
+		if p.isText() {
 			if p.Text == "" {
 				return
 			}
-			if n := len(parts); n > 0 && parts[n-1].Param == nil && !parts[n-1].Body {
+			if n := len(parts); n > 0 && parts[n-1].isText() {
 				parts[n-1].Text += p.Text
 				return
 			}
@@ -133,7 +158,7 @@ func callbackURL(key string, parent *Operation) ([]URLPart, string) {
 		parts = append(parts, p)
 	}
 	if strings.HasPrefix(key, "$") {
-		p, why := urlExpression(key, parent)
+		p, why := urlExpression(key, parent, parent.Responses)
 		if why != "" {
 			return nil, why
 		}
@@ -151,7 +176,7 @@ func callbackURL(key string, parent *Operation) ([]URLPart, string) {
 			return nil, "an expression is not closed with }"
 		}
 		add(URLPart{Text: rest[:open]})
-		p, why := urlExpression(rest[open+1:open+end], parent)
+		p, why := urlExpression(rest[open+1:open+end], parent, parent.Responses)
 		if why != "" {
 			return nil, why
 		}
@@ -161,15 +186,21 @@ func callbackURL(key string, parent *Operation) ([]URLPart, string) {
 	return parts, ""
 }
 
-// urlExpression maps a runtime expression to a part of a callback URL.
-func urlExpression(expr string, parent *Operation) (URLPart, string) {
+// urlExpression maps a runtime expression over the request of parent and
+// its responses to a part of a URL.
+func urlExpression(expr string, parent *Operation, responses []*Response) (URLPart, string) {
+	if rest, ok := strings.CutPrefix(expr, "$response."); ok {
+		return responseExpression(expr, rest, responses)
+	}
 	source, ok := strings.CutPrefix(expr, "$request.")
 	if !ok {
-		switch {
-		case expr == "$method":
+		switch expr {
+		case "$method":
 			return URLPart{Text: parent.Method}, ""
-		case expr == "$url", expr == "$statusCode", strings.HasPrefix(expr, "$response."):
-			return URLPart{}, fmt.Sprintf("%s is not part of the request type", expr)
+		case "$url":
+			return URLPart{URL: true}, ""
+		case "$statusCode":
+			return URLPart{StatusCode: true}, ""
 		}
 		return URLPart{}, fmt.Sprintf("%q is not a runtime expression", expr)
 	}
@@ -177,12 +208,8 @@ func urlExpression(expr string, parent *Operation) (URLPart, string) {
 		if parent.Body == nil {
 			return URLPart{}, fmt.Sprintf("%s refers to the body, which the operation does not have", expr)
 		}
-		// The pointer is a URI fragment, so it may be percent-encoded.
-		ptr, err := url.PathUnescape(strings.TrimPrefix(body, "#"))
-		if err != nil || (ptr != "" && ptr[0] != '/') {
-			return URLPart{}, fmt.Sprintf("%s does not end in a JSON pointer", expr)
-		}
-		return URLPart{Body: true, Pointer: ptr}, ""
+		ptr, why := fragmentPointer(expr, body)
+		return URLPart{Body: true, Pointer: ptr}, why
 	}
 	in, name, ok := strings.Cut(source, ".")
 	if !ok || name == "" || (in != "path" && in != "query" && in != "header") {
@@ -195,4 +222,46 @@ func urlExpression(expr string, parent *Operation) (URLPart, string) {
 		}
 	}
 	return URLPart{}, fmt.Sprintf("%s refers to a %s parameter the operation does not declare", expr, in)
+}
+
+// responseExpression maps $response.rest, expr, to a part of a URL: a
+// body that one of responses has, or a header one declares.
+func responseExpression(expr, rest string, responses []*Response) (URLPart, string) {
+	if body, ok := strings.CutPrefix(rest, "body"); ok && (body == "" || body[0] == '#') {
+		if !slices.ContainsFunc(responses, (*Response).HasValueBody) {
+			return URLPart{}, fmt.Sprintf("%s refers to a response body, which no response has", expr)
+		}
+		ptr, why := fragmentPointer(expr, body)
+		return URLPart{ResponseBody: true, Pointer: ptr}, why
+	}
+	name, ok := strings.CutPrefix(rest, "header.")
+	if !ok || name == "" {
+		return URLPart{}, fmt.Sprintf("%q is not a runtime expression", expr)
+	}
+	for _, r := range responses {
+		if h := r.Header(name); h != nil {
+			if h.Content != "" {
+				return URLPart{}, fmt.Sprintf("%s refers to a header with content, which a URL does not hold", expr)
+			}
+			return URLPart{Header: h.Name}, ""
+		}
+	}
+	return URLPart{}, fmt.Sprintf("%s refers to a header no response declares", expr)
+}
+
+// HasValueBody says r has a body that is a value, as JSON is: not a
+// stream, bytes or parts.
+func (r *Response) HasValueBody() bool {
+	return r.Body != nil && !slices.Contains([]string{"binary", "parts", "jsonl", "partstream", "sse"}, r.Kind)
+}
+
+// fragmentPointer returns the JSON pointer of fragment, the "#/..." after
+// a body in expr (or ""), or why it is not one.
+func fragmentPointer(expr, fragment string) (string, string) {
+	// The pointer is a URI fragment, so it may be percent-encoded.
+	ptr, err := url.PathUnescape(strings.TrimPrefix(fragment, "#"))
+	if err != nil || (ptr != "" && ptr[0] != '/') {
+		return "", fmt.Sprintf("%s does not end in a JSON pointer", expr)
+	}
+	return ptr, ""
 }
