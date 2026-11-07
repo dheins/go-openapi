@@ -4,6 +4,12 @@
 
 ### Added
 
+- `goapi diff -for server` (`diff.DocumentsFor`, `diff.Options`): changes
+  judged for servers implementing the old document.
+- `goapi diff` compares callbacks, links, defaults, examples and
+  discriminators (rules `callback-removed`, `callback-added`,
+  `link-removed`, `link-changed`, `link-added`, `default-changed`,
+  `example-changed`, `discriminator-changed`, `response-header-required`).
 - `x-order`: properties with it come first, by it, in Go structs and the
   JSON they write, TypeScript types and Markdown references.
 - `x-go-json-string`: integer, number and boolean properties written and
@@ -497,6 +503,9 @@
 
 ### Changed
 
+- `goapi diff` pairs `oneOf`/`anyOf` alternatives by what they are rather
+  than by position, reporting each one removed or added by name instead of
+  how many there are.
 - `x-nullable` and go-swagger's `x-isnullable` allow null in every
   version, not only in converted Swagger 2.0 documents: loading adds
   `"null"` to a schema's single type, as 3.0's `nullable` does.

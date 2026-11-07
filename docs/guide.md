@@ -244,6 +244,7 @@ conflicts.
 ```sh
 goapi diff old.yaml openapi.yaml
 goapi diff -fail-on warning -format json main.yaml openapi.yaml
+goapi diff -for server main.yaml openapi.yaml   # what breaks servers implementing main.yaml
 ```
 
 `goapi diff` reports what changed from one version of a document to
@@ -258,11 +259,15 @@ change with its place in both documents.
 
 Operations are matched by method and path, whatever their path
 parameters are called; parameters by place and name (path ones by
-position); responses by status; bodies by media type. Schemas are compared
-after following references, by which way their values go: what a client
-sends may only be accepted more widely, what it receives only more
-narrowly. Parameters and headers are text, so a number becoming a string
-is not a change for them.
+position); responses by status; bodies by media type; callbacks by name,
+expression and method; links by name. Schemas are compared after
+following references, by which way their values go: what a client sends
+may only be accepted more widely, what it receives only more narrowly.
+Parameters and headers are text, so a number becoming a string is not a
+change for them. The alternatives of `oneOf` and `anyOf` are paired by
+what they are, not where: by the discriminator value leading to them,
+else the component they refer to, else the most alike inline ones, so
+reordering them is no change.
 
 | | error | warning | info |
 |---|---|---|---|
@@ -274,6 +279,28 @@ is not a change for them.
 | What it receives | type widened (null now allowed among them), property removed or made optional | new enum values, constraints loosened, more alternatives | narrowed, added |
 | Security | a client meeting an old requirement meets no new one, a scheme used differently | | a requirement added as an alternative |
 | Servers | | URLs changed | |
+| Callbacks | | removed | added |
+| Links | | removed, leading to another operation, other parameters or body | added |
+| Discriminators | property name changed; a value removed from what a client sends | a value added to what it receives | other values |
+| Defaults | | added, removed or changed | |
+| Examples | | | added, removed or changed |
+
+**Servers.** `-for server` (`diff.DocumentsFor(old, new,
+diff.Options{For: diff.Servers})`) judges the changes for a server
+implementing the old document instead. Schemas are compared the other
+way round: what a server receives may only be narrower and what it sends
+only accepted more widely, so a new required response property or a
+request property's type widened is an error. Beside that:
+
+| | error | warning | info |
+|---|---|---|---|
+| Operations, webhooks, callbacks | added (it must serve or send them) | | removed, deprecated |
+| Parameters and request bodies | made optional (it may rely on them) | optional ones added (it ignores them) | required ones added, removed |
+| Media types | request one added, response one removed | | request one removed, response one added |
+| Responses | success status removed | other status removed | status added |
+| Response headers | a required one added, one made required | | removed, made optional |
+| Security | a requirement added as an alternative (it must accept it), a scheme used differently | | requirements tightened |
+| Servers, links | | | changed |
 
 Webhooks are compared too, the other way round: the client receives their
 requests and sends their responses. From Go,

@@ -125,11 +125,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   merged. — later
 - `goapi flatten -expand`: references into or out of schemas with an
   `$id`, and `$dynamicRef`, expanded too (they are kept). — later
-- `goapi diff`: callbacks, links, examples, defaults and discriminator
-  mappings are not compared; `oneOf`/`anyOf` alternatives are matched by
-  position, so reordered ones read as changed; and what breaks servers
-  implementing the old document (rather than clients) is not reported.
-  — later
+- `goapi diff`: `allOf` members are compared by position, and
+  `prefixItems`, `if`/`then`/`else`, `not`, `patternProperties` and
+  `dependentSchemas` are not compared. — later
 
 ## Logging and telemetry
 
@@ -144,6 +142,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi diff`: callbacks, links, examples, defaults and discriminator
+  mappings compared; `oneOf`/`anyOf` alternatives paired by what they
+  are; and `-for server`, what breaks servers implementing the old
+  document. (95409b5, 61fca4d, 3018864)
 - [x] go-swagger's `x-order` (the order of struct fields and encoded
   properties) and `x-go-json-string` (numbers and booleans written and
   read as JSON strings, like `encoding/json`'s `,string`), in Go models,

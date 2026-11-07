@@ -817,6 +817,22 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   `goapi validate` checks with the same package, are left as they are.
 - *Not done*: see [features.md](../features.md).
 
+### M42 – A fuller goapi diff ✅
+- [x] `oneOf`/`anyOf` alternatives paired by discriminator value,
+  component and likeness; discriminators compared
+- [x] callbacks, links, defaults and examples compared
+- [x] `-for server`: changes judged for servers implementing the old
+  document
+
+**How it went**
+- *Polarity, not direction*: the schema comparison asked which way a
+  value goes both to skip read-only and write-only properties and to
+  judge a change; splitting the two (the direction stays, whether the
+  side judged sends it decides) gave servers every schema rule mirrored.
+- *Named components*: pairing alternatives by likeness also paired `Cat`
+  with `Bird`; components of different names are now never paired.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 
