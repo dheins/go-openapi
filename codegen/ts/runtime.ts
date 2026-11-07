@@ -1408,25 +1408,34 @@ export interface OperationSpec {
 export interface LinkSpec {
   readonly name: string;
   readonly responses: readonly { readonly status: string; readonly contentType?: string }[];
-  readonly values: readonly {
+  readonly values: readonly (LinkSource & {
     /** The property of the linked request. */
     readonly key: string;
     readonly expression: string;
-    readonly const?: unknown;
-    /** Where the value is, with source the key of the header or request
-     * property, and pointer a JSON pointer into a body; a constant
-     * without. */
-    readonly from?: "responseBody" | "responseHeader" | "requestBody" | "request";
-    readonly source?: string;
-    readonly pointer?: string;
-  }[];
+    /** Text with expressions embedded in it: its text and values, in
+     * order. parse makes text spelling a number or boolean that value,
+     * for a parameter that is not a string. */
+    readonly parts?: readonly (LinkSource & { readonly text?: string })[];
+    readonly parse?: boolean;
+  })[];
+}
+
+/** Where a value of a link is: with source the key of the header or
+ * request property, and pointer a JSON pointer into a body; url is the
+ * URL the request was sent to, and statusCode the response's status. A
+ * constant (or text) has none. */
+export interface LinkSource {
+  readonly const?: unknown;
+  readonly from?: "responseBody" | "responseHeader" | "requestBody" | "request" | "url" | "statusCode";
+  readonly source?: string;
+  readonly pointer?: string;
 }
 
 /** Builds the request a link leads to from resp, a response, and req, the
- * request it answers: what a generated follow method sends. A value
- * that is not there is left out, for the request's validation to report
- * if it is required. */
-export function link(spec: LinkSpec, resp: object, req: object): unknown {
+ * request it answers, sent to url: what a generated follow method sends.
+ * A value that is not there is left out, for the request's validation to
+ * report if it is required. */
+export function link(spec: LinkSpec, resp: object, req: object, url?: string): unknown {
   const r = resp as Values;
   const q = req as Values;
   const status = r["status"] as number;
@@ -1435,29 +1444,54 @@ export function link(spec: LinkSpec, resp: object, req: object): unknown {
   }
   const out: Values = {};
   for (const v of spec.values) {
-    let value: unknown;
-    switch (v.from) {
-      case undefined:
-        value = v.const;
-        break;
-      case "responseBody":
-        value = valueAt(r["body"], v.pointer ?? "");
-        break;
-      case "responseHeader":
-        value = (r["headers"] as Values | undefined)?.[v.source ?? ""];
-        break;
-      case "requestBody":
-        value = valueAt(q[v.source ?? ""], v.pointer ?? "");
-        break;
-      case "request":
-        value = q[v.source ?? ""];
-        break;
-    }
+    const value = v.parts === undefined ? linkValue(v, r, q, url) : linkText(v.parts, v.parse === true, r, q, url);
     if (value !== undefined) {
       out[v.key] = value;
     }
   }
   return out;
+}
+
+// linkValue returns the value s says, of the response r, the request q
+// and the URL it was sent to, or undefined.
+function linkValue(s: LinkSource, r: Values, q: Values, url: string | undefined): unknown {
+  switch (s.from) {
+    case "responseBody":
+      return valueAt(r["body"], s.pointer ?? "");
+    case "responseHeader":
+      return (r["headers"] as Values | undefined)?.[s.source ?? ""];
+    case "requestBody":
+      return valueAt(q[s.source ?? ""], s.pointer ?? "");
+    case "request":
+      return q[s.source ?? ""];
+    case "url":
+      return url;
+    case "statusCode":
+      return r["status"];
+  }
+  return s.const;
+}
+
+// linkText joins parts, text and values (strings as they are, others as
+// JSON), or returns undefined if a value is not there. With parse, text
+// spelling a number or boolean is that value.
+function linkText(parts: readonly (LinkSource & { readonly text?: string })[], parse: boolean, r: Values, q: Values, url: string | undefined): unknown {
+  let text = "";
+  for (const p of parts) {
+    if (p.text !== undefined) {
+      text += p.text;
+      continue;
+    }
+    const v = linkValue(p, r, q, url);
+    if (v === undefined) {
+      return undefined;
+    }
+    text += typeof v === "string" ? v : JSON.stringify(v);
+  }
+  if (parse && (text === "true" || text === "false" || /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.test(text))) {
+    return JSON.parse(text) as unknown;
+  }
+  return text;
 }
 
 // valueAt returns the value at pointer, a JSON pointer, in v, or undefined.
@@ -1738,6 +1772,22 @@ function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown): void {
 }
 
 /** The parts of a request being built. */
+/** The URL a request of op is sent to, without sending it: the $url of a
+ * link's runtime expressions. Credentials sent in the query are not in
+ * it. */
+export function requestUrl(cfg: Config, op: OperationSpec, req: object): string {
+  const b: Built = { path: "", query: new URLSearchParams(), headers: new Headers(), cookies: [] };
+  buildParams(op, req as Values, b);
+  return builtUrl(cfg, op, b);
+}
+
+// builtUrl returns the URL of b, a request of op.
+function builtUrl(cfg: Config, op: OperationSpec, b: Built): string {
+  const query = b.rawQuery ?? b.query.toString();
+  const base = op.server !== undefined && cfg.operationServers ? new URL(op.server, cfg.baseUrl).href.replace(/\/+$/, "") : cfg.baseUrl;
+  return base + b.path + (query === "" ? "" : "?" + query);
+}
+
 interface Built {
   path: string;
   query: URLSearchParams;
@@ -2359,9 +2409,7 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
     // Browsers do not let scripts set Cookie; elsewhere it is sent.
     b.headers.set("Cookie", b.cookies.join("; "));
   }
-  const query = b.rawQuery ?? b.query.toString();
-  const base = op.server !== undefined && cfg.operationServers ? new URL(op.server, cfg.baseUrl).href.replace(/\/+$/, "") : cfg.baseUrl;
-  const url = base + b.path + (query === "" ? "" : "?" + query);
+  const url = builtUrl(cfg, op, b);
   const init: RequestInit = { method: op.method, headers: b.headers };
   if (b.body !== undefined) {
     init.body = b.body;

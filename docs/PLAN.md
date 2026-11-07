@@ -903,6 +903,21 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   `ir.Warning.ServerOnly`, which client targets no longer print.
 - *Not done*: see [features.md](../features.md).
 
+### M47 – Every runtime expression ✅
+- [x] Callback URLs with `$url` (`server.RequestURL`), `$statusCode` and
+  `$response.*`: URL functions taking `ctx` and `resp` when they need them
+- [x] Links with `$url`, `$method`, `$statusCode` and embedded expressions
+  (`client.LinkText`, `client.LinkPart`), in Go and TypeScript
+
+**How it went**
+- *Signatures only where needed*: callbacks and links that use only the
+  request keep their functions and methods, so existing callers are
+  unchanged.
+- *The URL is rebuilt*: a response does not carry the URL of its request,
+  so follow methods build the request again to get it, leaving out
+  credentials added when sending.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

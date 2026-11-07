@@ -13,7 +13,7 @@ import (
 
 // The functions here compute callback URLs: the values of the runtime
 // expressions in them, from the request of the operation declaring the
-// callback. Values are put in the URL as they are, not escaped: a
+// callback and the response its handler returns. Values are put in the URL as they are, not escaped: a
 // callback URL is often an expression on its own, holding a whole URL.
 
 // ParamValue returns the text of v, a parameter's value: a scalar as
@@ -30,17 +30,43 @@ func ParamValue(v any) (string, error) {
 }
 
 // BodyValue returns the value at pointer, a JSON pointer ("" for the
-// whole value), in body encoded as JSON: a string as it is, other values
-// as JSON.
+// whole value), in body, a request body, encoded as JSON: a string as it
+// is, other values as JSON.
 func BodyValue(body any, pointer string) (string, error) {
-	data, err := oapi.EncodeRequest(body)
+	return bodyText(body, oapi.Request, pointer, "body")
+}
+
+// ResponseValue is BodyValue for body, a response body.
+func ResponseValue(body any, pointer string) (string, error) {
+	return bodyText(body, oapi.Response, pointer, "response body")
+}
+
+// MissingResponseValue reports a runtime expression over the response
+// that resp, a response variant, does not have, such as a header that
+// only another status declares.
+func MissingResponseValue(expr string, resp any) error {
+	return fmt.Errorf("callback URL: %s is not in a %T", expr, resp)
+}
+
+func bodyText(body any, dir oapi.Direction, pointer, what string) (string, error) {
+	data, err := oapi.EncodeValue(body, dir)
 	if err != nil {
-		return "", fmt.Errorf("callback URL: body: %w", err)
+		return "", fmt.Errorf("callback URL: %s: %w", what, err)
 	}
 	v, err := valueAt(data, pointer)
 	if err != nil {
-		return "", fmt.Errorf("callback URL: the body %w", err)
+		return "", fmt.Errorf("callback URL: the %s %w", what, err)
 	}
+	text, err := textOf(v)
+	if err != nil {
+		return "", fmt.Errorf("callback URL: %s: %w", what, err)
+	}
+	return text, nil
+}
+
+// textOf returns v, a decoded JSON value, as text: a string as it is,
+// other values as JSON.
+func textOf(v any) (string, error) {
 	switch v := v.(type) {
 	case string:
 		return v, nil
@@ -49,7 +75,7 @@ func BodyValue(body any, pointer string) (string, error) {
 	}
 	text, err := json.Marshal(v)
 	if err != nil {
-		return "", fmt.Errorf("callback URL: body: %w", err)
+		return "", err
 	}
 	return string(text), nil
 }
@@ -105,6 +131,41 @@ func LinkValue(dst, src any, dir oapi.Direction, pointer string) error {
 		return err
 	}
 	return LinkConst(dst, raw)
+}
+
+// LinkPart returns the value at pointer ("" for all of it) in src encoded
+// as JSON in direction dir as text, for a link value with expressions
+// embedded in text: a string as it is, other values as JSON.
+func LinkPart(src any, dir oapi.Direction, pointer string) (string, error) {
+	data, err := oapi.EncodeValue(src, dir)
+	if err != nil {
+		return "", err
+	}
+	v, err := valueAt(data, pointer)
+	if err != nil {
+		return "", fmt.Errorf("the value %w", err)
+	}
+	return textOf(v)
+}
+
+// LinkText sets *dst, a scalar field of the request a link leads to, to
+// text, a value with expressions embedded in it: as a string or, for a
+// field that is not one, as the number or boolean text spells.
+func LinkText(dst any, text string) error {
+	quoted, err := json.Marshal(text)
+	if err != nil {
+		return err
+	}
+	err = LinkConst(dst, quoted)
+	if err == nil {
+		return nil
+	}
+	if _, numErr := strconv.ParseFloat(text, 64); json.Valid([]byte(text)) && (numErr == nil || text == "true" || text == "false") {
+		if LinkConst(dst, json.RawMessage(text)) == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // LinkConst sets *dst, a field of the request a link leads to, to the

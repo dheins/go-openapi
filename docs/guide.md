@@ -1522,9 +1522,17 @@ pet, err = c.GetPet(ctx, next)
 - **Values:** its `parameters` (by name, or qualified as `path.id` when
   several have the name) and `requestBody` are constants or runtime
   expressions:
-  - `$response.body#/pointer`, `$response.header.Name`;
+  - `$response.body#/pointer`, `$response.header.Name`, `$statusCode`;
   - `$request.body#/pointer`, `$request.path.name`, `$request.query.name`,
-    `$request.header.name`, over `req`, the request the response answers.
+    `$request.header.name`, over `req`, the request the response answers,
+    and its `$method` and `$url`. A link method using `$url` takes the
+    URL `req` was sent to, `GetPetLink(req, requestURL)`; the `Follow`
+    method builds the request again to get it.
+  - text with expressions embedded in braces, such as
+    `pets/{$response.body#/id}`: the parts joined, strings as they are
+    and other values as JSON, given to a string parameter as it is and
+    parsed as a number or boolean for one of those types
+    (`client.LinkText`). An object, array or body cannot take text.
 - **Missing values:** an optional value that is not set leaves the
   parameter unset when it is optional too, and is an error naming the
   link when it is required. A value the parameter cannot hold is an error
@@ -1532,9 +1540,9 @@ pet, err = c.GetPet(ctx, next)
 - **Variants:** a link reading the body is followed from the variants
   with a JSON or XML body; following a response without the link is an
   error.
-- **Not followed:** a link that names a `server`, uses other expressions
-  (`$url`, `$method`, `$statusCode`), or names an unknown operation or
-  parameter gets a warning and no methods.
+- **Not followed:** a link that names a `server`, gives embedded text to
+  an object, array or body, or names an unknown operation or parameter
+  gets a warning and no methods.
 
 Each operation's client functions are also exported from its operations
 package, `api.NewGetPetRequest(ctx, cfg, req)` and
@@ -1652,7 +1660,7 @@ if (resp.status === 200) {
   - JSON Lines, server-sent event and streamed multipart bodies take an `Iterable` (such as an array), sent at once, or an `AsyncIterable` (such as an async generator), streamed as it yields with `duplex: "half"`, which Node, Deno and Chromium over HTTP/2 support. Items are checked as they are written; an invalid one, or an error of the iterator, rejects the call with it.
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
 - **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines and streamed parts are `items` and server-sent events `events`, all `AsyncIterable`s that stop the stream when you `break`. A `multipart/byteranges` body is a `ByteRange[]`, `{ start, end, size, contentType, data }`. The parts of a response are checked against their encodings as they are read.
-- **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. A value that is not there is left out, for the request's validation to report if it is required.
+- **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. `$url` is the URL the request was sent to, built again (`requestUrl`), and embedded text is parsed for a number or boolean parameter. A value that is not there is left out, for the request's validation to report if it is required.
 - **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
 - **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal` and `headers`. A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
@@ -1710,9 +1718,25 @@ func (s *store) Subscribe(ctx context.Context, req *api.SubscribeRequest) (api.S
 
 URL functions handle `$method`, `$request.path.*`, `$request.query.*`,
 `$request.header.*` and `$request.body#/pointer`. Values are put in the
-URL as they are, since the value is often a whole URL. A callback whose
-key uses `$url`, `$statusCode` or `$response.*` gets no URL function, with
-a warning; compute its URL yourself.
+URL as they are, since the value is often a whole URL.
+
+A key that uses the response, `$statusCode`, `$response.body#/pointer` or
+`$response.header.Name`, makes the URL function take it too, `resp`, the
+response the handler returns; the value comes from the variant `resp` is,
+and a variant without it (a header only the 201 declares, say) is an
+error. A key that uses `$url`, the URL of the request as the server
+received it (`server.RequestURL(ctx)`), makes it take the handler's
+`ctx` first:
+
+```go
+// callbacks: {status: {"{$url}/status/{$response.body#/id}?code={$statusCode}": ...}}
+resp := api.Subscribe201JSONResponse{Body: model.Subscription{ID: "s1"}}
+target, err := api.SubscribeStatusCallbackURL(ctx, req, resp)
+```
+
+`server.RequestURL` uses https for a request over TLS and the request's
+`Host`; it does not trust `X-Forwarded-*` headers, so behind a proxy build
+such URLs yourself.
 
 The sender is configured like a client, except that it has no base URL.
 It checks requests before sending them (`client.WithoutRequestValidation`

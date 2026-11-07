@@ -99,6 +99,42 @@ func (s *Sender) PetAdoptedWebhook(ctx context.Context, target string, req *api.
 	return api.ReadPetAdoptedWebhookResponse(s.cfg, resp)
 }
 
+// SubscribeStatusCallback sends the callback "status" of Subscribe (POST
+// {$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode})
+// to target. A nil req sends no parameters or body.
+func (s *Sender) SubscribeStatusCallback(ctx context.Context, target string, req *api.SubscribeStatusCallbackRequest) (api.SubscribeStatusCallbackResponse, error) {
+	if req == nil {
+		req = &api.SubscribeStatusCallbackRequest{}
+	}
+	hreq, err := api.NewSubscribeStatusCallbackRequest(ctx, s.cfg, target, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadSubscribeStatusCallbackResponse(s.cfg, resp)
+}
+
+// SubscribeMovedCallback sends the callback "moved" of Subscribe (POST
+// {$url}/moved?to={$response.header.Location}) to target. A nil req sends
+// no parameters or body.
+func (s *Sender) SubscribeMovedCallback(ctx context.Context, target string, req *api.SubscribeMovedCallbackRequest) (api.SubscribeMovedCallbackResponse, error) {
+	if req == nil {
+		req = &api.SubscribeMovedCallbackRequest{}
+	}
+	hreq, err := api.NewSubscribeMovedCallbackRequest(ctx, s.cfg, target, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadSubscribeMovedCallbackResponse(s.cfg, resp)
+}
+
 // SubscribePetEventCallback sends the callback "petEvent" of Subscribe
 // (POST {$request.body#/url}/pets/{$method}) to target. A nil req sends no
 // parameters or body.

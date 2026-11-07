@@ -135,6 +135,9 @@ func (g *tsGen) client() (string, error) {
 	imports := []string{"config", "send", "type CallOptions", "type ClientOptions", "type Config", "type OperationSpec"}
 	if strings.Contains(body, ": LinkSpec = ") {
 		imports = append(imports, "link", "type LinkSpec")
+		if strings.Contains(body, "requestUrl(") {
+			imports = append(imports, "requestUrl")
+		}
 	}
 	for _, name := range []string{"BasicCredential", "Credential", "ServerEvent", "NamedEvent"} {
 		if strings.Contains(body, name) {
@@ -796,27 +799,53 @@ func (g *tsGen) linkSpec(o *ir.Operation, l *ir.Link) string {
 			key = tsCamel(l.Operation.Body.Fields[0].Name)
 		}
 		s := fmt.Sprintf("{ key: %s, expression: %s", jsString(key), jsString(v.Expression))
-		switch {
-		case v.Const != nil:
-			s += ", const: " + string(v.Const)
-		case v.ResponseBody:
-			s += fmt.Sprintf(", from: \"responseBody\", pointer: %s", jsString(v.Pointer))
-		case v.Header != "":
-			// The header's key is the same in every variant of the response.
-			for _, r := range o.Responses {
-				if h := r.Header(v.Header); h != nil && slices.Contains(r.Links, l) {
-					s += fmt.Sprintf(", from: \"responseHeader\", source: %s", jsString(headerKeys(r)[h]))
-					break
+		if v.Parts != nil {
+			var parts []string
+			for _, p := range v.Parts {
+				src := ir.LinkValue{RequestBody: p.Body, RequestParam: p.Param, URL: p.URL, StatusCode: p.StatusCode, ResponseBody: p.ResponseBody, Header: p.Header, Pointer: p.Pointer}
+				if p.IsText() {
+					parts = append(parts, "{ text: "+jsString(p.Text)+" }")
+					continue
 				}
+				parts = append(parts, "{ "+strings.TrimPrefix(g.linkSource(o, l, &src, ownKeys), ", ")+" }")
 			}
-		case v.RequestBody:
-			s += fmt.Sprintf(", from: \"requestBody\", source: %s, pointer: %s", jsString(tsCamel(o.Body.Fields[0].Name)), jsString(v.Pointer))
-		default:
-			s += fmt.Sprintf(", from: \"request\", source: %s", jsString(ownKeys[v.RequestParam]))
+			s += ", parts: [" + strings.Join(parts, ", ") + "]"
+			if t := g.tsType(v.Param.Elem); t != "string" && !strings.HasPrefix(t, "\"") {
+				s += ", parse: true"
+			}
+		} else {
+			s += g.linkSource(o, l, v, ownKeys)
 		}
 		values = append(values, s+" }")
 	}
 	return fmt.Sprintf("{ name: %s, responses: [%s], values: [%s] }", jsString(l.Name), strings.Join(responses, ", "), strings.Join(values, ", "))
+}
+
+// linkSource renders where the value v of link l of a response of o is,
+// as the fields of a LinkSource after a comma, with ownKeys the keys of
+// o's parameters.
+func (g *tsGen) linkSource(o *ir.Operation, l *ir.Link, v *ir.LinkValue, ownKeys map[*ir.Param]string) string {
+	switch {
+	case v.Const != nil:
+		return ", const: " + string(v.Const)
+	case v.URL:
+		return ", from: \"url\""
+	case v.StatusCode:
+		return ", from: \"statusCode\""
+	case v.ResponseBody:
+		return fmt.Sprintf(", from: \"responseBody\", pointer: %s", jsString(v.Pointer))
+	case v.Header != "":
+		// The header's key is the same in every variant of the response.
+		for _, r := range o.Responses {
+			if h := r.Header(v.Header); h != nil && slices.Contains(r.Links, l) {
+				return fmt.Sprintf(", from: \"responseHeader\", source: %s", jsString(headerKeys(r)[h]))
+			}
+		}
+		return ""
+	case v.RequestBody:
+		return fmt.Sprintf(", from: \"requestBody\", source: %s, pointer: %s", jsString(tsCamel(o.Body.Fields[0].Name)), jsString(v.Pointer))
+	}
+	return fmt.Sprintf(", from: \"request\", source: %s", jsString(ownKeys[v.RequestParam]))
 }
 
 // tsCamel turns a Go name into a TypeScript property or method name:

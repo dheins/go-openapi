@@ -4,6 +4,12 @@
 
 ### Added
 
+- Callback URLs with `$url`, `$statusCode`, `$response.body#/...` and
+  `$response.header.*`: their URL functions take the handler's `ctx`
+  (`server.RequestURL`) and `resp`, the response it returns. Links with
+  `$url`, `$method`, `$statusCode` and expressions embedded in text
+  (`client.LinkText`, `client.LinkPart`; TypeScript `requestUrl`), whose
+  link methods take the request's URL when they need it.
 - Generated Go and TypeScript clients, and the generated CLI, send
   operations with `servers` of their own, or of their path, there while
   they use the document's server (`<Operation>ServerURL`,

@@ -45,6 +45,19 @@ func TestLinks(t *testing.T) {
 		t.Errorf("the pet was not created again: %+v", r.Body)
 	}
 
+	// From the status code, the method and the URL, and expressions
+	// embedded in text, which a number parameter parses.
+	facts, err := created.FactsLink(req, "http://pets.test/v1/pets")
+	if err != nil || facts.PetID != 201 || facts.Session.Value != "POST http://pets.test/v1/pets#Ann" {
+		t.Fatalf("Facts link: %+v %v", facts, err)
+	}
+	if emb, err := created.EmbeddedLink(req); err != nil || emb.PetID != created.Body.ID {
+		t.Errorf("Embedded link: %+v %v", emb, err)
+	}
+	if _, err := created.ByNameLink(req); err == nil || !strings.Contains(err.Error(), "link ByName: {$request.body#/name}") {
+		t.Errorf("a name as a pet ID: %v", err)
+	}
+
 	// From a header; a request value that is not set leaves the linked
 	// one unset.
 	list := &api.ListPetsRequest{Tags: oapi.Some([]string{"cat"})}
@@ -80,6 +93,13 @@ func TestFollowLinks(t *testing.T) {
 	}
 	if p := as[api.CopyPet201JSONResponse](t)(c.FollowCreatePetCopyPet(ctx, created, req)); p.Body.Name != "Bo" || p.Body.ID == created.(api.CreatePet201JSONResponse).Body.ID {
 		t.Errorf("copied to %+v", p.Body)
+	}
+	// $url is where the request was sent, built again.
+	if p := as[api.GetPet200JSONResponse](t)(c.FollowCreatePetSent(ctx, created, req)); p.Body.Name != "Bo" {
+		t.Errorf("followed Sent to %+v", p.Body)
+	}
+	if got := s.seen["GetPet"].(*api.GetPetRequest).Session.Value; !strings.HasPrefix(got, "http://127.0.0.1:") || !strings.HasSuffix(got, "/v1/pets") {
+		t.Errorf("Sent session = %q", got)
 	}
 	list := &api.ListPetsRequest{Limit: oapi.Some(int32(1))}
 	page, err := c.ListPets(ctx, list)

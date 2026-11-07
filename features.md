@@ -46,15 +46,14 @@ shipped in.
   forms and XML, and `querystring` parameters with text or XML content.
   — later
 - Links to operations of other documents (`operationRef` to another
-  file), links naming a `server`, and runtime expressions other than
-  `$response.body`, `$response.header` and `$request.*` in links
-  (`$url`, `$method`, `$statusCode`, and expressions embedded in
-  strings). — later
+  file), links naming a `server`, and expressions embedded in text given
+  to object, array or body values of links. — later
 - Signed webhooks (an HMAC of the body in a header): OpenAPI has no
   security scheme for them, so they are left to client and server
   middleware, as the guide shows. — not planned
-- Callback URLs with `$url`, `$statusCode` or `$response.*`: no URL
-  function is generated, and the sender is given the URL. — later
+- `$url` in callback URLs as a proxy saw the request
+  (`X-Forwarded-Proto` and `-Host`): `server.RequestURL` uses the
+  request's own scheme and `Host`. — later
 - Webhooks and callbacks declared inside webhooks and callbacks. — later
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
@@ -137,6 +136,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Every runtime expression in callback URLs and links: `$url`,
+  `$statusCode` and `$response.*` in callback URLs (URL functions taking
+  `ctx` and `resp`), and `$url`, `$method`, `$statusCode` and expressions
+  embedded in text in links, in Go and TypeScript. (346d860, 2f15d11,
+  ffe5449)
 - [x] Generated Go and TypeScript clients send operations with `servers`
   of their own (an operation's or its path's) there while they use the
   document's server; `client.WithOperationServers` and

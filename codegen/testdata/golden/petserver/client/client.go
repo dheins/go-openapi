@@ -154,6 +154,82 @@ func (c *Client) FollowCreatePetAgain(ctx context.Context, resp api.CreatePetRes
 	return c.CreatePet(ctx, next)
 }
 
+// FollowCreatePetFacts follows the link "Facts" of a response of CreatePet:
+// it sends the request of GetPet that FactsLink builds from resp and req,
+// the request resp answers.
+func (c *Client) FollowCreatePetFacts(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		FactsLink(*api.CreatePetRequest, string) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Facts: a %T has no such link", resp)
+	}
+	built, err := api.NewCreatePetRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	next, err := linked.FactsLink(req, built.URL.String())
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(ctx, next)
+}
+
+// FollowCreatePetEmbedded follows the link "Embedded" of a response of
+// CreatePet: it sends the request of GetPet that EmbeddedLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetEmbedded(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		EmbeddedLink(*api.CreatePetRequest) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Embedded: a %T has no such link", resp)
+	}
+	next, err := linked.EmbeddedLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(ctx, next)
+}
+
+// FollowCreatePetByName follows the link "ByName" of a response of
+// CreatePet: it sends the request of GetPet that ByNameLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetByName(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		ByNameLink(*api.CreatePetRequest) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link ByName: a %T has no such link", resp)
+	}
+	next, err := linked.ByNameLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(ctx, next)
+}
+
+// FollowCreatePetSent follows the link "Sent" of a response of CreatePet:
+// it sends the request of GetPet that SentLink builds from resp and req,
+// the request resp answers.
+func (c *Client) FollowCreatePetSent(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		SentLink(*api.CreatePetRequest, string) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Sent: a %T has no such link", resp)
+	}
+	built, err := api.NewCreatePetRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	next, err := linked.SentLink(req, built.URL.String())
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(ctx, next)
+}
+
 // GetPet calls GET /pets/{petId}. A nil req sends no parameters or body.
 func (c *Client) GetPet(ctx context.Context, req *api.GetPetRequest) (api.GetPetResponse, error) {
 	if req == nil {

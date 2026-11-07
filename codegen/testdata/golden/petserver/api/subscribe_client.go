@@ -42,6 +42,7 @@ func NewSubscribeRequest(ctx context.Context, c *client.Config, req *SubscribeRe
 		r.HeaderParam(subscribeXCallbackParam, req.XCallback.Value)
 	}
 	r.JSONBody("application/json", req.Body)
+	r.Accept("application/json")
 	return c.Build(ctx, r)
 }
 
@@ -49,9 +50,34 @@ func NewSubscribeRequest(ctx context.Context, c *client.Config, req *SubscribeRe
 // Subscribe. It closes the body, except for a stream, which closes it when
 // its loop ends. Any other response is a *client.UnexpectedResponse.
 func ReadSubscribeResponse(c *client.Config, resp *http.Response) (SubscribeResponse, error) {
+	mt := client.MediaType(resp)
 	switch {
-	case resp.StatusCode == 201:
-		var v Subscribe201Response
+	case resp.StatusCode == 201 && client.MediaTypeIs(mt, "application/json", true):
+		var v Subscribe201JSONResponse
+		body, err := c.ReadBody(resp)
+		if err != nil {
+			return nil, err
+		}
+		if err := client.DecodeJSON(resp, body, &v.Body); err != nil {
+			return nil, err
+		}
+		var h0 string
+		if ok, err := client.Header(resp, "Location", server.ParseScalar[string], &h0); err != nil {
+			return nil, err
+		} else if ok {
+			v.Location = oapi.Some(h0)
+		}
+		if c.ValidateResponses {
+			var errs oapi.ValidationErrors
+			errs.Nested("", v.Body.Validate())
+			if err := client.Invalid(resp, errs.Err()); err != nil {
+				return nil, err
+			}
+		}
+		return v, nil
+	case client.StatusIs(resp.StatusCode, "default"):
+		var v SubscribeDefaultResponse
+		v.StatusCode = resp.StatusCode
 		_, err := c.ReadBody(resp)
 		if err != nil {
 			return nil, err

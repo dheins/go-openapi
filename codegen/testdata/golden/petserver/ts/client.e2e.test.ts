@@ -143,7 +143,11 @@ test("responses", { skip }, async () => {
   }
   assert.deepEqual(events.slice(0, 2), ['pet {"id":1,"name":"Rex"}', 'pet {"id":2,"name":"Tom","tag":"cat"}']);
 
-  assert.deepEqual(await c.subscribe({ xCallback: "https://hooks.example.com/ping", body: { url: "https://hooks.example.com" } }), { status: 201 });
+  assert.deepEqual(await c.subscribe({ xCallback: "https://hooks.example.com/ping", body: { url: "https://hooks.example.com" } }), {
+    status: 201,
+    headers: { location: "/subscriptions/s1" },
+    body: { id: "s1" },
+  });
   assert.deepEqual(await c.public(), { status: 204 });
 });
 

@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
+	petclient "github.com/dheins/go-openapi/codegen/testdata/golden/petserver/client"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/client"
@@ -72,6 +73,16 @@ func (r *receiver) SubscribePetEventCallback(ctx context.Context, req *api.Subsc
 	return api.SubscribePetEventCallback204Response{}, nil
 }
 
+func (r *receiver) SubscribeStatusCallback(ctx context.Context, req *api.SubscribeStatusCallbackRequest) (api.SubscribeStatusCallbackResponse, error) {
+	r.record(ctx, req)
+	return api.SubscribeStatusCallback204Response{}, nil
+}
+
+func (r *receiver) SubscribeMovedCallback(ctx context.Context, req *api.SubscribeMovedCallbackRequest) (api.SubscribeMovedCallbackResponse, error) {
+	r.record(ctx, req)
+	return api.SubscribeMovedCallback204Response{}, nil
+}
+
 func (r *receiver) SubscribePingCallback(ctx context.Context, req *api.SubscribePingCallbackRequest) (api.SubscribePingCallbackResponse, error) {
 	r.record(ctx, req)
 	return api.SubscribePingCallback200TextResponse{Body: "pong " + strconv.FormatInt(req.N.Value, 10)}, nil
@@ -110,14 +121,15 @@ func (hookAuth) HookToken(ctx context.Context, token string, _ []string) (contex
 }
 
 // newReceiver serves r's handlers at the paths a consumer would register:
-// the webhook at /hooks/adopted, pet events below /hooks (the URL of the
-// subscription) and pings at /ping.
+// the webhook at /hooks/adopted, pet events and statuses below /hooks (the
+// URL of the subscription) and pings at /ping.
 func newReceiver(t *testing.T, r *receiver) *httptest.Server {
 	t.Helper()
 	cfg := server.NewConfig(server.WithLogger(slog.New(slog.DiscardHandler)))
 	cfg.Handle(api.PetAdoptedWebhookOperation, "/hooks/adopted", api.HandlePetAdoptedWebhook(cfg, r, hookAuth{}))
 	cfg.Handle(api.SubscribePetEventCallbackOperation, "/hooks/pets/POST", api.HandleSubscribePetEventCallback(cfg, r))
 	cfg.Handle(api.SubscribePingCallbackOperation, "/ping", api.HandleSubscribePingCallback(cfg, r, hookAuth{}))
+	cfg.Handle(api.SubscribeStatusCallbackOperation, "/hooks/subscriptions/s1", api.HandleSubscribeStatusCallback(cfg, r))
 	srv := httptest.NewServer(cfg.Handler())
 	t.Cleanup(srv.Close)
 	return srv
@@ -173,6 +185,42 @@ func TestWebhookRoundTrip(t *testing.T) {
 	}
 	if _, err := s.PetAdoptedWebhook(ctx, "/relative", req); err == nil {
 		t.Error("sent to a relative URL")
+	}
+}
+
+// TestCallbackURLsOfResponses checks the URLs of callbacks over the
+// response ($statusCode, $response.*) and the request's URL ($url), which
+// the Subscribe handler computes, and sends one.
+func TestCallbackURLsOfResponses(t *testing.T) {
+	ctx := context.Background()
+	r := &receiver{}
+	hooks := newReceiver(t, r)
+	st, c := newTestClient(t, petclient.Credentials{})
+	req := &api.SubscribeRequest{Body: model.SubscribeRequestBody{URL: hooks.URL + "/hooks"}}
+	if _, err := c.Subscribe(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	urls := st.seen["SubscribeURLs"].([]string)
+	if urls[0] != hooks.URL+"/hooks/subscriptions/s1?status=201" {
+		t.Errorf("status URL = %s", urls[0])
+	}
+	// $url is where the client sent the subscription.
+	if !strings.HasPrefix(urls[1], "http://127.0.0.1:") || !strings.HasSuffix(urls[1], "/v1/subscriptions/moved?to=/subscriptions/s1") {
+		t.Errorf("moved URL = %s", urls[1])
+	}
+	s := newSender(t, SenderCredentials{HookKey: consumerKey})
+	if resp, err := s.SubscribeStatusCallback(ctx, urls[0], nil); err != nil || resp != (api.SubscribeStatusCallback204Response{}) {
+		t.Errorf("status: %+v %v", resp, err)
+	}
+
+	// Values a response or context does not have.
+	refused := api.SubscribeDefaultResponse{StatusCode: 409}
+	if _, err := api.SubscribeStatusCallbackURL(req, refused); err == nil || err.Error() != "callback URL: $response.body#/id is not in a api.SubscribeDefaultResponse" {
+		t.Errorf("refused: %v", err)
+	}
+	created := api.Subscribe201JSONResponse{Body: model.Subscribe201ResponseBody{ID: "s1"}}
+	if _, err := api.SubscribeMovedCallbackURL(ctx, req, created); err == nil || !strings.Contains(err.Error(), "$url is not set") {
+		t.Errorf("outside a request: %v", err)
 	}
 }
 
