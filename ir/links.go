@@ -3,7 +3,8 @@ package ir
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/dheins/go-openapi/oas"
@@ -31,16 +32,31 @@ type LinkValue struct {
 	Param *Param
 	// Expression is the value as written: a runtime expression or JSON.
 	Expression string
-	// Const is the value, for a constant; otherwise the value is taken
-	// from the response's body (ResponseBody, at Pointer), one of its
-	// headers (Header, a name), the request's body (RequestBody, at
-	// Pointer) or a parameter of the request (RequestParam).
+	// Const is the value, for a constant ($method too); otherwise the
+	// value is taken from the response's body (ResponseBody, at Pointer),
+	// one of its headers (Header, a name), its status code (StatusCode),
+	// the request's body (RequestBody, at Pointer), a parameter of the
+	// request (RequestParam) or its URL (URL).
 	Const        json.RawMessage
 	ResponseBody bool
 	Header       string
+	StatusCode   bool
 	RequestBody  bool
 	RequestParam *Param
+	URL          bool
 	Pointer      string
+	// Parts, if not nil, make the value text with expressions embedded in
+	// it ("pets/{$response.body#/id}"): the text and the values in it,
+	// in order, given to a scalar parameter.
+	Parts []URLPart
+}
+
+// NeedsURL says a value of l is, or has, the URL of the request the
+// link's response answers ($url).
+func (l *Link) NeedsURL() bool {
+	return slices.ContainsFunc(l.Values, func(v *LinkValue) bool {
+		return v.URL || slices.ContainsFunc(v.Parts, func(p URLPart) bool { return p.URL })
+	})
 }
 
 // pendingLinks are the links of a response, resolved once every
@@ -93,12 +109,17 @@ func (b *builder) resolveLinks(methods namespace) {
 // linkFits reports whether the response variant v has the body (as JSON
 // or XML) and headers the values of link read.
 func linkFits(link *Link, v *Response) bool {
+	fits := func(body bool, header string) bool {
+		return !(body && (v.Body == nil || v.Kind != "json" && v.Kind != "xml")) && (header == "" || v.Header(header) != nil)
+	}
 	for _, lv := range link.Values {
-		switch {
-		case lv.ResponseBody && (v.Body == nil || v.Kind != "json" && v.Kind != "xml"):
+		if !fits(lv.ResponseBody, lv.Header) {
 			return false
-		case lv.Header != "" && v.Header(lv.Header) == nil:
-			return false
+		}
+		for _, p := range lv.Parts {
+			if !fits(p.ResponseBody, p.Header) {
+				return false
+			}
 		}
 	}
 	return true
@@ -144,9 +165,12 @@ func (b *builder) link(name string, l *oas.Link, pl pendingLinks, byID map[strin
 		if why != "" {
 			return nil, why
 		}
-		v, why := linkValue(raw, pl.answers)
+		v, why := linkValue(raw, pl.answers, pl.variants)
 		if why != "" {
 			return nil, fmt.Sprintf("parameter %s: %s", key, why)
+		}
+		if v.Parts != nil && (p.Array || p.Object) {
+			return nil, fmt.Sprintf("parameter %s: an expression embedded in text gives text, which %s is not", key, p.Name)
 		}
 		v.Param = p
 		link.Values = append(link.Values, v)
@@ -155,9 +179,12 @@ func (b *builder) link(name string, l *oas.Link, pl pendingLinks, byID map[strin
 		if target.Body == nil {
 			return nil, fmt.Sprintf("it gives a request body, which %s does not have", target.Name)
 		}
-		v, why := linkValue(l.RequestBody, pl.answers)
+		v, why := linkValue(l.RequestBody, pl.answers, pl.variants)
 		if why != "" {
 			return nil, "requestBody: " + why
+		}
+		if v.Parts != nil {
+			return nil, "requestBody: an expression embedded in text gives text, which a body is not"
 		}
 		link.Values = append(link.Values, v)
 	}
@@ -188,27 +215,43 @@ func linkParam(target *Operation, key string) (*Param, string) {
 }
 
 // linkValue maps the value of a link's parameter or body: JSON, of which
-// a string starting with $ is a runtime expression over the response and
-// the request of answers.
-func linkValue(raw json.RawMessage, answers *Operation) (*LinkValue, string) {
+// a string starting with $ is a runtime expression over variants, the
+// response, and the request of answers, and a string with {$...} in it
+// text with such expressions embedded.
+func linkValue(raw json.RawMessage, answers *Operation, variants []*Response) (*LinkValue, string) {
 	var expr string
-	if json.Unmarshal(raw, &expr) != nil || !strings.HasPrefix(expr, "$") {
+	if json.Unmarshal(raw, &expr) != nil {
 		return &LinkValue{Expression: string(raw), Const: raw}, ""
 	}
-	v := &LinkValue{Expression: expr}
-	pointer := func(rest string) string {
-		// The pointer is a URI fragment, so it may be percent-encoded.
-		ptr, err := url.PathUnescape(strings.TrimPrefix(rest, "#"))
-		if err != nil || (ptr != "" && ptr[0] != '/') {
-			return fmt.Sprintf("%s does not end in a JSON pointer", expr)
+	if !strings.HasPrefix(expr, "$") {
+		if !strings.Contains(expr, "{$") {
+			return &LinkValue{Expression: string(raw), Const: raw}, ""
 		}
-		v.Pointer = ptr
-		return ""
+		parts, why := templateParts(expr, answers, variants)
+		if why != "" {
+			return nil, why
+		}
+		return &LinkValue{Expression: expr, Parts: parts}, ""
+	}
+	v := &LinkValue{Expression: expr}
+	switch expr {
+	case "$method":
+		// A method is a token, which needs no escaping beyond quotes.
+		v.Const = json.RawMessage(strconv.Quote(answers.Method))
+		return v, ""
+	case "$url":
+		v.URL = true
+		return v, ""
+	case "$statusCode":
+		v.StatusCode = true
+		return v, ""
 	}
 	switch {
 	case strings.HasPrefix(expr, "$response.body") && (expr == "$response.body" || expr[len("$response.body")] == '#'):
 		v.ResponseBody = true
-		return v, pointer(strings.TrimPrefix(expr, "$response.body"))
+		var why string
+		v.Pointer, why = fragmentPointer(expr, strings.TrimPrefix(expr, "$response.body"))
+		return v, why
 	case strings.HasPrefix(expr, "$response.header."):
 		v.Header = strings.TrimPrefix(expr, "$response.header.")
 		return v, ""

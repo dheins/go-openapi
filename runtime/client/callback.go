@@ -57,6 +57,16 @@ func bodyText(body any, dir oapi.Direction, pointer, what string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("callback URL: the %s %w", what, err)
 	}
+	text, err := textOf(v)
+	if err != nil {
+		return "", fmt.Errorf("callback URL: %s: %w", what, err)
+	}
+	return text, nil
+}
+
+// textOf returns v, a decoded JSON value, as text: a string as it is,
+// other values as JSON.
+func textOf(v any) (string, error) {
 	switch v := v.(type) {
 	case string:
 		return v, nil
@@ -65,7 +75,7 @@ func bodyText(body any, dir oapi.Direction, pointer, what string) (string, error
 	}
 	text, err := json.Marshal(v)
 	if err != nil {
-		return "", fmt.Errorf("callback URL: %s: %w", what, err)
+		return "", err
 	}
 	return string(text), nil
 }
@@ -121,6 +131,41 @@ func LinkValue(dst, src any, dir oapi.Direction, pointer string) error {
 		return err
 	}
 	return LinkConst(dst, raw)
+}
+
+// LinkPart returns the value at pointer ("" for all of it) in src encoded
+// as JSON in direction dir as text, for a link value with expressions
+// embedded in text: a string as it is, other values as JSON.
+func LinkPart(src any, dir oapi.Direction, pointer string) (string, error) {
+	data, err := oapi.EncodeValue(src, dir)
+	if err != nil {
+		return "", err
+	}
+	v, err := valueAt(data, pointer)
+	if err != nil {
+		return "", fmt.Errorf("the value %w", err)
+	}
+	return textOf(v)
+}
+
+// LinkText sets *dst, a scalar field of the request a link leads to, to
+// text, a value with expressions embedded in it: as a string or, for a
+// field that is not one, as the number or boolean text spells.
+func LinkText(dst any, text string) error {
+	quoted, err := json.Marshal(text)
+	if err != nil {
+		return err
+	}
+	err = LinkConst(dst, quoted)
+	if err == nil {
+		return nil
+	}
+	if _, numErr := strconv.ParseFloat(text, 64); json.Valid([]byte(text)) && (numErr == nil || text == "true" || text == "false") {
+		if LinkConst(dst, json.RawMessage(text)) == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // LinkConst sets *dst, a field of the request a link leads to, to the

@@ -336,17 +336,75 @@ func (f *fileGen) linkMethod(w func(int, string, ...any), o *ir.Operation, r *ir
 		w(0, "%s", comment("", []string{"", l.Doc}))
 	}
 	oapi := f.imp(oapiImport, "oapi")
-	w(0, "func (r %s) %s(req *%s) (*%s, error) {", r.TypeName, l.Method, o.RequestType, target.RequestType)
+	if l.NeedsURL() {
+		w(0, "//")
+		w(0, "// requestURL is the URL req was sent to.")
+		w(0, "func (r %s) %s(req *%s, requestURL string) (*%s, error) {", r.TypeName, l.Method, o.RequestType, target.RequestType)
+	} else {
+		w(0, "func (r %s) %s(req *%s) (*%s, error) {", r.TypeName, l.Method, o.RequestType, target.RequestType)
+	}
 	w(1, "var out %s", target.RequestType)
-	for _, v := range l.Values {
+	for i, v := range l.Values {
 		dst := "&out."
 		if v.Param != nil {
 			dst += v.Param.Field
 		} else {
 			dst += target.Body.Fields[0].Name
 		}
+		// pre are the statements computing the parts of embedded text.
 		var cond, stmt string
+		var pre []string
 		switch {
+		case v.Parts != nil:
+			var conds, terms []string
+			for j, p := range v.Parts {
+				name := fmt.Sprintf("v%dp%d", i, j)
+				var c, call string
+				switch {
+				case p.URL:
+					terms = append(terms, "requestURL")
+					continue
+				case p.StatusCode && r.Code != 0:
+					terms = append(terms, strconv.Quote(strconv.Itoa(r.Code)))
+					continue
+				case p.StatusCode:
+					terms = append(terms, f.imp("strconv", "strconv")+".Itoa(r.StatusCode)")
+					continue
+				case p.ResponseBody:
+					call = fmt.Sprintf("client.LinkPart(r.Body, %s.Response, %q)", oapi, p.Pointer)
+				case p.Header != "":
+					h := r.Header(p.Header)
+					var value string
+					c, value = present("r."+h.Field, h.Type)
+					call = fmt.Sprintf("client.ParamValue(%s)", value)
+				case p.Body:
+					field := o.Body.Fields[0]
+					var value string
+					c, value = present("req."+field.Name, field.Type)
+					call = fmt.Sprintf("client.LinkPart(%s, %s.Request, %q)", value, oapi, p.Pointer)
+				case p.Param != nil:
+					var value string
+					c, value = present("req."+p.Param.Field, p.Param.Type)
+					call = fmt.Sprintf("client.ParamValue(%s)", value)
+				default:
+					terms = append(terms, strconv.Quote(p.Text))
+					continue
+				}
+				if c != "" {
+					conds = append(conds, c)
+				}
+				pre = append(pre, fmt.Sprintf("%s, err := %s", name, call), "if err != nil {",
+					fmt.Sprintf("\treturn nil, client.LinkError(%q, %q, err)", l.Name, v.Expression), "}")
+				terms = append(terms, name)
+			}
+			cond = strings.Join(conds, " && ")
+			stmt = fmt.Sprintf("client.LinkText(%s, %s)", dst, strings.Join(terms, " + "))
+		case v.URL:
+			stmt = fmt.Sprintf("client.LinkText(%s, requestURL)", dst)
+		case v.StatusCode && r.Code != 0:
+			stmt = fmt.Sprintf("client.LinkConst(%s, %s(%q))", dst, f.imp("encoding/json", "json")+".RawMessage", strconv.Itoa(r.Code))
+		case v.StatusCode:
+			stmt = fmt.Sprintf("client.LinkValue(%s, r.StatusCode, %s.Response, \"\")", dst, oapi)
 		case v.Const != nil:
 			stmt = fmt.Sprintf("client.LinkConst(%s, %s(%s))", dst, f.imp("encoding/json", "json")+".RawMessage", strconv.Quote(string(v.Const)))
 		case v.ResponseBody:
@@ -383,6 +441,9 @@ func (f *fileGen) linkMethod(w func(int, string, ...any), o *ir.Operation, r *ir
 				w(2, "return nil, client.LinkError(%q, %q, %s.New(\"it is not set\"))", l.Name, v.Expression, f.imp("errors", "errors"))
 				w(1, "}")
 			}
+		}
+		for _, s := range pre {
+			w(depth, "%s", s)
 		}
 		w(depth, "if err := %s; err != nil {", stmt)
 		w(depth+1, "return nil, client.LinkError(%q, %q, err)", l.Name, v.Expression)
@@ -1141,13 +1202,24 @@ func (f *fileGen) followMethod(w func(int, string, ...any), o *ir.Operation, l *
 	w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
 	ctx := f.imp("context", "context")
 	w(0, "func (c *Client) %s(ctx %s.Context, resp %s, req *%s) (%s, error) {", l.Follow, ctx, op(o.ResponseType), op(o.RequestType), op(target.ResponseType))
+	urlArg, urlParam := "", ""
+	if l.NeedsURL() {
+		urlArg, urlParam = ", built.URL.String()", ", string"
+	}
 	w(1, "linked, ok := resp.(interface {")
-	w(2, "%s(*%s) (*%s, error)", l.Method, op(o.RequestType), op(target.RequestType))
+	w(2, "%s(*%s%s) (*%s, error)", l.Method, op(o.RequestType), urlParam, op(target.RequestType))
 	w(1, "})")
 	w(1, "if !ok {")
 	w(2, "return nil, %s.Errorf(\"link %s: a %%T has no such link\", resp)", f.imp("fmt", "fmt"), l.Name)
 	w(1, "}")
-	w(1, "next, err := linked.%s(req)", l.Method)
+	if l.NeedsURL() {
+		// $url: where req was sent, built again without sending it.
+		w(1, "built, err := %s(ctx, c.cfg, req)", op("New"+o.Name+"Request"))
+		w(1, "if err != nil {")
+		w(2, "return nil, err")
+		w(1, "}")
+	}
+	w(1, "next, err := linked.%s(req%s)", l.Method, urlArg)
 	w(1, "if err != nil {")
 	w(2, "return nil, err")
 	w(1, "}")

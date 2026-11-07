@@ -186,6 +186,16 @@ Links:
   - `Destination` = `$request.body#/name`
 - `Again` to [createPet](#post-pets)
   - request body = `$response.body`
+- `Facts` to [getPet](#get-petspetid): Values of the exchange rather than of its bodies.
+  - `petId` = `$statusCode`
+  - `session` = `{$method} {$url}#{$response.body#/name}`
+- `Embedded` to [getPet](#get-petspetid)
+  - `petId` = `{$response.body#/id}`
+- `ByName` to [getPet](#get-petspetid)
+  - `petId` = `{$request.body#/name}`
+- `Sent` to [getPet](#get-petspetid)
+  - `petId` = `$response.body#/id`
+  - `session` = `$url`
 
 `4XX`:
 

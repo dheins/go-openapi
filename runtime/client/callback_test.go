@@ -89,3 +89,30 @@ func TestCallbackValues(t *testing.T) {
 		t.Errorf("missing = %v", err)
 	}
 }
+
+func TestLinkText(t *testing.T) {
+	var s string
+	if err := LinkText(&s, "pets/7"); err != nil || s != "pets/7" {
+		t.Errorf("string = %q, %v", s, err)
+	}
+	var n oapi.Optional[int64]
+	if err := LinkText(&n, "42"); err != nil || n.Value != 42 || !n.Set {
+		t.Errorf("number = %+v, %v", n, err)
+	}
+	var b bool
+	if err := LinkText(&b, "true"); err != nil || !b {
+		t.Errorf("boolean = %v, %v", b, err)
+	}
+	var id int64
+	for _, text := range []string{"pet-7", "null", "Inf", "[1]"} {
+		if err := LinkText(&id, text); err == nil {
+			t.Errorf("%q set a number: %d", text, id)
+		}
+	}
+	if got, err := LinkPart(map[string]any{"id": 7, "name": "Rex"}, oapi.Response, "/id"); err != nil || got != "7" {
+		t.Errorf("part = %q, %v", got, err)
+	}
+	if _, err := LinkPart(map[string]any{}, oapi.Response, "/id"); err == nil || err.Error() != "the value has no /id" {
+		t.Errorf("missing part: %v", err)
+	}
+}

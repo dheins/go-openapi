@@ -1,2 +1,2 @@
-1154:9: operation-level servers with another base path than the document's are not used by the generated server; generated clients send to them
-1239:7: path-level servers are not used by the generated server; generated clients send to them
+1173:9: operation-level servers with another base path than the document's are not used by the generated server; generated clients send to them
+1258:7: path-level servers are not used by the generated server; generated clients send to them

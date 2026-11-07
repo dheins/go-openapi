@@ -68,6 +68,14 @@ const followCreatePetCopyPetLink: LinkSpec = { name: "CopyPet", responses: [{ st
 
 const followCreatePetAgainLink: LinkSpec = { name: "Again", responses: [{ status: "201" }], values: [{ key: "body", expression: "$response.body", from: "responseBody", pointer: "" }] };
 
+const followCreatePetFactsLink: LinkSpec = { name: "Facts", responses: [{ status: "201" }], values: [{ key: "petId", expression: "$statusCode", from: "request", source: "" }, { key: "session", expression: "{$method} {$url}#{$response.body#/name}", from: "request", source: "" }] };
+
+const followCreatePetEmbeddedLink: LinkSpec = { name: "Embedded", responses: [{ status: "201" }], values: [{ key: "petId", expression: "{$response.body#/id}", from: "request", source: "" }] };
+
+const followCreatePetByNameLink: LinkSpec = { name: "ByName", responses: [{ status: "201" }], values: [{ key: "petId", expression: "{$request.body#/name}", from: "request", source: "" }] };
+
+const followCreatePetSentLink: LinkSpec = { name: "Sent", responses: [{ status: "201" }], values: [{ key: "petId", expression: "$response.body#/id", from: "responseBody", pointer: "/id" }, { key: "session", expression: "$url", from: "request", source: "" }] };
+
 /** The inputs of getPet. */
 export interface GetPetRequest {
   petId: number;
@@ -931,6 +939,30 @@ export class Client {
   /** Follows the link "Again" of a response of createPet: sends the request of createPet it builds from resp and req, the request resp answers. */
   async followCreatePetAgain(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<CreatePetResponse> {
     return this.createPet(link(followCreatePetAgainLink, resp, req) as CreatePetRequest, call);
+  }
+
+  /**
+   * Follows the link "Facts" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers.
+   *
+   * Values of the exchange rather than of its bodies.
+   */
+  async followCreatePetFacts(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
+    return this.getPet(link(followCreatePetFactsLink, resp, req) as GetPetRequest, call);
+  }
+
+  /** Follows the link "Embedded" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
+  async followCreatePetEmbedded(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
+    return this.getPet(link(followCreatePetEmbeddedLink, resp, req) as GetPetRequest, call);
+  }
+
+  /** Follows the link "ByName" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
+  async followCreatePetByName(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
+    return this.getPet(link(followCreatePetByNameLink, resp, req) as GetPetRequest, call);
+  }
+
+  /** Follows the link "Sent" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
+  async followCreatePetSent(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
+    return this.getPet(link(followCreatePetSentLink, resp, req) as GetPetRequest, call);
   }
 
   /** GET /pets/{petId}. */

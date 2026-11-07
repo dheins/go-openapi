@@ -31,8 +31,13 @@ paths:
             nowhere: {operationId: missing}
             unknownParam: {operationId: getPet, parameters: {color: red}}
             ambiguous: {operationId: getPet, parameters: {mode: fast}}
-            badExpression: {operationId: getPet, parameters: {id: $url}}
+            badExpression: {operationId: getPet, parameters: {id: $foo}}
             noHeader: {operationId: getPet, parameters: {id: $response.header.X-Nope}}
+            byRequestFacts: {operationId: getPet, parameters: {id: $statusCode, query.mode: $method, header.mode: $url}}
+            embedded: {operationId: getPet, parameters: {id: "{$response.body#/id}", query.mode: "{$method} {$url}?s={$statusCode}&h={$response.header.X-Id}"}}
+            embeddedArray: {operationId: getPet, parameters: {tags: "a{$statusCode}"}}
+            embeddedBody: {operationId: createPet, requestBody: "x{$statusCode}"}
+            embeddedBad: {operationId: getPet, parameters: {id: "{$response.header.X-Nope}"}}
   /pets/{id}:
     get:
       operationId: getPet
@@ -41,6 +46,7 @@ paths:
         - {name: id, in: path, required: true, schema: {type: integer}}
         - {name: mode, in: query, schema: {type: string}}
         - {name: mode, in: header, schema: {type: string}}
+        - {name: tags, in: query, schema: {type: array, items: {type: string}}}
       responses: {"200": {description: ok}}
 `
 
@@ -63,11 +69,33 @@ func TestLinks(t *testing.T) {
 		"CreatePet201JSONResponse byBody ByBodyLink GetPet [path.id=$response.body#/id header.mode=\"fast\"]",
 		"CreatePet201JSONResponse byHeader ByHeaderLink GetPet [path.id=$response.header.x-id]",
 		"CreatePet201JSONResponse byRequest ByRequestLink GetPet [path.id=$request.body#/name]",
+		"CreatePet201JSONResponse byRequestFacts ByRequestFactsLink GetPet [path.id=$statusCode query.mode=$method header.mode=$url]",
+		"CreatePet201JSONResponse embedded EmbeddedLink GetPet [path.id={$response.body#/id} query.mode={$method} {$url}?s={$statusCode}&h={$response.header.X-Id}]",
 		"CreatePet201TextResponse byHeader ByHeaderLink GetPet [path.id=$response.header.x-id]",
 		"CreatePet201TextResponse byRequest ByRequestLink GetPet [path.id=$request.body#/name]",
+		"CreatePet201TextResponse byRequestFacts ByRequestFactsLink GetPet [path.id=$statusCode query.mode=$method header.mode=$url]",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("links:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	for _, l := range create.Responses[0].Links {
+		switch l.Name {
+		case "byRequestFacts":
+			if v := l.Values; string(v[1].Const) != `"POST"` || !v[0].StatusCode || !v[2].URL || !l.NeedsURL() {
+				t.Errorf("byRequestFacts = %+v %+v %+v", v[0], v[1], v[2])
+			}
+		case "embedded":
+			if p := l.Values[0].Parts; len(p) != 1 || !p[0].ResponseBody || p[0].Pointer != "/id" {
+				t.Errorf("embedded id = %+v", p)
+			}
+			if p := l.Values[1].Parts; len(p) != 6 || p[0].Text != "POST " || !p[1].URL || p[2].Text != "?s=" || !p[3].StatusCode || p[4].Text != "&h=" || p[5].Header != "X-Id" {
+				t.Errorf("embedded mode = %+v", p)
+			}
+		case "byBody":
+			if l.NeedsURL() {
+				t.Error("byBody needs the URL")
+			}
+		}
 	}
 
 	var warnings []string
@@ -81,8 +109,11 @@ func TestLinks(t *testing.T) {
 		`the link "server" of response 201 of CreatePet: it names a server`,
 		`the link "nowhere" of response 201 of CreatePet: it leads to no operation`,
 		`the link "unknownParam" of response 201 of CreatePet: GetPet has no parameter color`,
-		`the link "badExpression" of response 201 of CreatePet: parameter id: $url is not a value of the response or request`,
+		`the link "badExpression" of response 201 of CreatePet: parameter id: $foo is not a value of the response or request`,
 		`the link "noHeader" of response 201 of CreatePet reads a body or header no variant of the response has`,
+		`the link "embeddedArray" of response 201 of CreatePet: parameter tags: an expression embedded in text gives text, which tags is not`,
+		`the link "embeddedBody" of response 201 of CreatePet: requestBody: an expression embedded in text gives text, which a body is not`,
+		`the link "embeddedBad" of response 201 of CreatePet: parameter id: $response.header.X-Nope refers to a header no response declares`,
 	} {
 		if !slices.ContainsFunc(warnings, func(s string) bool { return strings.Contains(s, w) }) {
 			t.Errorf("no warning %q in:\n%s", w, strings.Join(warnings, "\n"))

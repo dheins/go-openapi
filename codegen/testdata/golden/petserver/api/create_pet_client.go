@@ -132,3 +132,71 @@ func (r CreatePet201JSONResponse) AgainLink(req *CreatePetRequest) (*CreatePetRe
 	}
 	return &out, nil
 }
+
+// FactsLink returns the request of GetPet that the link "Facts" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+//
+// Values of the exchange rather than of its bodies.
+//
+// requestURL is the URL req was sent to.
+func (r CreatePet201JSONResponse) FactsLink(req *CreatePetRequest, requestURL string) (*GetPetRequest, error) {
+	var out GetPetRequest
+	if err := client.LinkConst(&out.PetID, json.RawMessage("201")); err != nil {
+		return nil, client.LinkError("Facts", "$statusCode", err)
+	}
+	v1p3, err := client.LinkPart(r.Body, oapi.Response, "/name")
+	if err != nil {
+		return nil, client.LinkError("Facts", "{$method} {$url}#{$response.body#/name}", err)
+	}
+	if err := client.LinkText(&out.Session, "POST "+requestURL+"#"+v1p3); err != nil {
+		return nil, client.LinkError("Facts", "{$method} {$url}#{$response.body#/name}", err)
+	}
+	return &out, nil
+}
+
+// EmbeddedLink returns the request of GetPet that the link "Embedded" of
+// this response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) EmbeddedLink(req *CreatePetRequest) (*GetPetRequest, error) {
+	var out GetPetRequest
+	v0p0, err := client.LinkPart(r.Body, oapi.Response, "/id")
+	if err != nil {
+		return nil, client.LinkError("Embedded", "{$response.body#/id}", err)
+	}
+	if err := client.LinkText(&out.PetID, v0p0); err != nil {
+		return nil, client.LinkError("Embedded", "{$response.body#/id}", err)
+	}
+	return &out, nil
+}
+
+// ByNameLink returns the request of GetPet that the link "ByName" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) ByNameLink(req *CreatePetRequest) (*GetPetRequest, error) {
+	var out GetPetRequest
+	v0p0, err := client.LinkPart(req.Body, oapi.Request, "/name")
+	if err != nil {
+		return nil, client.LinkError("ByName", "{$request.body#/name}", err)
+	}
+	if err := client.LinkText(&out.PetID, v0p0); err != nil {
+		return nil, client.LinkError("ByName", "{$request.body#/name}", err)
+	}
+	return &out, nil
+}
+
+// SentLink returns the request of GetPet that the link "Sent" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+//
+// requestURL is the URL req was sent to.
+func (r CreatePet201JSONResponse) SentLink(req *CreatePetRequest, requestURL string) (*GetPetRequest, error) {
+	var out GetPetRequest
+	if err := client.LinkValue(&out.PetID, r.Body, oapi.Response, "/id"); err != nil {
+		return nil, client.LinkError("Sent", "$response.body#/id", err)
+	}
+	if err := client.LinkText(&out.Session, requestURL); err != nil {
+		return nil, client.LinkError("Sent", "$url", err)
+	}
+	return &out, nil
+}

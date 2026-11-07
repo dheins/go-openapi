@@ -144,6 +144,13 @@ func operationCount(pi *oas.PathItem) int {
 // of parent. It returns why the URL cannot be computed instead, if it
 // cannot.
 func callbackURL(key string, parent *Operation) ([]URLPart, string) {
+	return templateParts(key, parent, parent.Responses)
+}
+
+// templateParts parses key, text with runtime expressions in braces or a
+// single bare expression, against the request of parent and responses,
+// or says why it cannot be computed.
+func templateParts(key string, parent *Operation, responses []*Response) ([]URLPart, string) {
 	var parts []URLPart
 	add := func(p URLPart) {
 		if p.isText() {
@@ -158,7 +165,7 @@ func callbackURL(key string, parent *Operation) ([]URLPart, string) {
 		parts = append(parts, p)
 	}
 	if strings.HasPrefix(key, "$") {
-		p, why := urlExpression(key, parent, parent.Responses)
+		p, why := urlExpression(key, parent, responses)
 		if why != "" {
 			return nil, why
 		}
@@ -176,7 +183,7 @@ func callbackURL(key string, parent *Operation) ([]URLPart, string) {
 			return nil, "an expression is not closed with }"
 		}
 		add(URLPart{Text: rest[:open]})
-		p, why := urlExpression(rest[open+1:open+end], parent, parent.Responses)
+		p, why := urlExpression(rest[open+1:open+end], parent, responses)
 		if why != "" {
 			return nil, why
 		}

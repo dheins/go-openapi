@@ -111,6 +111,25 @@ paths:
             Again:
               operationId: createPet
               requestBody: $response.body
+            Facts:
+              operationId: getPet
+              description: Values of the exchange rather than of its bodies.
+              parameters:
+                petId: $statusCode
+                session: "{$method} {$url}#{$response.body#/name}"
+            Embedded:
+              operationId: getPet
+              parameters:
+                petId: "{$response.body#/id}"
+            ByName:
+              operationId: getPet
+              parameters:
+                petId: "{$request.body#/name}"
+            Sent:
+              operationId: getPet
+              parameters:
+                petId: $response.body#/id
+                session: $url
         4XX:
           $ref: "#/components/responses/Error"
   /pets/{petId}:
