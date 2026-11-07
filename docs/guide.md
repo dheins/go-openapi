@@ -145,6 +145,7 @@ at `server.WithDocument`.
 ```sh
 goapi flatten -out openapi.bundled.yaml openapi.yaml
 goapi flatten -hoist -remove-unused -out flat.json openapi.yaml
+goapi flatten -expand -out expanded.yaml openapi.yaml
 ```
 
 `goapi flatten` writes a document split over several files as one, for
@@ -170,6 +171,27 @@ else `-out`'s extension, else the input's, as for `goapi convert`.
   discriminator mappings (by reference or by name) and the security
   schemes requirements name count. A schema that refers only to itself is
   dropped.
+- **`-expand`** replaces every reference (to a schema, parameter,
+  response, request body, header, example, link, callback, path item or
+  media type) by a copy of what it points to, for tools that follow no
+  references at all, and then drops the components nothing refers to;
+  security schemes stay. It cannot be combined with `-hoist`, which does
+  the opposite.
+  - **Recursive schemas** stay references: a reference to a schema being
+    copied (`Tree.children` to `Tree`, or `A` to `B` to `A`) is kept, with
+    the component it leads to. So are references into or out of a schema
+    with an `$id`, against which they resolve, `$dynamicRef`, and the
+    references discriminator mappings make by name or reference.
+  - **Keywords next to a reference** (OpenAPI 3.1 and 3.2) are laid over
+    the copy when they are annotations (`description`, `title`,
+    `examples`, `default`, `deprecated`, `readOnly`, ...; the `summary`
+    and `description` of other references), merged into it when the
+    target does not have them, and otherwise put with it in an `allOf`,
+    as they are when either has keywords that depend on each other
+    (`properties` and `additionalProperties`, `items` and `contains`,
+    `if` and `then`). A 3.0 document ignores them, as 3.0 says.
+  - Example values, defaults and `x-` extensions are data: a `$ref` in
+    them is left as it is.
 
 Errors in the document are printed; one that loads despite them is
 flattened as it is, and one that cannot be loaded writes nothing and exits
@@ -211,8 +233,8 @@ shared file merge without conflicts over it.
   makes the result invalid.
 
 The output format follows `-format`, else `-out`'s extension, else the
-first input's; `-hoist` and `-remove-unused` apply to the result as to
-`goapi flatten`'s. The result is validated: errors in it exit with 1, as
+first input's; `-hoist`, `-expand` and `-remove-unused` apply to the
+result as to `goapi flatten`'s. The result is validated: errors in it exit with 1, as
 conflicts do with `-fail-on-conflict`, for CI. From Go,
 `flatten.Mixin(specs, flatten.Options{})` returns the document and the
 conflicts.
