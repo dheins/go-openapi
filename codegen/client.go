@@ -317,6 +317,18 @@ func (f *fileGen) clientOps(o *ir.Operation) string {
 		b.WriteString("\n")
 	}
 	f.readResponseFunc(w, o)
+	for _, l := range operationLinks(o) {
+		if l.ServerURL == "" {
+			continue
+		}
+		doc := fmt.Sprintf("%s is the server of the link %q of %s, which clients send the request it leads to while they use the document's server (client.WithServer).", linkServerConst(l), l.Name, o.Name)
+		if u, err := url.Parse(l.ServerURL); err != nil || !u.IsAbs() {
+			doc += " It is relative to the base URL."
+		}
+		b.WriteString("\n")
+		w(0, "%s", strings.TrimSuffix(wrapComment(doc), "\n"))
+		w(0, "const %s = %q", linkServerConst(l), l.ServerURL)
+	}
 	for _, r := range o.Responses {
 		for _, l := range r.Links {
 			b.WriteString("\n")
@@ -1180,6 +1192,12 @@ func (f *fileGen) clientMethod(o *ir.Operation) string {
 
 // operationLinks returns the links of the responses of o, once each:
 // variants of a response share them.
+// linkServerConst names the constant of the server of link l, as its
+// Follow method does: CreatePetGetPetServerURL.
+func linkServerConst(l *ir.Link) string {
+	return strings.TrimPrefix(l.Follow, "Follow") + "ServerURL"
+}
+
 func operationLinks(o *ir.Operation) []*ir.Link {
 	var links []*ir.Link
 	for _, r := range o.Responses {
@@ -1223,6 +1241,10 @@ func (f *fileGen) followMethod(w func(int, string, ...any), o *ir.Operation, l *
 	w(1, "if err != nil {")
 	w(2, "return nil, err")
 	w(1, "}")
-	w(1, "return c.%s(ctx, next)", target.Name)
+	if l.ServerURL != "" {
+		w(1, "return c.%s(client.WithServer(ctx, %s), next)", target.Name, op(linkServerConst(l)))
+	} else {
+		w(1, "return c.%s(ctx, next)", target.Name)
+	}
 	w(0, "}")
 }

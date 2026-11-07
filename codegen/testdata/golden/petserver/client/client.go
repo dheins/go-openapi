@@ -230,6 +230,40 @@ func (c *Client) FollowCreatePetSent(ctx context.Context, resp api.CreatePetResp
 	return c.GetPet(ctx, next)
 }
 
+// FollowCreatePetMirror follows the link "Mirror" of a response of
+// CreatePet: it sends the request of GetPet that MirrorLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetMirror(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		MirrorLink(*api.CreatePetRequest) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Mirror: a %T has no such link", resp)
+	}
+	next, err := linked.MirrorLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(client.WithServer(ctx, api.CreatePetMirrorServerURL), next)
+}
+
+// FollowCreatePetArchive follows the link "Archive" of a response of
+// CreatePet: it sends the request of GetPet that ArchiveLink builds from
+// resp and req, the request resp answers.
+func (c *Client) FollowCreatePetArchive(ctx context.Context, resp api.CreatePetResponse, req *api.CreatePetRequest) (api.GetPetResponse, error) {
+	linked, ok := resp.(interface {
+		ArchiveLink(*api.CreatePetRequest) (*api.GetPetRequest, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("link Archive: a %T has no such link", resp)
+	}
+	next, err := linked.ArchiveLink(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPet(client.WithServer(ctx, api.CreatePetArchiveServerURL), next)
+}
+
 // GetPet calls GET /pets/{petId}. A nil req sends no parameters or body.
 func (c *Client) GetPet(ctx context.Context, req *api.GetPetRequest) (api.GetPetResponse, error) {
 	if req == nil {

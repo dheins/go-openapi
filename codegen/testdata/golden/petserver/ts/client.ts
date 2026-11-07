@@ -76,6 +76,10 @@ const followCreatePetByNameLink: LinkSpec = { name: "ByName", responses: [{ stat
 
 const followCreatePetSentLink: LinkSpec = { name: "Sent", responses: [{ status: "201" }], values: [{ key: "petId", expression: "$response.body#/id", from: "responseBody", pointer: "/id" }, { key: "session", expression: "$url", from: "url" }] };
 
+const followCreatePetMirrorLink: LinkSpec = { name: "Mirror", responses: [{ status: "201" }], values: [{ key: "petId", expression: "$response.body#/id", from: "responseBody", pointer: "/id" }] };
+
+const followCreatePetArchiveLink: LinkSpec = { name: "Archive", responses: [{ status: "201" }], values: [{ key: "petId", expression: "$response.body#/id", from: "responseBody", pointer: "/id" }] };
+
 /** The inputs of getPet. */
 export interface GetPetRequest {
   petId: number;
@@ -963,6 +967,16 @@ export class Client {
   /** Follows the link "Sent" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
   async followCreatePetSent(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
     return this.getPet(link(followCreatePetSentLink, resp, req, requestUrl(this.#cfg, createPetSpec, req)) as GetPetRequest, call);
+  }
+
+  /** Follows the link "Mirror" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
+  async followCreatePetMirror(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
+    return this.getPet(link(followCreatePetMirrorLink, resp, req) as GetPetRequest, { ...call, server: "https://eu.mirror.example.com/v1" });
+  }
+
+  /** Follows the link "Archive" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
+  async followCreatePetArchive(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
+    return this.getPet(link(followCreatePetArchiveLink, resp, req) as GetPetRequest, { ...call, server: "/archive" });
   }
 
   /** GET /pets/{petId}. */

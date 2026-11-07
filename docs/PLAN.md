@@ -918,6 +918,22 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M48 – Link servers ✅
+- [x] `ir.Link.ServerURL`; Go `client.WithServer`, `client.ServerFrom` and
+  `<Operation><Link>ServerURL`, followed by `Follow` methods
+- [x] TypeScript `CallOptions.server`, set by follow methods
+- [x] the Markdown reference shows a link's server
+- [x] `operationRef` into another file, through a `$ref`'d path item
+
+**How it went**
+- *One rule for servers*: a link's server is a server for one call, which
+  takes an operation's own server's place, so it is ignored with a base
+  URL of the caller's own unless forced, as operation servers are.
+- *Already working*: an `operationRef` into another file resolved to the
+  operation the paths include; only its test and the warning for
+  operations of other APIs were missing.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

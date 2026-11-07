@@ -130,6 +130,21 @@ paths:
               parameters:
                 petId: $response.body#/id
                 session: $url
+            Mirror:
+              operationId: getPet
+              server:
+                url: https://{region}.mirror.example.com/v1
+                variables:
+                  region:
+                    default: eu
+              parameters:
+                petId: $response.body#/id
+            Archive:
+              operationId: getPet
+              server:
+                url: /archive
+              parameters:
+                petId: $response.body#/id
         4XX:
           $ref: "#/components/responses/Error"
   /pets/{petId}:

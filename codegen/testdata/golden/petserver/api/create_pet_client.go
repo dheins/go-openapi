@@ -92,6 +92,16 @@ func ReadCreatePetResponse(c *client.Config, resp *http.Response) (CreatePetResp
 	return nil, c.Unexpected(resp)
 }
 
+// CreatePetMirrorServerURL is the server of the link "Mirror" of CreatePet,
+// which clients send the request it leads to while they use the document's
+// server (client.WithServer).
+const CreatePetMirrorServerURL = "https://eu.mirror.example.com/v1"
+
+// CreatePetArchiveServerURL is the server of the link "Archive" of
+// CreatePet, which clients send the request it leads to while they use the
+// document's server (client.WithServer). It is relative to the base URL.
+const CreatePetArchiveServerURL = "/archive"
+
 // GetPetLink returns the request of GetPet that the link "GetPet" of this
 // response leads to, built from the response and req, the request of
 // CreatePet it answers.
@@ -197,6 +207,28 @@ func (r CreatePet201JSONResponse) SentLink(req *CreatePetRequest, requestURL str
 	}
 	if err := client.LinkText(&out.Session, requestURL); err != nil {
 		return nil, client.LinkError("Sent", "$url", err)
+	}
+	return &out, nil
+}
+
+// MirrorLink returns the request of GetPet that the link "Mirror" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) MirrorLink(req *CreatePetRequest) (*GetPetRequest, error) {
+	var out GetPetRequest
+	if err := client.LinkValue(&out.PetID, r.Body, oapi.Response, "/id"); err != nil {
+		return nil, client.LinkError("Mirror", "$response.body#/id", err)
+	}
+	return &out, nil
+}
+
+// ArchiveLink returns the request of GetPet that the link "Archive" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) ArchiveLink(req *CreatePetRequest) (*GetPetRequest, error) {
+	var out GetPetRequest
+	if err := client.LinkValue(&out.PetID, r.Body, oapi.Response, "/id"); err != nil {
+		return nil, client.LinkError("Archive", "$response.body#/id", err)
 	}
 	return &out, nil
 }
