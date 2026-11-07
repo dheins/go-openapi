@@ -52,6 +52,7 @@ goapi diff main.yaml openapi.yaml                     # breaking changes, for CI
 goapi templates -out templates                        # the generator's templates, to override blocks of (or add files with goapi.yaml) with -templates
 goapi scan -out openapi.yaml ./...                    # a document from annotated Go code
 goapi serve openapi.yaml                              # the document and a Swagger UI or Redoc page
+goapi generate markdown -out API.md openapi.yaml      # the API's reference, as Markdown to commit
 goapi generate ts-client -out web/src/api openapi.yaml # a TypeScript client using fetch
 goapi generate model -out internal/models openapi.yaml
 goapi generate server -out internal/gen openapi.yaml   # server in gen, operations in gen/api, schemas in gen/model

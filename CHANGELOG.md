@@ -4,6 +4,12 @@
 
 ### Added
 
+- `goapi generate markdown` (`codegen.Markdown`): a document's reference
+  as one Markdown file, with its servers, security schemes, operations by
+  tag, webhooks, callbacks and schemas, linked by GitHub's anchors, from
+  a template `-templates` can change (`goapi templates -target
+  markdown`). The petstore example commits its `API.md`.
+- `ir.Selection.Selects`: whether a selection keeps an operation.
 - `goapi generate cli` (`codegen.CLI`, `runtime/cli`): a command-line
   client with a command per operation and a flag per parameter, bodies
   as JSON, `@file` or stdin, the response printed (streams item by item,

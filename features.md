@@ -115,9 +115,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - `goapi generate cli`: bodies of positional parts and event streams,
   webhooks and callbacks (which a server sends), shell completion, and a
   flag per property of a JSON body. — later
-- `goapi generate markdown`: reference documentation as Markdown files to
-  commit, as `swagger generate markdown` writes; `server.WithDocumentPage`
-  only renders it while serving. — later
+- `goapi generate markdown`: a file per tag, examples made up from
+  schemas when the document gives none, `externalValue` examples fetched
+  (they are linked), only the schemas the selected operations use, and
+  targets of `goapi.yaml`. — later
 - `goapi mixin`: documents merged into one (their paths, components and
   tags, with conflicts reported), as `swagger mixin` does; `goapi flatten`
   only bundles the files one document refers to. — later
@@ -143,6 +144,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi generate markdown`: reference documentation as one Markdown
+  file to commit, from a template of its own, as `swagger generate
+  markdown` writes. (38c87a4, 4a8deb7)
 - [x] `goapi generate cli`: a command-line client with a command per
   operation and a flag per parameter, on the generated Go client, as
   `swagger generate cli` writes. (e9e2c9f, 04c5b7d)
