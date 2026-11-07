@@ -25,6 +25,8 @@ curl -H "X-API-Key: secret" -d '{"name":"Rex","status":"available"}' localhost:8
   response types, and a handler per operation), and the schema types in
   [gen/model](gen/model) (package `model`). [gen/client](gen/client)
   (package `client`) is a generated client sharing those types.
+- [API.md](API.md) is the API's reference, generated from the document
+  too.
 - [main_test.go](main_test.go) exercises it end to end, with raw HTTP
   requests and through the client.
 

@@ -30,6 +30,9 @@ func TestTemplatesCommand(t *testing.T) {
 	if code, out, _ := run("-out", filepath.Join(dir, "ts"), "-target", "ts"); code != exitOK || !strings.Contains(out, "client.ts.tmpl") || strings.Count(out, ".tmpl") != 3 {
 		t.Errorf("ts: exit %d, %q", code, out)
 	}
+	if code, out, _ := run("-out", filepath.Join(dir, "md"), "-target", "markdown"); code != exitOK || out != filepath.Join(dir, "md", "reference.md.tmpl")+"\n" {
+		t.Errorf("markdown: exit %d, %q", code, out)
+	}
 	for _, args := range [][]string{{"-target", "rust"}, {"extra"}} {
 		if code, _, stderr := run(args...); code != exitFailure || stderr == "" {
 			t.Errorf("%q: exit %d", args, code)

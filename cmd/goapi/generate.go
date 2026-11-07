@@ -22,13 +22,17 @@ import (
 )
 
 // runGenerate implements "generate model", "generate server",
-// "generate client", "generate cli" and "generate ts-client".
+// "generate client", "generate cli", "generate ts-client" and
+// "generate markdown".
 func runGenerate(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "ts-client" {
 		return runGenerateTS(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "markdown" {
+		return runGenerateMarkdown(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || (args[0] != "model" && args[0] != "server" && args[0] != "client" && args[0] != "cli") {
-		fmt.Fprintln(stderr, `goapi generate: expected "model", "server", "client", "cli" or "ts-client"`)
+		fmt.Fprintln(stderr, `goapi generate: expected "model", "server", "client", "cli", "ts-client" or "markdown"`)
 		return exitFailure
 	}
 	target := args[0]

@@ -91,13 +91,15 @@ var (
 	linkRE    = regexp.MustCompile(`\]\(#([^)]+)\)`)
 )
 
-// TestMarkdownLinks checks that every link of the golden references goes
-// to a heading, by the anchors GitHub gives the headings.
+// TestMarkdownLinks checks that every link of the golden references, and
+// of the example's, goes to a heading, by the anchors GitHub gives the
+// headings.
 func TestMarkdownLinks(t *testing.T) {
 	files, err := filepath.Glob("testdata/golden/*/API.md")
 	if err != nil {
 		t.Fatal(err)
 	}
+	files = append(files, "../examples/petstore/API.md")
 	if len(files) == 0 {
 		t.Fatal("no golden API.md")
 	}
