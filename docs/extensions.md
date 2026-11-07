@@ -91,6 +91,23 @@ note:
   x-omitempty: false   # Note string `json:"note"`, written as "note":"" when unset
 ```
 
+## `x-order`
+
+On a property, an integer: its place among the object's properties, as
+go-swagger has it. Properties with one come first, by it (equal ones in
+the document's order), then the others in the document's order. It
+orders the fields of Go structs, and so the properties encoded JSON
+has, the properties of TypeScript types and descriptors, and the
+property tables of `goapi generate markdown`. A value that is not an
+integer is a warning, and the property keeps its place.
+
+```yaml
+properties:
+  note: {type: string}
+  id: {type: integer, x-order: 1}
+  name: {type: string, x-order: 0}   # Name, ID, Note; {"name":...,"id":...,"note":...}
+```
+
 ## `x-nullable`, `x-isnullable`
 
 On a schema, `true`: the value may be null, as 3.0's `nullable: true`

@@ -142,6 +142,18 @@ export interface Tag {
 /** The schema of Tag, for validation and encoding. */
 export const TagSchema: $Schema = { kind: "object", properties: { code: { schema: { kind: "string", format: "pet-code" }, required: true }, color: { schema: { kind: "string", format: "color" } }, slug: { schema: { kind: "string", minLength: 2, format: "slug" } }, note: { schema: { kind: "string", minLength: 2 }, zeroIsAbsent: true }, labels: { schema: { kind: "array", items: { kind: "string" } }, zeroIsAbsent: true }, alias: { schema: { kind: "nullable", of: { kind: "string" } } } } };
 
+/** Properties put in order by x-order; those without one follow. */
+export interface Ranked {
+  name?: string;
+  id?: number;
+  note?: string;
+  extra?: string;
+  rank?: string;
+}
+
+/** The schema of Ranked, for validation and encoding. */
+export const RankedSchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } }, id: { schema: { kind: "integer" } }, note: { schema: { kind: "string" } }, extra: { schema: { kind: "string" } }, rank: { schema: { kind: "string" } } } };
+
 export interface Settings {
   theme?: SettingsTheme;
   notify?: boolean;

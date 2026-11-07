@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"go/token"
@@ -375,6 +376,24 @@ func (b *builder) fillStruct(t *Type) {
 			}
 		}
 	}
+	// x-order puts properties first, by its value; the others follow in
+	// document order.
+	orders := make(map[string]*int64, len(props))
+	for _, p := range props {
+		orders[p.name] = b.propertyOrder(p.schema)
+	}
+	slices.SortStableFunc(props, func(a, c property) int {
+		oa, oc := orders[a.name], orders[c.name]
+		switch {
+		case oa != nil && oc != nil:
+			return cmp.Compare(*oa, *oc)
+		case oa != nil:
+			return -1
+		case oc != nil:
+			return 1
+		}
+		return 0
+	})
 
 	for _, p := range props {
 		name := extensionString(p.schema, "x-go-name")
@@ -1999,6 +2018,24 @@ func extensionString(s *oas.Schema, key string) string {
 		return ""
 	}
 	return v
+}
+
+// propertyOrder returns the x-order of a property's schema, or nil if it
+// has none, or one that is not an integer, which it warns about.
+func (b *builder) propertyOrder(s *oas.Schema) *int64 {
+	if s == nil {
+		return nil
+	}
+	raw, ok := s.Extra.Get("x-order")
+	if !ok {
+		return nil
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil {
+		b.warn(s, []string{"x-order"}, fmt.Sprintf("x-order must be an integer, not %s; the property keeps its place", raw))
+		return nil
+	}
+	return &n
 }
 
 // extensionFalse reports whether the extension key of s is false.

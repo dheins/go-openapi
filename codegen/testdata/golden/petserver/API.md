@@ -71,6 +71,7 @@ Version `1.0`
   - [Note](#note)
   - [Filter](#filter)
   - [Tag](#tag)
+  - [Ranked](#ranked)
   - [Settings](#settings)
   - [Size](#size)
   - [Prefs](#prefs)
@@ -1382,6 +1383,18 @@ Variant 2:
 | `note` | string | no | minLength: `2` |
 | `labels` | array of string | no |  |
 | `alias` | string, nullable | no |  |
+
+### Ranked
+
+Properties put in order by x-order; those without one follow.
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | no |  |
+| `id` | integer | no |  |
+| `note` | string | no |  |
+| `extra` | string | no |  |
+| `rank` | string | no |  |
 
 ### Settings
 

@@ -2,11 +2,13 @@ package codegen
 
 import (
 	"bytes"
+	"cmp"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"slices"
+	"strconv"
 	"strings"
 	"text/template"
 	"unicode"
@@ -761,7 +763,8 @@ func (g *mdGen) addProperties(list *[]*MDProperty, prefix string, s *oas.Schema,
 		required = append(required, m.Required...)
 	}
 	add := func(o *oas.Schema) {
-		for name, p := range o.Properties.All() {
+		for _, name := range byOrder(o.Properties) {
+			p, _ := o.Properties.Get(name)
 			full := prefix + name
 			// A property allOf members both declare is one row.
 			if i := slices.IndexFunc(*list, func(mp *MDProperty) bool { return mp.Name == full }); i >= 0 {
@@ -790,6 +793,38 @@ func (g *mdGen) addProperties(list *[]*MDProperty, prefix string, s *oas.Schema,
 			add(m)
 		}
 	}
+}
+
+// byOrder returns the names of properties in the order generated types
+// have them: those with an integer x-order first, by it, then the others.
+func byOrder(properties *oas.OrderedMap[*oas.Schema]) []string {
+	names := properties.Keys()
+	order := func(name string) (int64, bool) {
+		s, _ := properties.Get(name)
+		if s == nil {
+			return 0, false
+		}
+		raw, ok := s.Extra.Get("x-order")
+		if !ok {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+		return n, err == nil
+	}
+	slices.SortStableFunc(names, func(a, b string) int {
+		oa, okA := order(a)
+		ob, okB := order(b)
+		switch {
+		case okA && okB:
+			return cmp.Compare(oa, ob)
+		case okA:
+			return -1
+		case okB:
+			return 1
+		}
+		return 0
+	})
+	return names
 }
 
 // cmpText returns the first of texts that is not empty.

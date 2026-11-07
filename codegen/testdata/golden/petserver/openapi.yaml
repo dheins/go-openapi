@@ -1525,6 +1525,22 @@ components:
         alias:
           type: string
           x-isnullable: true
+    Ranked:
+      description: Properties put in order by x-order; those without one follow.
+      type: object
+      properties:
+        note:
+          type: string
+        id:
+          type: integer
+          x-order: 1
+        name:
+          type: string
+          x-order: 0
+        extra:
+          type: string
+        rank:
+          type: string
     Settings:
       type: object
       properties:

@@ -804,6 +804,40 @@ components:
 	}
 }
 
+func TestOrder(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      properties:
+        z: {type: string}
+    Row:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          properties:
+            a: {type: string}
+            b: {type: string, x-order: 2}
+            c: {type: string, x-order: -1}
+            d: {type: string, x-order: 2}
+            e: {type: string, x-order: first}
+`, Options{})
+	var got []string
+	for _, f := range typeNamed(t, m, "Row").Fields {
+		got = append(got, f.JSONName)
+	}
+	if want := []string{"c", "b", "d", "z", "a", "e"}; !slices.Equal(got, want) {
+		t.Errorf("fields = %v, want %v", got, want)
+	}
+	if len(m.Warnings) != 1 || m.Warnings[0].Location.Pointer != "/components/schemas/Row/allOf/1/properties/e/x-order" ||
+		m.Warnings[0].Message != `x-order must be an integer, not "first"; the property keeps its place` {
+		t.Errorf("warnings = %v", m.Warnings)
+	}
+}
+
 func TestCheckStructTags(t *testing.T) {
 	for tags, want := range map[string]string{
 		`db:"a"`:                 "",
