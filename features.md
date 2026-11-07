@@ -112,9 +112,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - Template targets: scopes beyond document, model and operation (each
   type, each webhook or callback, each tag), and targets of other
   generators than the one reading the directory. — later
-- `goapi generate cli`: a command-line client with a command per
-  operation and a flag per parameter, as `swagger generate cli` writes.
-  — later
+- `goapi generate cli`: bodies of positional parts and event streams,
+  webhooks and callbacks (which a server sends), shell completion, and a
+  flag per property of a JSON body. — later
 - `goapi generate markdown`: reference documentation as Markdown files to
   commit, as `swagger generate markdown` writes; `server.WithDocumentPage`
   only renders it while serving. — later
@@ -143,6 +143,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi generate cli`: a command-line client with a command per
+  operation and a flag per parameter, on the generated Go client, as
+  `swagger generate cli` writes. (e9e2c9f, 04c5b7d)
 - [x] Custom templates that add files: targets in a `goapi.yaml` of the
   templates directory, once per document, model or operation, in a
   generated package or one of their own, for Go and TypeScript; and

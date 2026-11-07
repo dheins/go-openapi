@@ -4,6 +4,11 @@
 
 ### Added
 
+- `goapi generate cli` (`codegen.CLI`, `runtime/cli`): a command-line
+  client with a command per operation and a flag per parameter, bodies
+  as JSON, `@file` or stdin, the response printed (streams item by item,
+  `-v` for status and headers), exit codes by response, and credentials
+  by flag or environment variable.
 - Template targets: a `goapi.yaml` in a templates directory adds files of
   your own, once per document, model or operation, in a generated package
   or a package of their own (`codegen.Options.Import`, `-import`, now for
