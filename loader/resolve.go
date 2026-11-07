@@ -49,7 +49,7 @@ type resolver struct {
 // use.
 func (r *resolver) converter() *converter {
 	if r.conv == nil {
-		r.conv = newConverter(r.node20)
+		r.conv = newConverter(r.node20, r.cfg.convertTo)
 	}
 	return r.conv
 }

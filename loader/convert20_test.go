@@ -248,7 +248,7 @@ func TestLoadSwagger2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.SourceVersion != "2.0" || spec.Document.OpenAPI != convertedVersion {
+	if spec.SourceVersion != "2.0" || spec.Document.OpenAPI != Convert31 {
 		t.Errorf("versions: source %q, document %q", spec.SourceVersion, spec.Document.OpenAPI)
 	}
 	var notices []string
@@ -318,7 +318,7 @@ func TestLoadSwagger2MultiFile(t *testing.T) {
 // convertRoot converts the Swagger 2.0 document src alone, without
 // following references to other files, and returns its notices.
 func convertRoot(src *Source) []Notice {
-	c := newConverter(nil)
+	c := newConverter(nil, Convert31)
 	c.document(src.root, src.URI())
 	return c.notices
 }

@@ -9,12 +9,12 @@
 //	goapi generate cli [-out dir] [-name name] [-client import -types import] file
 //	goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
 //	goapi generate markdown [-out file] [-paths patterns] [-tags tags] file
-//	goapi convert [-out file] [-format yaml|json] file
+//	goapi convert [-out file] [-format yaml|json] [-version 3.1.0|3.2.0] file
 //	goapi diff [-format text|json] [-fail-on error|warning] [-for client|server] old new
-//	goapi flatten [-out file] [-format yaml|json] [-hoist|-expand] [-remove-unused] file
-//	goapi mixin [-out file] [-format yaml|json] [-fail-on-conflict] file file...
+//	goapi flatten [-out file] [-format yaml|json] [-hoist|-expand] [-remove-unused] [-convert-to version] file
+//	goapi mixin [-out file] [-format yaml|json] [-fail-on-conflict] [-convert-to version] file file...
 //	goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
-//	goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
+//	goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] [-convert-to version] file
 //	goapi templates [-out dir] [-target go|ts|markdown]
 //	goapi version
 package main
@@ -99,12 +99,12 @@ Usage:
   goapi generate cli [-out dir] [-name name] [-client import -types import] file
   goapi generate ts-client [-out dir] [-paths patterns] [-tags tags] file
   goapi generate markdown [-out file] [-paths patterns] [-tags tags] file
-  goapi convert [-out file] [-format yaml|json] file
+  goapi convert [-out file] [-format yaml|json] [-version 3.1.0|3.2.0] file
   goapi diff [-format text|json] [-fail-on error|warning] [-for client|server] old new
-  goapi flatten [-out file] [-format yaml|json] [-hoist|-expand] [-remove-unused] file
-  goapi mixin [-out file] [-format yaml|json] [-fail-on-conflict] file file...
+  goapi flatten [-out file] [-format yaml|json] [-hoist|-expand] [-remove-unused] [-convert-to version] file
+  goapi mixin [-out file] [-format yaml|json] [-fail-on-conflict] [-convert-to version] file file...
   goapi scan [-out file] [-format yaml|json] [-dir dir] [packages]
-  goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] file
+  goapi serve [-addr host:port] [-ui swagger|redoc] [-assets url] [-convert-to version] file
   goapi templates [-out dir] [-target go|ts|markdown]
   goapi version
 
@@ -116,7 +116,7 @@ Commands:
   generate cli      generate a command-line client for a document
   generate ts-client generate a TypeScript client for a document
   generate markdown generate reference documentation of a document as Markdown
-  convert           write a Swagger 2.0 document as OpenAPI 3.1
+  convert           write a Swagger 2.0 document as OpenAPI 3.1 or 3.2
   diff              report the changes between two versions of a document
   flatten           write a document split over several files as one
   mixin             merge documents into the first, reporting conflicts

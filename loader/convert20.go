@@ -12,10 +12,6 @@ import (
 	"github.com/dheins/go-openapi/oas"
 )
 
-// convertedVersion is the "openapi" value given to converted Swagger 2.0
-// documents, as to upgraded 3.0 ones.
-const convertedVersion = upgradedVersion
-
 // converter rewrites Swagger 2.0 content into its OpenAPI 3.1 equivalent,
 // in place: the root document (document), then the objects of other files
 // that references lead to (fragment). Nodes that are moved keep their
@@ -43,10 +39,13 @@ type converter struct {
 	// renamed are the new references of renamed components, by their
 	// unescaped old ones.
 	renamed map[string]string
+	// version is the OpenAPI version converted to (Convert31 or
+	// Convert32).
+	version string
 }
 
-func newConverter(lookup func(base, ref string) *yaml.Node) *converter {
-	return &converter{seen: map[*yaml.Node]bool{}, lookup: lookup, forms: map[string]*yaml.Node{}, bodies: map[string]*yaml.Node{}}
+func newConverter(lookup func(base, ref string) *yaml.Node, version string) *converter {
+	return &converter{seen: map[*yaml.Node]bool{}, lookup: lookup, forms: map[string]*yaml.Node{}, bodies: map[string]*yaml.Node{}, version: version}
 }
 
 func (c *converter) warn(at *yaml.Node, format string, args ...any) {
@@ -204,7 +203,7 @@ func (c *converter) document(n *yaml.Node, uri string) {
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == "swagger" {
 			n.Content[i].Value = "openapi"
-			n.Content[i+1] = str(convertedVersion, n.Content[i+1])
+			n.Content[i+1] = str(c.version, n.Content[i+1])
 		}
 	}
 	c.servers(n)
@@ -831,6 +830,9 @@ func (c *converter) schema(n *yaml.Node) {
 		}
 	}
 	upgradeSchemaFields(n)
+	if c.version == Convert32 {
+		xmlNodeType(mappingValue(n, "xml"))
+	}
 	eachEntry(mappingValue(n, "properties"), c.schema)
 	c.schema(mappingValue(n, "additionalProperties"))
 	c.schema(mappingValue(n, "not"))
@@ -843,6 +845,23 @@ func (c *converter) schema(n *yaml.Node) {
 	}
 	for _, k := range []string{"allOf", "anyOf", "oneOf"} {
 		eachItem(mappingValue(n, k), c.schema)
+	}
+}
+
+// xmlNodeType writes the attribute and wrapped fields of an XML object,
+// which 3.2 deprecates, as its nodeType: an attribute, or the element
+// wrapping an array.
+func xmlNodeType(x *yaml.Node) {
+	x = resolveAlias(x)
+	if x == nil || x.Kind != yaml.MappingNode {
+		return
+	}
+	attribute, wrapped := removeKey(x, "attribute"), removeKey(x, "wrapped")
+	switch {
+	case attribute != nil && attribute.Value == "true":
+		set(x, "nodeType", str("attribute", attribute))
+	case wrapped != nil && wrapped.Value == "true":
+		set(x, "nodeType", str("element", wrapped))
 	}
 }
 

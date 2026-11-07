@@ -12,12 +12,13 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/dheins/go-openapi/loader"
 	"github.com/dheins/go-openapi/validate"
 )
 
 // runConvert implements "convert": it writes a Swagger 2.0 document as
-// the OpenAPI 3.1 document the loader converts it to, with the objects of
-// other files it refers to copied in.
+// the OpenAPI 3.1 (or, with -version, 3.2) document the loader converts
+// it to, with the objects of other files it refers to copied in.
 func runConvert(args []string, stdout, stderr io.Writer) int {
 	fail := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "goapi convert: "+format+"\n", a...)
@@ -27,11 +28,15 @@ func runConvert(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("out", "", "file to write the converted document to (default: standard output)")
 	format := fs.String("format", "", "output format, yaml or json (default: from the -out extension, else the input's)")
+	version := fs.String("version", loader.Convert31, "OpenAPI version to convert to: 3.1.0 or 3.2.0")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
 		}
 		return exitFailure
+	}
+	if err := checkConvertTo(*version); err != nil {
+		return fail("%v", err)
 	}
 	if fs.NArg() != 1 {
 		return fail("expected one document")
@@ -41,7 +46,7 @@ func runConvert(args []string, stdout, stderr io.Writer) int {
 		return fail("unknown format %q", *format)
 	}
 
-	res, err := validate.File(file)
+	res, err := validate.File(file, loader.WithConvertTo(*version))
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -68,6 +73,15 @@ func runConvert(args []string, stdout, stderr io.Writer) int {
 		return fail("%v", err)
 	}
 	return exitOK
+}
+
+// checkConvertTo reports a version Swagger 2.0 documents cannot be
+// converted to.
+func checkConvertTo(version string) error {
+	if version != loader.Convert31 && version != loader.Convert32 {
+		return fmt.Errorf("cannot convert to OpenAPI %q; use %s or %s", version, loader.Convert31, loader.Convert32)
+	}
+	return nil
 }
 
 // outputFormat returns the format a document is written in: format if it

@@ -25,7 +25,8 @@ import (
 // Copied objects go under components, named after the last token of
 // their pointer or, for a whole file, after the file; a path item is put
 // in place of the first reference to it, since 3.0 has no
-// components.pathItems. Objects referenced both whole and at a pointer
+// components.pathItems, but for a Swagger 2.0 document converted to 3.2,
+// whose path items go to components.pathItems. Objects referenced both whole and at a pointer
 // inside them are copied once. A $id whose scope holds a rewritten
 // reference is removed, since it would change what the pointer means;
 // references within its scope, or to objects it identifies, are
@@ -138,7 +139,15 @@ func (b *bundler) collectParts() error {
 			return err
 		}
 		p := &part{loc: f.Location, obj: f.Object, tree: tree}
-		if _, isPath := f.Object.(*oas.PathItem); !isPath {
+		if _, isPath := f.Object.(*oas.PathItem); isPath && b.spec.convertedTo == Convert32 {
+			// 3.2 has components.pathItems, which 3.0 has not.
+			name := partName(f.Location)
+			for i := 2; used["pathItems/"+name]; i++ {
+				name = partName(f.Location) + strconv.Itoa(i)
+			}
+			used["pathItems/"+name] = true
+			p.pointer = oas.JoinPointer("", "components", "pathItems", name)
+		} else if !isPath {
 			kind, ok := componentKinds[reflect.TypeOf(f.Object)]
 			if !ok {
 				return fmt.Errorf("bundling %s: a %s cannot be copied into components", f.Location, typeName(reflect.TypeOf(f.Object)))

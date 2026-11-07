@@ -126,3 +126,32 @@ func TestGenerateFromSwagger2(t *testing.T) {
 		t.Errorf("openapi.json = %.60s", doc)
 	}
 }
+
+func TestConvertTo32(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"convert", "-version", "3.2.0", "-format", "json", "../../loader/testdata/swagger2/multi/swagger.yaml"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
+	}
+	path := filepath.Join(t.TempDir(), "openapi.json")
+	if err := os.WriteFile(path, stdout.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := validate.File(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range res.Diagnostics {
+		t.Errorf("converted: %s", d)
+	}
+	if res.Spec.SourceVersion != "3.2.0" || res.Spec.Document.Components.PathItems.Len() == 0 {
+		t.Errorf("version %q, path items %v", res.Spec.SourceVersion, res.Spec.Document.Components.PathItems.Keys())
+	}
+	stderr.Reset()
+	if code := run([]string{"convert", "-version", "3.0.0", kitchenDoc}, &stdout, &stderr); code != exitFailure || !strings.Contains(stderr.String(), "3.0.0") {
+		t.Errorf("-version 3.0.0: exit %d, %s", code, &stderr)
+	}
+	stdout.Reset()
+	if code := run([]string{"flatten", "-convert-to", "3.2.0", "-format", "json", kitchenDoc}, &stdout, &stderr); code != exitOK || !strings.Contains(stdout.String(), `"openapi":"3.2.0"`) {
+		t.Errorf("flatten -convert-to: exit %d, %.100s", code, &stdout)
+	}
+}
