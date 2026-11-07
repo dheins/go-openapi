@@ -359,3 +359,63 @@ func TestPlaces(t *testing.T) {
 		t.Errorf("changes %+v", cs)
 	}
 }
+
+// union returns a document whose POST /pets takes, and whose GET /pets
+// returns, the schema given in YAML, with components Cat, Dog and Bird.
+func union(schema string) string {
+	return `paths:
+  /pets:
+    post:
+      requestBody: {content: {application/json: {schema: ` + schema + `}}}
+      ` + ok + `
+    get:
+      responses: {"200": {description: ok, content: {application/json: {schema: ` + schema + `}}}}
+components:
+  schemas:
+    Cat: {type: object, required: [kind], properties: {kind: {type: string}, lives: {type: integer}}}
+    Dog: {type: object, required: [kind], properties: {kind: {type: string}, good: {type: boolean}}}
+    Bird: {type: object, required: [kind], properties: {kind: {type: string}, wings: {type: integer, maximum: 2}}}
+`
+}
+
+func TestVariants(t *testing.T) {
+	cat, dog, bird := `{$ref: "#/components/schemas/Cat"}`, `{$ref: "#/components/schemas/Dog"}`, `{$ref: "#/components/schemas/Bird"}`
+	// Reordered alternatives are the same ones.
+	expect(t, changes(t, union("{oneOf: ["+cat+", "+dog+"]}"), union("{oneOf: ["+dog+", "+cat+"]}")))
+	// Inline ones are paired by what they are.
+	a, b := `{type: string, maxLength: 5}`, `{type: object, required: [x], properties: {x: {type: integer}}}`
+	b2 := `{type: object, required: [x], properties: {x: {type: integer, maximum: 3}}}`
+	expect(t, changes(t, union("{anyOf: ["+a+", "+b+"]}"), union("{anyOf: ["+b2+", "+a+"]}")),
+		"error constraint-tightened: POST /pets: request body application/json/anyOf/0/x: maximum 3 was added",
+	)
+	expect(t, changes(t, union("{oneOf: ["+cat+", "+dog+"]}"), union("{oneOf: ["+dog+", "+bird+"]}")),
+		"info variants-changed: GET /pets: response 200 application/json: oneOf alternative Cat was removed",
+		"warning variants-changed: GET /pets: response 200 application/json: oneOf alternative Bird was added",
+		"error variants-changed: POST /pets: request body application/json: oneOf alternative Cat was removed",
+		"info variants-changed: POST /pets: request body application/json: oneOf alternative Bird was added",
+	)
+}
+
+func TestDiscriminators(t *testing.T) {
+	cat, dog, bird := `{$ref: "#/components/schemas/Cat"}`, `{$ref: "#/components/schemas/Dog"}`, `{$ref: "#/components/schemas/Bird"}`
+	disc := func(prop, mapping string, variants ...string) string {
+		return "{oneOf: [" + strings.Join(variants, ", ") + "], discriminator: {propertyName: " + prop + ", mapping: {" + mapping + "}}}"
+	}
+	old := disc("kind", `cat: "#/components/schemas/Cat", dog: "#/components/schemas/Dog"`, cat, dog)
+	expect(t, changes(t, union(old), union(disc("type", `cat: "#/components/schemas/Cat", dog: "#/components/schemas/Dog"`, cat, dog))),
+		`error discriminator-changed: GET /pets: response 200 application/json: the discriminator is "type" instead of "kind"`,
+		`error discriminator-changed: POST /pets: request body application/json: the discriminator is "type" instead of "kind"`,
+	)
+	// A value is paired with the alternative it leads to: "dog" leads to
+	// Bird now, whose wings are compared with Dog's properties.
+	expect(t, changes(t, union(old), union(disc("kind", `cat: "#/components/schemas/Cat", dog: "#/components/schemas/Bird", fish: "#/components/schemas/Dog"`, cat, bird, dog))),
+		`warning discriminator-changed: GET /pets: response 200 application/json: discriminator value "fish" added to the mapping`,
+		"error property-removed: GET /pets: response 200 application/json/oneOf/1/good: the property was removed",
+		"info property-added: GET /pets: response 200 application/json/oneOf/1/wings: the property was added",
+		"warning variants-changed: GET /pets: response 200 application/json: oneOf alternative Dog was added",
+		`info discriminator-changed: POST /pets: request body application/json: discriminator value "fish" added to the mapping`,
+		"warning property-removed: POST /pets: request body application/json/oneOf/1/good: the property was removed",
+		"info property-added: POST /pets: request body application/json/oneOf/1/wings: the property was added",
+		"info variants-changed: POST /pets: request body application/json: oneOf alternative Dog was added",
+	)
+}
