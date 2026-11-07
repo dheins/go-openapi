@@ -918,6 +918,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M49 – Link text and constants ✅
+- [x] link text given to arrays and objects (JSON, or the style's text of
+  one value), bodies and `content` parameters (JSON, or a text body's
+  text); braces that do not open an expression are text
+- [x] expressions inside a link's object and array constants filled in
+  (`ir.LinkValue.Fills`, `client.LinkFill`), with the
+  `link-nested-expression` warning of `goapi validate`
+- [x] TypeScript: `LinkSpec` values' `style`, `json` and `fills`
+
+**How it went**
+- *Strings only*: the official schemas make link `parameters` a map of
+  strings, so constants with expressions inside are only valid as a
+  `requestBody`; parameters take text.
+- *The server's readers*: text for arrays and objects is split with
+  `server.Param.TextValues` and converted by `server.ParseArray` and
+  `server.DecodeFields`, as a server reads parameters.
+- *Not done*: see [features.md](../features.md).
+
 ### M48 – Link servers ✅
 - [x] `ir.Link.ServerURL`; Go `client.WithServer`, `client.ServerFrom` and
   `<Operation><Link>ServerURL`, followed by `Follow` methods

@@ -4,6 +4,13 @@
 
 ### Added
 
+- Links give text with expressions embedded to array and object
+  parameters (as JSON, or as the parameter's style writes one value) and
+  to request bodies, and fill in expressions inside their object and
+  array constants, in Go (`client.LinkArray`, `client.LinkObject`,
+  `client.LinkParsed`, `client.LinkFill`) and TypeScript clients.
+  `goapi validate` warns about such constants (`link-nested-expression`),
+  which OpenAPI does not define.
 - Links that name a `server` are followed there, while the client uses
   the document's server (or `client.WithOperationServers(true)`):
   `client.WithServer(ctx, url)` and `client.ServerFrom` set and read a
@@ -547,6 +554,10 @@
 
 ### Changed
 
+- A link's object or array constant with members that are expressions,
+  such as `{"id": "$response.body#/id"}`, is sent with them filled in
+  rather than as written, and text with expressions embedded given to an
+  array, object or body no longer leaves the link without methods.
 - A link whose `operationRef` leads to an operation of another document
   warns that it is another document's, rather than that it leads to no
   operation.
