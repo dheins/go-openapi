@@ -19,7 +19,8 @@ func loadFile(t *testing.T, file string) *loader.Spec {
 	return res.Spec
 }
 
-// TestSameDocument checks that a document has no changes from itself.
+// TestSameDocument checks that a document has no changes from itself,
+// for either side.
 func TestSameDocument(t *testing.T) {
 	files, err := filepath.Glob("../codegen/testdata/golden/*/openapi.yaml")
 	if err != nil {
@@ -27,8 +28,10 @@ func TestSameDocument(t *testing.T) {
 	}
 	files = append(files, "../loader/testdata/multi/openapi.yaml", "../loader/testdata/swagger2/kitchen.yaml")
 	for _, file := range files {
-		if changes := Documents(loadFile(t, file), loadFile(t, file)); len(changes) > 0 {
-			t.Errorf("%s: %v", file, changes)
+		for _, side := range []Side{Clients, Servers} {
+			if changes := DocumentsFor(loadFile(t, file), loadFile(t, file), Options{For: side}); len(changes) > 0 {
+				t.Errorf("%s, side %d: %v", file, side, changes)
+			}
 		}
 	}
 }
@@ -358,4 +361,283 @@ func TestPlaces(t *testing.T) {
 	if len(cs) != 1 || cs[0].Old.Position.Line != 6 || cs[0].New.Position.Line != 6 || !strings.Contains(cs[0].String(), "new.yaml:6:") {
 		t.Errorf("changes %+v", cs)
 	}
+}
+
+// union returns a document whose POST /pets takes, and whose GET /pets
+// returns, the schema given in YAML, with components Cat, Dog and Bird.
+func union(schema string) string {
+	return `paths:
+  /pets:
+    post:
+      requestBody: {content: {application/json: {schema: ` + schema + `}}}
+      ` + ok + `
+    get:
+      responses: {"200": {description: ok, content: {application/json: {schema: ` + schema + `}}}}
+components:
+  schemas:
+    Cat: {type: object, required: [kind], properties: {kind: {type: string}, lives: {type: integer}}}
+    Dog: {type: object, required: [kind], properties: {kind: {type: string}, good: {type: boolean}}}
+    Bird: {type: object, required: [kind], properties: {kind: {type: string}, wings: {type: integer, maximum: 2}}}
+`
+}
+
+func TestVariants(t *testing.T) {
+	cat, dog, bird := `{$ref: "#/components/schemas/Cat"}`, `{$ref: "#/components/schemas/Dog"}`, `{$ref: "#/components/schemas/Bird"}`
+	// Reordered alternatives are the same ones.
+	expect(t, changes(t, union("{oneOf: ["+cat+", "+dog+"]}"), union("{oneOf: ["+dog+", "+cat+"]}")))
+	// Inline ones are paired by what they are.
+	a, b := `{type: string, maxLength: 5}`, `{type: object, required: [x], properties: {x: {type: integer}}}`
+	b2 := `{type: object, required: [x], properties: {x: {type: integer, maximum: 3}}}`
+	expect(t, changes(t, union("{anyOf: ["+a+", "+b+"]}"), union("{anyOf: ["+b2+", "+a+"]}")),
+		"error constraint-tightened: POST /pets: request body application/json/anyOf/0/x: maximum 3 was added",
+	)
+	expect(t, changes(t, union("{oneOf: ["+cat+", "+dog+"]}"), union("{oneOf: ["+dog+", "+bird+"]}")),
+		"info variants-changed: GET /pets: response 200 application/json: oneOf alternative Cat was removed",
+		"warning variants-changed: GET /pets: response 200 application/json: oneOf alternative Bird was added",
+		"error variants-changed: POST /pets: request body application/json: oneOf alternative Cat was removed",
+		"info variants-changed: POST /pets: request body application/json: oneOf alternative Bird was added",
+	)
+}
+
+func TestDiscriminators(t *testing.T) {
+	cat, dog, bird := `{$ref: "#/components/schemas/Cat"}`, `{$ref: "#/components/schemas/Dog"}`, `{$ref: "#/components/schemas/Bird"}`
+	disc := func(prop, mapping string, variants ...string) string {
+		return "{oneOf: [" + strings.Join(variants, ", ") + "], discriminator: {propertyName: " + prop + ", mapping: {" + mapping + "}}}"
+	}
+	old := disc("kind", `cat: "#/components/schemas/Cat", dog: "#/components/schemas/Dog"`, cat, dog)
+	expect(t, changes(t, union(old), union(disc("type", `cat: "#/components/schemas/Cat", dog: "#/components/schemas/Dog"`, cat, dog))),
+		`error discriminator-changed: GET /pets: response 200 application/json: the discriminator is "type" instead of "kind"`,
+		`error discriminator-changed: POST /pets: request body application/json: the discriminator is "type" instead of "kind"`,
+	)
+	// A value is paired with the alternative it leads to: "dog" leads to
+	// Bird now, whose wings are compared with Dog's properties.
+	expect(t, changes(t, union(old), union(disc("kind", `cat: "#/components/schemas/Cat", dog: "#/components/schemas/Bird", fish: "#/components/schemas/Dog"`, cat, bird, dog))),
+		`warning discriminator-changed: GET /pets: response 200 application/json: discriminator value "fish" added to the mapping`,
+		"error property-removed: GET /pets: response 200 application/json/oneOf/1/good: the property was removed",
+		"info property-added: GET /pets: response 200 application/json/oneOf/1/wings: the property was added",
+		"warning variants-changed: GET /pets: response 200 application/json: oneOf alternative Dog was added",
+		`info discriminator-changed: POST /pets: request body application/json: discriminator value "fish" added to the mapping`,
+		"warning property-removed: POST /pets: request body application/json/oneOf/1/good: the property was removed",
+		"info property-added: POST /pets: request body application/json/oneOf/1/wings: the property was added",
+		"info variants-changed: POST /pets: request body application/json: oneOf alternative Dog was added",
+	)
+}
+
+func TestCallbacks(t *testing.T) {
+	doc := func(callbacks string) string {
+		return `paths:
+  /subscriptions:
+    post:
+      ` + ok + `
+      callbacks:
+` + callbacks
+	}
+	event := func(schema string) string {
+		return `        onEvent:
+          "{$request.body#/url}":
+            post:
+              requestBody: {content: {application/json: {schema: ` + schema + `}}}
+              responses: {"204": {description: ok}}
+`
+	}
+	expect(t, changes(t, doc(event("{type: object, properties: {id: {type: string}}}")+`        onPing:
+          "{$request.body#/ping}":
+            get: {`+ok+`}
+`), doc(event("{type: object, required: [id], properties: {id: {type: string}, at: {type: string}}}")+`        onDone:
+          "{$request.body#/done}":
+            post: {`+ok+`}
+`)),
+		// The API sends the callback's request, so a client receives it.
+		"info property-added: POST /subscriptions: callback onEvent POST {$request.body#/url}: request body application/json/at: the property was added",
+		"warning callback-removed: POST /subscriptions: callback onPing was removed",
+		"info callback-added: POST /subscriptions: callback onDone was added",
+	)
+	expect(t, changes(t, doc(event("{type: string}")), doc(`        onEvent:
+          "{$request.body#/url}":
+            put: {`+ok+`}
+`)),
+		"warning callback-removed: POST /subscriptions: callback onEvent POST {$request.body#/url} was removed",
+		"info callback-added: POST /subscriptions: callback onEvent PUT {$request.body#/url} was added",
+	)
+}
+
+func TestLinks(t *testing.T) {
+	doc := func(links string) string {
+		return `paths:
+  /pets:
+    post:
+      operationId: createPet
+      responses:
+        "201":
+          description: created
+          links:
+` + links + `
+  /pets/{id}:
+    get: {operationId: getPet, ` + ok + `}
+    delete: {operationId: deletePet, ` + ok + `}
+`
+	}
+	expect(t, changes(t, doc(`            Get: {operationId: getPet, parameters: {id: $response.body#/id}}
+            Delete: {operationId: deletePet}
+            Same: {operationId: getPet, parameters: {id: $response.body#/id}}`), doc(`            Get: {operationId: deletePet, parameters: {id: $response.body#/petId}}
+            Same: {operationId: getPet, parameters: {id: $response.body#/id}}
+            New: {operationId: getPet}`)),
+		"warning link-changed: POST /pets: response 201: link Get changed: the operation it leads to, its parameters",
+		"warning link-removed: POST /pets: response 201: link Delete was removed",
+		"info link-added: POST /pets: response 201: link New was added",
+	)
+}
+
+func TestDefaultsAndExamples(t *testing.T) {
+	doc := func(limitDefault, example, schema string) string {
+		return `paths:
+  /pets:
+    get:
+      parameters:
+        - {name: limit, in: query, schema: {type: integer` + limitDefault + `}` + example + `}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: ` + schema + `
+`
+	}
+	expect(t, changes(t,
+		doc(", default: 10", ", examples: {few: {value: 2}, many: {value: 50}}", "{type: object, properties: {sort: {type: string, default: name}, tag: {type: string, example: cat}}}"),
+		doc(", default: 20", ", examples: {few: {value: 3}, none: {value: 0}}", "{type: object, properties: {sort: {type: string}, tag: {type: string, example: dog, default: none}}}")),
+		`warning default-changed: GET /pets: query parameter "limit": the default is 20 instead of 10`,
+		`info example-changed: GET /pets: query parameter "limit": example "few" was changed`,
+		`info example-changed: GET /pets: query parameter "limit": example "many" was removed`,
+		`info example-changed: GET /pets: query parameter "limit": example "none" was added`,
+		`warning default-changed: GET /pets: response 200 application/json/sort: default "name" was removed`,
+		`warning default-changed: GET /pets: response 200 application/json/tag: default "none" was added`,
+		`info example-changed: GET /pets: response 200 application/json/tag: example "example" was changed`,
+	)
+}
+
+// changesFor returns the changes from old to new judged for side, as
+// changes does.
+func changesFor(t *testing.T, side Side, old, new string) []string {
+	t.Helper()
+	load := func(name, body string) *loader.Spec {
+		src, err := loader.ParseBytes([]byte(head+body), "file:///"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec, err := loader.LoadSource(src)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return spec
+	}
+	var out []string
+	for _, c := range DocumentsFor(load("old.yaml", old), load("new.yaml", new), Options{For: side}) {
+		out = append(out, c.Severity.String()+" "+c.Rule+": "+c.Message)
+	}
+	return out
+}
+
+func TestServers(t *testing.T) {
+	old := `paths:
+  /pets:
+    get:
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, maxLength: 10}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Next: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {type: object, required: [id], properties: {id: {type: integer}, tag: {type: string}}}
+        "404": {description: none}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {name: {type: string}}}}}}
+      ` + ok + `
+  /old:
+    get: {` + ok + `}
+`
+	new := `paths:
+  /pets:
+    get:
+      deprecated: true
+      parameters:
+        - {name: q, in: query, schema: {type: string}}
+        - {name: page, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Next: {required: true, schema: {type: string}}
+            X-Total: {required: true, schema: {type: integer}}
+          content:
+            application/json:
+              schema: {type: object, required: [id, tag], properties: {id: {type: integer}, tag: {type: string, maxLength: 5}}}
+        "201": {description: created}
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object, properties: {name: {type: [string, integer]}}}}
+          application/xml: {schema: {type: object}}
+      ` + ok + `
+  /new:
+    get: {` + ok + `}
+`
+	expect(t, changesFor(t, Servers, old, new),
+		"info operation-deprecated: GET /pets is deprecated",
+		`error parameter-optional: GET /pets: query parameter "q" is optional now`,
+		// What a server receives may only be narrower: maxLength removed
+		// is wider.
+		`warning constraint-loosened: GET /pets: query parameter "q": maxLength 10 was removed`,
+		`warning parameter-added: GET /pets: query parameter "page" was added`,
+		// What it sends may only be accepted more widely.
+		"error property-required: GET /pets: response 200 application/json/tag: the property is required now",
+		"error constraint-tightened: GET /pets: response 200 application/json/tag: maxLength 5 was added",
+		"error response-header-required: GET /pets: response 200: header X-Next is required now",
+		"error response-header-added: GET /pets: response 200: header X-Total was added",
+		"warning response-removed: GET /pets: response 404 was removed",
+		"info response-added: GET /pets: response 201 was added, which clients may not expect",
+		"error type-widened: POST /pets: request body application/json/name: may be integer now",
+		"error media-type-added: POST /pets: request body: media type application/xml was added",
+		"info operation-removed: operation GET /old was removed",
+		"error operation-added: operation GET /new was added",
+	)
+}
+
+func TestServersSecurityAndCallbacks(t *testing.T) {
+	const schemes = `components:
+  securitySchemes:
+    key: {type: apiKey, in: header, name: X-Key}
+    basic: {type: http, scheme: basic}
+`
+	doc := func(security, callbacks string) string {
+		return `paths:
+  /pets:
+    get:
+      security: ` + security + `
+      ` + ok + `
+      callbacks:
+` + callbacks + schemes
+	}
+	ping := `        onPing:
+          "{$request.query.url}":
+            post: {` + ok + `}
+`
+	done := `        onDone:
+          "{$request.query.url}":
+            post: {` + ok + `}
+`
+	expect(t, changesFor(t, Servers, doc("[{key: []}]", ping), doc("[{key: []}, {basic: []}]", done)),
+		"error security-relaxed: GET /pets: security requirement {basic} was added",
+		"info callback-removed: GET /pets: callback onPing was removed",
+		"error callback-added: GET /pets: callback onDone was added",
+	)
+	expect(t, changesFor(t, Clients, doc("[{key: []}]", ping), doc("[{key: []}, {basic: []}]", done)),
+		"info security-relaxed: GET /pets: security requirement {basic} was added",
+		"warning callback-removed: GET /pets: callback onPing was removed",
+		"info callback-added: GET /pets: callback onDone was added",
+	)
 }

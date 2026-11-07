@@ -37,8 +37,8 @@ func toJSONPlace(p diff.Place) *jsonPlace {
 }
 
 // runDiff implements "diff": it reports the changes from one version of a
-// document to another, by what they break for the API's clients, and
-// fails when one is as severe as -fail-on.
+// document to another, by what they break for the API's clients, or its
+// servers with -for server, and fails when one is as severe as -fail-on.
 func runDiff(args []string, stdout, stderr io.Writer) int {
 	fail := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "goapi diff: "+format+"\n", a...)
@@ -48,6 +48,7 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	format := fs.String("format", "text", "output format: text or json")
 	failOn := fs.String("fail-on", "error", "exit with 1 for a change of this severity or a worse one: error or warning")
+	side := fs.String("for", "client", "judge the changes for the API's clients (client) or for servers implementing the old document (server)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -60,6 +61,11 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	threshold, ok := map[string]diff.Severity{"error": diff.Error, "warning": diff.Warning}[*failOn]
 	if !ok {
 		return fail("unknown severity %q; use error or warning", *failOn)
+	}
+	sides := map[string]diff.Side{"client": diff.Clients, "server": diff.Servers}
+	forSide, ok := sides[*side]
+	if !ok {
+		return fail("unknown side %q; use client or server", *side)
 	}
 	if fs.NArg() != 2 {
 		return fail("expected the old and the new document")
@@ -79,7 +85,7 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		specs[i] = res.Spec
 	}
 
-	changes := diff.Documents(specs[0], specs[1])
+	changes := diff.DocumentsFor(specs[0], specs[1], diff.Options{For: forSide})
 	diff.Sort(changes)
 	code := exitOK
 	counts := map[diff.Severity]int{}

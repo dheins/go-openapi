@@ -50,7 +50,7 @@ goapi convert -out openapi.yaml swagger.yaml          # Swagger 2.0 to OpenAPI 3
 goapi flatten -hoist -out flat.yaml openapi.yaml      # one file, inline types as components
 goapi flatten -expand -out expanded.yaml openapi.yaml # one file, every reference replaced by what it points to
 goapi mixin -out openapi.yaml pets.yaml orders.yaml   # documents merged into the first, conflicts reported
-goapi diff main.yaml openapi.yaml                     # breaking changes, for CI
+goapi diff main.yaml openapi.yaml                     # breaking changes, for CI (-for server for implementations)
 goapi templates -out templates                        # the generator's templates, to override blocks of (or add files with goapi.yaml) with -templates
 goapi scan -out openapi.yaml ./...                    # a document from annotated Go code
 goapi serve openapi.yaml                              # the document and a Swagger UI or Redoc page

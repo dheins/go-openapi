@@ -39,6 +39,14 @@ func TestDiff(t *testing.T) {
 	if code, _, _ := run("-fail-on", "warning", old, added); code != exitInvalid {
 		t.Errorf("-fail-on warning: %d", code)
 	}
+	// For servers, a new response is information, and a maxLength on what
+	// they receive none either.
+	if code, out, _ := run("-for", "server", "-fail-on", "warning", old, tightened); code != exitOK || !strings.Contains(out, "0 error(s), 0 warning(s), 1 other change(s)") {
+		t.Errorf("-for server: %d %q", code, out)
+	}
+	if code, _, stderr := run("-for", "proxy", old, old); code != exitFailure || !strings.Contains(stderr, "unknown side") {
+		t.Errorf("-for proxy: %d %q", code, stderr)
+	}
 	// Errors come first, at their line in the new document.
 	code, out, _ := run(old, tightened)
 	lines := strings.Split(strings.TrimSpace(out), "\n")
