@@ -762,6 +762,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   the golden references finds its heading.
 - *Not done*: see [features.md](../features.md).
 
+### M39 – Merging documents ✅
+- [x] `flatten.Mixin`: documents bundled, then merged into the first, with
+  conflicts returned and the first declaration kept
+- [x] `goapi mixin`, with `-fail-on-conflict` and the result validated
+
+**How it went**
+- *On the bundled JSON*: each document is bundled first, so references
+  are all within it and point at components merged by name; the merge
+  works on the ordered JSON tree flatten already had.
+- *Meaning kept*: merging the root's servers and security would have
+  widened every operation's, so when they differ each operation gets its
+  document's, and a later document's path servers and parameters move to
+  its operations.
+- *The fixtures found one*: merging the golden documents gave paths equal
+  but for parameter names (`/pets/{id}` and `/pets/{petId}`), invalid
+  together; they are conflicts now.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

@@ -4,6 +4,10 @@
 
 ### Added
 
+- `goapi mixin` (`flatten.Mixin`): documents merged into the first, each
+  bundled, with their paths, webhooks, components, tags, servers and
+  security requirements; conflicts are reported with the first
+  declaration kept, and `-fail-on-conflict` fails on them.
 - `goapi generate markdown` (`codegen.Markdown`): a document's reference
   as one Markdown file, with its servers, security schemes, operations by
   tag, webhooks, callbacks and schemas, linked by GitHub's anchors, from

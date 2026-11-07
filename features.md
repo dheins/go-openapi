@@ -119,9 +119,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
   schemas when the document gives none, `externalValue` examples fetched
   (they are linked), only the schemas the selected operations use, and
   targets of `goapi.yaml`. — later
-- `goapi mixin`: documents merged into one (their paths, components and
-  tags, with conflicts reported), as `swagger mixin` does; `goapi flatten`
-  only bundles the files one document refers to. — later
+- `goapi mixin`: conflicting components renamed (with their references)
+  rather than left out, 3.0 documents merged with 3.1 ones (converting
+  them), and the `x-` extensions of objects other than the root and paths
+  merged. — later
 - `goapi flatten -expand`: every `$ref` replaced by what it points to
   (recursive schemas kept as references), as `swagger expand` does.
   — later
@@ -144,6 +145,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi mixin`: documents merged into the first (their paths,
+  webhooks, components, tags, servers and security), with conflicts
+  reported, as `swagger mixin` does. (a5304ef, d06901f)
 - [x] `goapi generate markdown`: reference documentation as one Markdown
   file to commit, from a template of its own, as `swagger generate
   markdown` writes. (38c87a4, 4a8deb7)
