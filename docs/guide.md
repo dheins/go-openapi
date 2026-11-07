@@ -11,6 +11,7 @@ its tests.
 - [Validate a document](#validate-a-document)
 - [Swagger 2.0 documents](#swagger-20-documents)
 - [Flatten a document](#flatten-a-document)
+- [Merge documents](#merge-documents)
 - [Compare versions of a document](#compare-versions-of-a-document)
 - [Generate models](#generate-models)
 - [Generate a server](#generate-a-server)
@@ -174,6 +175,47 @@ Errors in the document are printed; one that loads despite them is
 flattened as it is, and one that cannot be loaded writes nothing and exits
 with 1. From Go, `flatten.Document(spec, flatten.Options{Hoist: true})`
 does the same.
+
+## Merge documents
+
+```sh
+goapi mixin -out openapi.yaml pets.yaml orders.yaml users.yaml
+goapi mixin -fail-on-conflict -remove-unused -out api.json main.yaml extra.yaml
+```
+
+`goapi mixin` merges documents into the first, as one document: an API
+described per team or service, published as one. Each is bundled first,
+as `goapi flatten` bundles it (a Swagger 2.0 one converted to 3.1), so
+the result refers to no other file, and documents that refer to one
+shared file merge without conflicts over it.
+
+- **Merged:** the paths, method by method; webhooks; components, section
+  by section and name by name; tags, by name; and the servers and
+  security requirements of all of them, each listed once.
+- **From the first:** `info`, `externalDocs` (a later one's if the first
+  has none), `$self` and `jsonSchemaDialect`. The first's version is the
+  result's; a 3.0 document merges only with 3.0 ones, whose schemas mean
+  other things, and 3.1 and 3.2 ones into one at least as recent.
+- **Meaning kept:** when the documents' servers or security differ, each
+  document's operations get their document's as their own, so that
+  merging them changes no operation's; when a path both declare has
+  different servers or path parameters, those of the later document move
+  to the operations it adds.
+- **Conflicts:** what a later document declares otherwise (an operation
+  of a method and path, a component or tag of a name, a path that is
+  another with other parameter names, a root field) is left out, the
+  first declaration kept, and printed as a warning with where it is;
+  references to a component left out lead to the one kept. Equal
+  declarations, whatever their keys' order, are no conflict. Two
+  operations with one `operationId` are both kept, and reported, which
+  makes the result invalid.
+
+The output format follows `-format`, else `-out`'s extension, else the
+first input's; `-hoist` and `-remove-unused` apply to the result as to
+`goapi flatten`'s. The result is validated: errors in it exit with 1, as
+conflicts do with `-fail-on-conflict`, for CI. From Go,
+`flatten.Mixin(specs, flatten.Options{})` returns the document and the
+conflicts.
 
 ## Compare versions of a document
 
