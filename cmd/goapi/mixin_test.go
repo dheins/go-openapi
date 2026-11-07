@@ -57,6 +57,12 @@ components:
 	}
 	validFile(t, out)
 
+	// Expanded: B's Pet is left out, and the references to A's copied.
+	stdout.Reset()
+	if code := run([]string{"mixin", "-expand", "-format", "json", a, b}, &stdout, &stderr); code != exitOK || strings.Contains(stdout.String(), `"$ref"`) {
+		t.Errorf("-expand: exit %d: %s\n%s", code, &stderr, &stdout)
+	}
+
 	// An operation ID both use breaks the merged document.
 	c := write("c.yaml", strings.ReplaceAll(strings.ReplaceAll(string(readFile(t, b)), "listOrders", "listPets"), "Pet:", "Order:"))
 	stderr.Reset()
@@ -64,7 +70,7 @@ components:
 		t.Errorf("duplicate operationId: exit %d: %s", code, &stderr)
 	}
 
-	for _, args := range [][]string{{a}, {"-format", "toml", a, b}, {a, filepath.Join(dir, "none.yaml")}} {
+	for _, args := range [][]string{{a}, {"-format", "toml", a, b}, {"-hoist", "-expand", a, b}, {a, filepath.Join(dir, "none.yaml")}} {
 		stderr.Reset()
 		if code := run(append([]string{"mixin"}, args...), &stdout, &stderr); code != exitFailure || stderr.Len() == 0 {
 			t.Errorf("%q: exit %d, stderr %q", args, code, &stderr)

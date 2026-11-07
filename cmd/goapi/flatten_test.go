@@ -73,6 +73,16 @@ func TestFlatten(t *testing.T) {
 	}
 	validFile(t, flat)
 
+	// With every reference expanded: the paths of the file refer to none.
+	expanded := filepath.Join(dir, "expanded.json")
+	if code := run([]string{"flatten", "-expand", "-out", expanded, multiDoc}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("-expand: exit %d: %s", code, &stderr)
+	}
+	validFile(t, expanded)
+	if data, err := os.ReadFile(expanded); err != nil || bytes.Contains(data, []byte(`"#/components/parameters/`)) {
+		t.Errorf("expanded: %v\n%s", err, data)
+	}
+
 	// A Swagger 2.0 document is converted on the way.
 	stdout.Reset()
 	if code := run([]string{"flatten", "-format", "json", kitchenDoc}, &stdout, &stderr); code != exitOK || !strings.Contains(stdout.String(), `"openapi":"3.1.0"`) {
@@ -89,7 +99,7 @@ func TestFlatten(t *testing.T) {
 	if code := run([]string{"flatten", bad}, &stdout, &stderr); code != exitInvalid || stdout.Len() != 0 || !strings.Contains(stderr.String(), "cannot be loaded") {
 		t.Errorf("unloadable: exit %d, stderr %q", code, &stderr)
 	}
-	for _, args := range [][]string{{"flatten"}, {"flatten", "-format", "xml", multiDoc}, {"flatten", "missing.yaml"}} {
+	for _, args := range [][]string{{"flatten"}, {"flatten", "-format", "xml", multiDoc}, {"flatten", "missing.yaml"}, {"flatten", "-hoist", "-expand", multiDoc}} {
 		stderr.Reset()
 		if code := run(args, &stdout, &stderr); code != exitFailure || stderr.Len() == 0 {
 			t.Errorf("%q: exit %d, stderr %q", args, code, &stderr)
