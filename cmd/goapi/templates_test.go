@@ -16,7 +16,7 @@ func TestTemplatesCommand(t *testing.T) {
 		return code, stdout.String(), stderr.String()
 	}
 	goDir := filepath.Join(dir, "go")
-	if code, out, stderr := run("-out", goDir); code != exitOK || strings.Count(out, ".tmpl") != 5 {
+	if code, out, stderr := run("-out", goDir); code != exitOK || strings.Count(out, ".tmpl") != 5 || !strings.Contains(out, "goapi.yaml") {
 		t.Fatalf("go: exit %d, stdout %q, stderr %q", code, out, stderr)
 	}
 	data, err := os.ReadFile(filepath.Join(goDir, "model.go.tmpl"))

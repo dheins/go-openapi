@@ -36,19 +36,19 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 	}
 	gens := map[string]*generator{}
 	var order []string
-	pkgGen := func(imp, pkg string) (*generator, error) {
+	pkgGen := func(imp, dir string) (*generator, error) {
 		if g, ok := gens[imp]; ok {
 			return g, nil
 		}
 		o := opts
 		if imp != "" {
-			o.Package = pkg
+			o.Package = packageName(dir)
 		}
 		g, err := newGenerator(o)
 		if err != nil {
 			return nil, err
 		}
-		g.self, g.lay = imp, lay
+		g.self, g.lay, g.dir = imp, lay, dir
 		gens[imp] = g
 		order = append(order, imp)
 		return g, nil
@@ -58,11 +58,11 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 		return nil, err
 	}
 	if opts.TypesImport == "" {
-		og, err := pkgGen(lay.opsImport, lay.opsPkg)
+		og, err := pkgGen(lay.opsImport, lay.opsDir)
 		if err != nil {
 			return nil, err
 		}
-		mg, err := pkgGen(lay.modelsImport, lay.modelsPkg)
+		mg, err := pkgGen(lay.modelsImport, lay.modelsDir)
 		if err != nil {
 			return nil, err
 		}
@@ -99,6 +99,12 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 		return nil, fmt.Errorf("generating client.go: %w", err)
 	}
 	g.add("client.go", content)
+	pkg := func(dir string) (*generator, error) {
+		return targetPackage(opts, lay, gens, &order, dir)
+	}
+	if err := addTargets(m, opts, true, pkg); err != nil {
+		return nil, err
+	}
 	return packageFiles(gens, order), nil
 }
 

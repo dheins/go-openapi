@@ -24,19 +24,19 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 	// One generator per package, by import path; "" is the server's.
 	gens := map[string]*generator{}
 	var order []string
-	pkgGen := func(imp, pkg string) (*generator, error) {
+	pkgGen := func(imp, dir string) (*generator, error) {
 		if g, ok := gens[imp]; ok {
 			return g, nil
 		}
 		o := opts
 		if imp != "" {
-			o.Package = pkg
+			o.Package = packageName(dir)
 		}
 		g, err := newGenerator(o)
 		if err != nil {
 			return nil, err
 		}
-		g.self, g.lay = imp, lay
+		g.self, g.lay, g.dir = imp, lay, dir
 		gens[imp] = g
 		order = append(order, imp)
 		return g, nil
@@ -45,11 +45,11 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	og, err := pkgGen(lay.opsImport, lay.opsPkg)
+	og, err := pkgGen(lay.opsImport, lay.opsDir)
 	if err != nil {
 		return nil, err
 	}
-	mg, err := pkgGen(lay.modelsImport, lay.modelsPkg)
+	mg, err := pkgGen(lay.modelsImport, lay.modelsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +119,12 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 		}
 		g.add("sender.go", content)
 	}
+	pkg := func(dir string) (*generator, error) {
+		return targetPackage(opts, lay, gens, &order, dir)
+	}
+	if err := addTargets(m, opts, true, pkg); err != nil {
+		return nil, err
+	}
 	return packageFiles(gens, order), nil
 }
 
@@ -160,7 +166,7 @@ func packageFiles(gens map[string]*generator, order []string) []File {
 		pg := gens[imp]
 		for _, f := range pg.files {
 			if imp != "" {
-				f.Name = path.Join(pg.opts.Package, f.Name)
+				f.Name = path.Join(pg.dir, f.Name)
 			}
 			files = append(files, f)
 		}

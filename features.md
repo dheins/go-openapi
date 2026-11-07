@@ -109,11 +109,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - Custom templates: a block that only adds to a built-in one, without
   copying it (a way to call the block it replaces), and `runtime.ts` as a
   template. — later
-- Custom templates that add files or targets: a template file of your own
-  written once per model, operation or document, and a layout of the
-  generated packages other than `-operations` and `-models`, as
-  go-swagger's generator config file allows. Only blocks of the built-in
-  files can be replaced today. — later
+- Template targets: scopes beyond document, model and operation (each
+  type, each webhook or callback, each tag), and targets of other
+  generators than the one reading the directory. — later
 - `goapi generate cli`: a command-line client with a command per
   operation and a flag per parameter, as `swagger generate cli` writes.
   — later
@@ -145,6 +143,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Custom templates that add files: targets in a `goapi.yaml` of the
+  templates directory, once per document, model or operation, in a
+  generated package or one of their own, for Go and TypeScript; and
+  `-operations`/`-models` paths such as `internal/api`, as go-swagger's
+  generator config allows. (bcf59d0, 389e2e2, bf846cf)
 - [x] Validating requests (and, opt-in, responses) of handlers written by
   hand against a document: `middleware.Validate`, as go-swagger's
   `middleware` and `untyped` packages offer. (b1d5464, ca46b20, 0a886ed)

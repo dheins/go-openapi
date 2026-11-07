@@ -1,0 +1,28 @@
+{{/* routes gets the *ir.Model: the operations' IDs, by method and path. */}}
+{{define "routes"}}
+// Routes are the operations of the document, by their IDs.
+var Routes = map[string]string{
+{{- range .Operations}}{{if .ID}}
+	{{quote .ID}}: {{quote (printf "%s %s" .Method .Path)}},
+{{- end}}{{end}}
+}
+{{end}}
+
+{{define "readme"}}# {{len .Types}} types
+
+{{range .Types}}{{if eq .Root .}}- {{.Name}}
+{{end}}{{end}}{{end}}
+
+{{/* repo gets a root *ir.Type of kind struct. */}}
+{{define "repo"}}
+// {{.Name}}Repo stores {{.Name}} values.
+type {{.Name}}Repo interface {
+	Put(ctx {{imp "context" "context"}}.Context, v {{modelType .}}) error
+	List(ctx context.Context) ([]{{modelType .}}, error)
+}
+{{end}}
+
+{{define "opdoc"}}# {{.Method}} {{.Path}}
+
+{{.Name}} ({{camel .Name}}, {{snake .Name}}).
+{{end}}

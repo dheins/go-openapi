@@ -1,0 +1,18 @@
+# Files of these templates of the codegen tests: one per document, model
+# and operation, Go and not, in the generated packages and one of their
+# own.
+targets:
+  - template: routes
+    scope: document
+    path: routes.go
+  - template: readme
+    scope: document
+    path: README.md
+  - template: repo
+    scope: model
+    path: "{{snake .Name}}_repo.go"
+    package: internal/repo
+    when: '{{eq (kind .) "struct"}}'
+  - template: opdoc
+    scope: operation
+    path: "docs/{{snake .Name}}.md"

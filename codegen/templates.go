@@ -70,10 +70,10 @@ func userTemplates(fsys fs.FS) ([]string, error) {
 
 // checkTemplates parses the user templates of fsys next to the built-in
 // ones, set, with the functions funcs: a block of theirs must replace a
-// built-in one or be used by another of theirs, so that a misspelt name
-// does not go unnoticed, and text outside {{define}} would never be
-// written.
-func checkTemplates(fsys fs.FS, set *template.Template, funcs template.FuncMap) error {
+// built-in one, be one of targets (the blocks of goapi.yaml) or be used by
+// another of theirs, so that a misspelt name does not go unnoticed, and
+// text outside {{define}} would never be written.
+func checkTemplates(fsys fs.FS, set *template.Template, funcs template.FuncMap, targets []string) error {
 	files, err := userTemplates(fsys)
 	if err != nil {
 		return err
@@ -107,6 +107,16 @@ func checkTemplates(fsys fs.FS, set *template.Template, funcs template.FuncMap) 
 				collectUses(d.Tree.Root, used)
 			}
 		}
+	}
+	for _, name := range targets {
+		if builtin[name] {
+			// Its definition would replace the built-in block too.
+			return fmt.Errorf("templates: %s names block %q, which is a block of goapi's templates; name it otherwise", TargetsFile, name)
+		}
+		if _, ok := defined[name]; !ok {
+			return fmt.Errorf("templates: %s names block %q, which no *.tmpl file defines", TargetsFile, name)
+		}
+		used[name] = true
 	}
 	for name, file := range defined {
 		if !builtin[name] && !used[name] {

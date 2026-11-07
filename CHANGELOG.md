@@ -4,6 +4,13 @@
 
 ### Added
 
+- Template targets: a `goapi.yaml` in a templates directory adds files of
+  your own, once per document, model or operation, in a generated package
+  or a package of their own (`codegen.Options.Import`, `-import`, now for
+  `generate model` too), for Go and TypeScript; blocks get `snake`,
+  `camel`, `pascal`, `lower`, `upper` and `modelType`. `goapi templates`
+  writes an example `goapi.yaml`.
+- `-operations` and `-models` take paths such as `internal/api`.
 - `middleware.Validate`: checks the requests of handlers written by hand
   against a document without generated code (routes, parameters, JSON,
   form, multipart and XML bodies, credentials present), answering as

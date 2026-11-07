@@ -32,7 +32,9 @@ type TSOptions struct {
 	Source string
 	// Templates, if set, holds *.tmpl files whose {{define}} blocks
 	// replace the built-in blocks of models.ts, client.ts and index.ts, as
-	// Options.Templates does for Go. This is experimental.
+	// Options.Templates does for Go, and a goapi.yaml whose targets add
+	// files of your own, written as their blocks render. This is
+	// experimental.
 	Templates fs.FS
 }
 
@@ -69,7 +71,11 @@ func TypeScript(m *ir.Model, opts TSOptions) ([]File, []string, error) {
 		return nil, nil, err
 	}
 	files = append(files, File{Name: "index.ts", Content: []byte(index)})
-	return files, g.warnings, nil
+	extra, err := tsTargets(m, opts.Templates, files, g.funcs(), g.render)
+	if err != nil {
+		return nil, nil, err
+	}
+	return append(files, extra...), g.warnings, nil
 }
 
 // parseTemplates parses the templates of the files, the built-in ones
@@ -81,7 +87,11 @@ func (g *tsGen) parseTemplates() error {
 		return err
 	}
 	if g.opts.Templates != nil {
-		if err := checkTemplates(g.opts.Templates, tmpl, funcs); err != nil {
+		names, err := targetNames(g.opts.Templates)
+		if err != nil {
+			return err
+		}
+		if err := checkTemplates(g.opts.Templates, tmpl, funcs, names); err != nil {
 			return err
 		}
 		if err := parseUserTemplates(tmpl, g.opts.Templates); err != nil {
@@ -103,7 +113,7 @@ func (g *tsGen) render(name string, data any) (string, error) {
 
 // funcs are the functions of the TypeScript templates.
 func (g *tsGen) funcs() template.FuncMap {
-	return template.FuncMap{
+	funcs := template.FuncMap{
 		"tsDoc":         tsDoc,
 		"tsType":        func(r *ir.Ref) string { return g.tsType(r) },
 		"tsKey":         tsKey,
@@ -126,6 +136,10 @@ func (g *tsGen) funcs() template.FuncMap {
 		"linkDoc":       linkDoc,
 		"goapiVersion":  goapiVersion,
 	}
+	for name, fn := range namingFuncs {
+		funcs[name] = fn
+	}
+	return funcs
 }
 
 // tsRuntimeExports are the names of runtime.ts that users of a client

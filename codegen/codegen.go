@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"go/format"
+	"go/token"
 	"io/fs"
 	"path"
 	"slices"
@@ -34,15 +35,21 @@ type Options struct {
 	// openapi.json) so the server can serve it with server.WithDocument.
 	Document []byte
 	// OperationsPackage, if set, makes Server put the request and response
-	// types of the operations in a package of their own, in the
-	// subdirectory of that name, imported as OperationsImport; the server
-	// package keeps a small handler file per operation. ModelsPackage and
-	// ModelsImport do the same for the schema types, which otherwise go
-	// with the operations. Without either, all files are one package.
+	// types of the operations in a package of their own, in that
+	// subdirectory ("api", or a path such as "internal/api", the package
+	// named after its last element), imported as OperationsImport; the
+	// server package keeps a small handler file per operation.
+	// ModelsPackage and ModelsImport do the same for the schema types,
+	// which otherwise go with the operations. Without either, all files
+	// are one package.
 	OperationsPackage string
 	OperationsImport  string
 	ModelsPackage     string
 	ModelsImport      string
+	// Import is the import path of the output directory, which packages
+	// of templates' targets of their own are imported below; see
+	// Target.Package.
+	Import string
 	// TypesPackage and TypesImport, if set, make Client use the
 	// operations' package of a server or client generated before, by its
 	// name and import path, instead of generating the types again.
@@ -58,24 +65,57 @@ type Options struct {
 }
 
 // layout says which package each kind of generated code goes to, by
-// import path; "" is the package of Options.Package.
+// import path; "" is the package of Options.Package. Each has a name, and
+// a directory below the output, whose last element the name is.
 type layout struct {
-	opsPkg, opsImport       string
-	modelsPkg, modelsImport string
+	opsPkg, opsDir, opsImport          string
+	modelsPkg, modelsDir, modelsImport string
 }
 
 func layoutOf(opts Options) (layout, error) {
 	l := layout{
-		opsPkg: opts.OperationsPackage, opsImport: opts.OperationsImport,
-		modelsPkg: opts.ModelsPackage, modelsImport: opts.ModelsImport,
+		opsDir: opts.OperationsPackage, opsImport: opts.OperationsImport,
+		modelsDir: opts.ModelsPackage, modelsImport: opts.ModelsImport,
 	}
-	if (l.opsPkg == "") != (l.opsImport == "") || (l.modelsPkg == "") != (l.modelsImport == "") {
+	if (l.opsDir == "") != (l.opsImport == "") || (l.modelsDir == "") != (l.modelsImport == "") {
 		return layout{}, fmt.Errorf("codegen: a separate package needs both a name and an import path")
 	}
-	if l.modelsPkg == "" {
-		l.modelsPkg, l.modelsImport = l.opsPkg, l.opsImport
+	for _, dir := range []*string{&l.opsDir, &l.modelsDir} {
+		if *dir == "" {
+			continue
+		}
+		if err := CheckPackageDir(*dir); err != nil {
+			return layout{}, err
+		}
+		*dir = path.Clean(*dir)
+	}
+	l.opsPkg, l.modelsPkg = packageName(l.opsDir), packageName(l.modelsDir)
+	if l.modelsDir == "" {
+		l.modelsPkg, l.modelsDir, l.modelsImport = l.opsPkg, l.opsDir, l.opsImport
 	}
 	return l, nil
+}
+
+// packageName returns the name of the package in dir: its last element.
+func packageName(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return path.Base(dir)
+}
+
+// CheckPackageDir reports why dir cannot hold a generated package: a
+// relative, slash-separated path below the output, whose last element
+// names the package.
+func CheckPackageDir(dir string) error {
+	clean := path.Clean(dir)
+	if path.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(dir, "\\") {
+		return fmt.Errorf("codegen: %q is not a directory below the output", dir)
+	}
+	if name := path.Base(clean); !token.IsIdentifier(name) || token.IsKeyword(name) {
+		return fmt.Errorf("codegen: %q is not a valid package name, the last element of %q", name, dir)
+	}
+	return nil
 }
 
 // File is one generated source file.
@@ -94,7 +134,56 @@ func Models(m *ir.Model, opts Options) ([]File, error) {
 	if err := g.models(m); err != nil {
 		return nil, err
 	}
-	return g.files, nil
+	gens := map[string]*generator{"": g}
+	order := []string{""}
+	pkg := func(dir string) (*generator, error) {
+		if dir == "" {
+			return g, nil
+		}
+		// The models are in the root package, which the others import.
+		return extraPackage(opts, layout{modelsPkg: opts.Package, modelsImport: opts.Import}, gens, &order, dir)
+	}
+	if err := addTargets(m, opts, false, pkg); err != nil {
+		return nil, err
+	}
+	return packageFiles(gens, order), nil
+}
+
+// targetPackage returns the generator of the package in dir, below the
+// output: the root package (""), the operations' or the models', or one
+// of a target's own.
+func targetPackage(opts Options, lay layout, gens map[string]*generator, order *[]string, dir string) (*generator, error) {
+	switch clean := path.Clean(dir); {
+	case dir == "":
+		return gens[""], nil
+	case clean == lay.opsDir && gens[lay.opsImport] != nil:
+		return gens[lay.opsImport], nil
+	case clean == lay.modelsDir && gens[lay.modelsImport] != nil:
+		return gens[lay.modelsImport], nil
+	}
+	return extraPackage(opts, lay, gens, order, dir)
+}
+
+// extraPackage returns the generator of the package of a target's own in
+// dir, below opts.Import, creating it in gens.
+func extraPackage(opts Options, lay layout, gens map[string]*generator, order *[]string, dir string) (*generator, error) {
+	if opts.Import == "" {
+		return nil, fmt.Errorf("package %s needs the import path of the output (codegen.Options.Import, goapi generate -import)", dir)
+	}
+	imp := path.Join(opts.Import, path.Clean(dir))
+	if g, ok := gens[imp]; ok {
+		return g, nil
+	}
+	o := opts
+	o.Package = packageName(path.Clean(dir))
+	g, err := newGenerator(o)
+	if err != nil {
+		return nil, err
+	}
+	g.self, g.lay, g.dir = imp, lay, path.Clean(dir)
+	gens[imp] = g
+	*order = append(*order, imp)
+	return g, nil
 }
 
 type generator struct {
@@ -107,7 +196,9 @@ type generator struct {
 	vars map[string]bool
 	// params are the variables describing parameters, shared by a
 	// package's client functions and handlers.
-	params    map[*ir.Param]string
+	params map[*ir.Param]string
+	// dir is the package's directory below the output, for subpackages.
+	dir       string
 	files     []File
 	fileNames map[string]bool
 }
@@ -123,7 +214,11 @@ func newGenerator(opts Options) (*generator, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := checkTemplates(opts.Templates, builtin, f.funcs()); err != nil {
+		names, err := targetNames(opts.Templates)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkTemplates(opts.Templates, builtin, f.funcs(), names); err != nil {
 			return nil, err
 		}
 	}
@@ -210,7 +305,33 @@ func (g *generator) render(name string, data any, setup func(*fileGen)) ([]byte,
 	if err := tmpl.ExecuteTemplate(&body, name, data); err != nil {
 		return nil, err
 	}
+	return g.goFile(f, body.Bytes())
+}
 
+// renderText renders block name with data as a file that is not Go
+// source: as the block writes it.
+func (g *generator) renderText(name string, data any) ([]byte, error) {
+	f := &fileGen{gen: g, imports: map[string]string{}}
+	tmpl, err := template.New("go").Funcs(f.funcs()).ParseFS(templateFiles, "templates/*.tmpl")
+	if err != nil {
+		return nil, err
+	}
+	if g.opts.Templates != nil {
+		if err := parseUserTemplates(tmpl, g.opts.Templates); err != nil {
+			return nil, err
+		}
+	}
+	var body bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&body, name, data); err != nil {
+		return nil, err
+	}
+	return body.Bytes(), nil
+}
+
+// goFile completes the body of a Go file rendered with f: the header,
+// the package clause, the imports f collected and its variables, then
+// gofmt.
+func (g *generator) goFile(f *fileGen, body []byte) ([]byte, error) {
 	var out bytes.Buffer
 	out.WriteString(g.header())
 	fmt.Fprintf(&out, "package %s\n\n", g.opts.Package)
@@ -252,7 +373,7 @@ func (g *generator) render(name string, data any, setup func(*fileGen)) ([]byte,
 	for _, v := range f.varDecls {
 		out.WriteString("\n" + v + "\n")
 	}
-	out.Write(body.Bytes())
+	out.Write(body)
 
 	formatted, err := format.Source(out.Bytes())
 	if err != nil {
@@ -348,11 +469,19 @@ func (f *fileGen) funcs() template.FuncMap {
 		"opType": func(name string) string {
 			return f.qualify(f.gen.lay.opsImport, f.gen.lay.opsPkg, name)
 		},
+		// modelType names a schema type, qualified for the package being
+		// written, as goType names references to it.
+		"modelType": func(t *ir.Type) string {
+			return f.qualify(f.gen.lay.modelsImport, f.gen.lay.modelsPkg, t.Name)
+		},
 		"unionDecodeStmts":   f.unionDecodeStmts,
 		"unionMarshalStmts":  f.unionMarshalStmts,
 		"unionValidateStmts": f.unionValidateStmts,
 		"tupleDecls":         f.tupleDecls,
 		"goapiVersion":       goapiVersion,
+	}
+	for name, fn := range namingFuncs {
+		funcs[name] = fn
 	}
 	for name, fn := range f.serverFuncs() {
 		funcs[name] = fn
