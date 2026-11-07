@@ -8,13 +8,10 @@ shipped in.
 
 ## Loader
 
-- `goapi convert -version 3.2.0`: converting Swagger 2.0 to OpenAPI 3.2
-  rather than 3.1 (the content is the same; 3.2 could use
-  `components.pathItems` and other 3.2 fields). — later
-- Swagger 2.0 features without an OpenAPI 3 equivalent, reported as
-  `conversion` warnings: the `schemes` of an operation (it could become
-  operation-level `servers`), `collectionFormat: tsv`, and the collection
-  formats of nested items. — later
+- Swagger 2.0 collection formats of form fields that OpenAPI 3 has no
+  style for (tsv, nested items), read as csv. — later
+- Generated clients sending operations with `servers` of their own (an
+  operation's or a path's) there, rather than to the base URL. — later
 
 ## Models
 
@@ -142,6 +139,12 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi convert -version 3.2.0` (and `-convert-to` elsewhere):
+  Swagger 2.0 converted to OpenAPI 3.2, with XML `nodeType` and
+  `components.pathItems`; operation `schemes` as operation `servers`; and
+  collection formats without a 3.x style kept as
+  `x-goapi-collection-format`, which servers and clients read. (947b523,
+  622c2a0, 5025c9f)
 - [x] `goapi diff`: `allOf` members paired by what they are, and tuples,
   `not`, `if`/`then`/`else`, `patternProperties`, `dependentSchemas`,
   `dependentRequired`, `propertyNames` and `contains` compared. (f6296dd)
