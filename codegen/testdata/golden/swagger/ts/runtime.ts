@@ -1259,6 +1259,11 @@ export interface CallOptions {
   signal?: AbortSignal;
   /** Headers of this call, over those the client and operation set. */
   headers?: Record<string, string>;
+  /** The server of this call, absolute or relative to the base URL, over
+   * the operation's own, by the same rule: it is used while the
+   * operationServers option is on. Following a link that names a server
+   * sets it. */
+  server?: string;
 }
 
 /** A credential: a string, or a function returning one, possibly async. */
@@ -1781,10 +1786,11 @@ export function requestUrl(cfg: Config, op: OperationSpec, req: object): string 
   return builtUrl(cfg, op, b);
 }
 
-// builtUrl returns the URL of b, a request of op.
-function builtUrl(cfg: Config, op: OperationSpec, b: Built): string {
+// builtUrl returns the URL of b, a request of op, sent to server, if
+// given, rather than to the operation's own.
+function builtUrl(cfg: Config, op: OperationSpec, b: Built, server: string | undefined = op.server): string {
   const query = b.rawQuery ?? b.query.toString();
-  const base = op.server !== undefined && cfg.operationServers ? new URL(op.server, cfg.baseUrl).href.replace(/\/+$/, "") : cfg.baseUrl;
+  const base = server !== undefined && cfg.operationServers ? new URL(server, cfg.baseUrl).href.replace(/\/+$/, "") : cfg.baseUrl;
   return base + b.path + (query === "" ? "" : "?" + query);
 }
 
@@ -2409,7 +2415,7 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
     // Browsers do not let scripts set Cookie; elsewhere it is sent.
     b.headers.set("Cookie", b.cookies.join("; "));
   }
-  const url = builtUrl(cfg, op, b);
+  const url = builtUrl(cfg, op, b, call.server ?? op.server);
   const init: RequestInit = { method: op.method, headers: b.headers };
   if (b.body !== undefined) {
     init.body = b.body;

@@ -971,12 +971,12 @@ export class Client {
 
   /** Follows the link "Mirror" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
   async followCreatePetMirror(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
-    return this.getPet(link(followCreatePetMirrorLink, resp, req) as GetPetRequest, call);
+    return this.getPet(link(followCreatePetMirrorLink, resp, req) as GetPetRequest, { ...call, server: "https://eu.mirror.example.com/v1" });
   }
 
   /** Follows the link "Archive" of a response of createPet: sends the request of getPet it builds from resp and req, the request resp answers. */
   async followCreatePetArchive(resp: CreatePetResponse, req: CreatePetRequest, call?: CallOptions): Promise<GetPetResponse> {
-    return this.getPet(link(followCreatePetArchiveLink, resp, req) as GetPetRequest, call);
+    return this.getPet(link(followCreatePetArchiveLink, resp, req) as GetPetRequest, { ...call, server: "/archive" });
   }
 
   /** GET /pets/{petId}. */

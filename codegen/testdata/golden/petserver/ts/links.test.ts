@@ -1,5 +1,6 @@
-// Tests of links with $url, $method, $statusCode and expressions embedded
-// in text. Not generated; codegen's TestTypeScript runs them.
+// Tests of links with $url, $method, $statusCode, expressions embedded
+// in text and servers. Not generated; codegen's TestTypeScript runs
+// them.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -38,4 +39,38 @@ test("embedded expressions give text, parsed for a number parameter", async () =
   // A name is no pet ID, which the request's validation reports.
   await assert.rejects(c.followCreatePetByName(created, req), /petId/);
   assert.equal(sent.length, 1);
+});
+
+for (const [name, options, want] of [
+  ["the document's server", {}, ["https://eu.mirror.example.com/v1/pets/7", "https://api.example.com/archive/pets/7", "https://api.example.com/v1/pets/7"]],
+  ["a base URL of its own", { baseUrl: "http://localhost:8080/v1" }, ["http://localhost:8080/v1/pets/7", "http://localhost:8080/v1/pets/7", "http://localhost:8080/v1/pets/7"]],
+  [
+    "a base URL of its own, with operation servers",
+    { baseUrl: "http://localhost:8080/v1", operationServers: true },
+    ["https://eu.mirror.example.com/v1/pets/7", "http://localhost:8080/archive/pets/7", "http://localhost:8080/v1/pets/7"],
+  ],
+] as const) {
+  test(`links naming a server are followed there (${name})`, async () => {
+    const sent: string[] = [];
+    const fetch = async (input: RequestInfo | URL) => {
+      sent.push(String(input));
+      return new Response(null, { status: 404 });
+    };
+    const c = new Client({ ...options, fetch, codecs });
+    await c.followCreatePetMirror(created, req);
+    await c.followCreatePetArchive(created, req);
+    await c.followCreatePetGetPet(created, req);
+    assert.deepEqual(sent, want);
+  });
+}
+
+test("a call's own server", async () => {
+  const sent: string[] = [];
+  const fetch = async (input: RequestInfo | URL) => {
+    sent.push(String(input));
+    return new Response(null, { status: 404 });
+  };
+  const c = new Client({ fetch, codecs });
+  await c.getPet({ petId: 7 }, { server: "https://other.example.com/v2" });
+  assert.deepEqual(sent, ["https://other.example.com/v2/pets/7"]);
 });
