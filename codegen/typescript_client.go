@@ -543,6 +543,9 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		params = append(params, s+", schema: "+g.schema(p.Type)+" }")
 	}
 	spec := fmt.Sprintf("{\n  method: %s,\n  path: %s,\n  params: [%s],\n", jsString(o.Method), jsString(o.Path), strings.Join(params, ", "))
+	if o.ServerURL != "" {
+		spec += fmt.Sprintf("  server: %s,\n", jsString(o.ServerURL))
+	}
 	if len(media) > 0 {
 		var ms []string
 		for _, m := range media {

@@ -1222,6 +1222,11 @@ export interface ClientOptions {
   /** The server URL, below which paths are sent; the document's first
    * server URL by default. */
   baseUrl?: string;
+  /** Send operations with servers of their own there rather than to
+   * baseUrl: true by default while baseUrl is the document's, false once
+   * it is given. A relative operation server is resolved against
+   * baseUrl. */
+  operationServers?: boolean;
   /** The fetch function to send with; the global fetch by default. */
   fetch?: typeof fetch;
   /** Headers sent with every request that does not set them. */
@@ -1392,6 +1397,9 @@ export interface OperationSpec {
   /** Alternative requirements, each needing all its schemes; none means
    * the operation is not secured, and an empty one allows anonymous use. */
   readonly security?: readonly (readonly SchemeSpec[])[];
+  /** The operation's own server URL, absolute or relative to the base
+   * URL, which it is sent to when the operationServers option is on. */
+  readonly server?: string;
 }
 
 /** A link of a response, as client.ts describes it: the responses it is
@@ -2291,6 +2299,7 @@ async function authorize(op: OperationSpec, creds: Values, b: Built): Promise<vo
 /** The parts of a client a call needs. */
 export interface Config {
   readonly baseUrl: string;
+  readonly operationServers: boolean;
   readonly fetch: typeof fetch;
   readonly headers: Record<string, string>;
   readonly validateRequests: boolean;
@@ -2313,6 +2322,7 @@ export function config(options: ClientOptions, defaultBaseUrl: string, credentia
   return {
     codecs,
     baseUrl: baseUrl.replace(/\/+$/, ""),
+    operationServers: options.operationServers ?? options.baseUrl === undefined,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     headers: options.headers ?? {},
     validateRequests: options.validateRequests ?? true,
@@ -2350,7 +2360,8 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
     b.headers.set("Cookie", b.cookies.join("; "));
   }
   const query = b.rawQuery ?? b.query.toString();
-  const url = cfg.baseUrl + b.path + (query === "" ? "" : "?" + query);
+  const base = op.server !== undefined && cfg.operationServers ? new URL(op.server, cfg.baseUrl).href.replace(/\/+$/, "") : cfg.baseUrl;
+  const url = base + b.path + (query === "" ? "" : "?" + query);
   const init: RequestInit = { method: op.method, headers: b.headers };
   if (b.body !== undefined) {
     init.body = b.body;

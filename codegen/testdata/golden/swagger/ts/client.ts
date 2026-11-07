@@ -107,6 +107,7 @@ const loginSpec: OperationSpec = {
   method: "POST",
   path: "/login",
   params: [],
+  server: "http://pets.example.com/api",
   body: { required: true, media: [{ mediaType: "application/x-www-form-urlencoded", kind: "form", key: "body", schema: $ref(() => $m.LoginRequestBodySchema) }] },
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "string" } }],
 };
