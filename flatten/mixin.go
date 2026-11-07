@@ -10,14 +10,17 @@ import (
 )
 
 // Conflict is something a document declares differently from an earlier
-// one, which Mixin keeps.
+// one.
 type Conflict struct {
-	// Document is the index of the document whose declaration is left
-	// out, and With that of the one kept.
+	// Document is the index of the later document, and With that of the
+	// earlier one.
 	Document, With int
 	// Pointer is where, in the merged document.
 	Pointer string
 	Message string
+	// Kept says that With's declaration is kept and Document's left out;
+	// otherwise both are (two operations with one ID).
+	Kept bool
 }
 
 func (c Conflict) String() string {
@@ -225,7 +228,7 @@ func (m *merger) conflict(doc int, tokens []string, message string) {
 			break
 		}
 	}
-	m.conflicts = append(m.conflicts, Conflict{Document: doc, With: with, Pointer: ptr, Message: message})
+	m.conflicts = append(m.conflicts, Conflict{Document: doc, With: with, Pointer: ptr, Message: message, Kept: true})
 }
 
 // add puts v at key of parent, which came from document doc.
@@ -248,7 +251,7 @@ func (m *merger) merge(r *node, doc int) {
 				continue
 			}
 			if have == nil || !equal(have, v) {
-				m.conflict(doc, []string{key}, "differs; the first document's is kept")
+				m.conflict(doc, []string{key}, "differs")
 			}
 		case key == "paths" || key == "webhooks":
 			m.mergeItems(key, v, doc)
@@ -279,7 +282,7 @@ func (m *merger) mergeItems(key string, items *node, doc int) {
 		switch {
 		case have == nil && key == "paths" && m.equivalentPath(merged, name) != "":
 			kept := m.equivalentPath(merged, name)
-			m.conflict(doc, tokens, fmt.Sprintf("the path is %s with other parameter names, which is kept", kept))
+			m.conflict(doc, tokens, fmt.Sprintf("the path is %s with other parameter names", kept))
 			m.conflicts[len(m.conflicts)-1].With = m.origin[joinPointer([]string{key, kept})]
 		case have == nil:
 			m.add(merged, tokens, item, doc)
@@ -455,7 +458,7 @@ func (m *merger) mergeComponents(components *node, doc int) {
 				if existing := have.get(name); existing == nil {
 					m.add(have, tokens, entries.vals[j], doc)
 				} else if !equal(existing, entries.vals[j]) {
-					m.conflict(doc, tokens, "differs; the first declared is kept, and references to it lead to that one")
+					m.conflict(doc, tokens, "differs; references to it lead to the one kept")
 				}
 			}
 		}
@@ -543,6 +546,8 @@ func (m *merger) collectOperationID(op *node, tokens []string, doc int) {
 	ptr := joinPointer(tokens)
 	if other, ok := m.operationIDs[id.str]; ok {
 		m.conflict(doc, tokens, fmt.Sprintf("operationId %q is also the operation %s's", id.str, other))
+		c := &m.conflicts[len(m.conflicts)-1]
+		c.Kept, c.With = false, m.origin[other]
 		return
 	}
 	m.operationIDs[id.str] = ptr

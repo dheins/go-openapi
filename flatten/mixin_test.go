@@ -142,7 +142,7 @@ func TestMixin(t *testing.T) {
 	want := []string{
 		"/tags/0: tag \"pets\" differs",
 		"/paths/~1pets/put: the operation differs",
-		"/components/schemas/Error: differs; the first declared is kept, and references to it lead to that one",
+		"/components/schemas/Error: differs; references to it lead to the one kept",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("conflicts:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -241,7 +241,7 @@ paths:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conflicts) != 1 || conflicts[0].String() != `/paths/~1b/get: operationId "list" is also the operation /paths/~1a/get's` {
+	if len(conflicts) != 1 || conflicts[0].Kept || conflicts[0].String() != `/paths/~1b/get: operationId "list" is also the operation /paths/~1a/get's` {
 		t.Errorf("conflicts: %v", conflicts)
 	}
 	if valueAt(decode(t, data), "paths", "/b", "get") == nil {
@@ -266,7 +266,7 @@ paths:
 		t.Fatal(err)
 	}
 	if len(conflicts) != 1 || conflicts[0].Document != 2 || conflicts[0].With != 1 ||
-		conflicts[0].String() != "/paths/~1pets~1{petId}: the path is /pets/{id} with other parameter names, which is kept" {
+		conflicts[0].String() != "/paths/~1pets~1{petId}: the path is /pets/{id} with other parameter names" {
 		t.Errorf("conflicts: %+v", conflicts)
 	}
 	loadBytes(t, data)
