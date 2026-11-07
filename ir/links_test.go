@@ -42,6 +42,8 @@ paths:
             embeddedArray: {operationId: getPet, parameters: {tags: "a{$statusCode}"}}
             embeddedBody: {operationId: createPet, requestBody: "x{$statusCode}"}
             embeddedBad: {operationId: getPet, parameters: {id: "{$response.header.X-Nope}"}}
+            nested: {operationId: createPet, requestBody: {name: "copy of {$response.body#/id}", tags: [$statusCode, "{$response.header.X-Id}", $5], id: "{$statusCode}", raw: '{"a": "{$method}"}'}}
+            nestedBad: {operationId: createPet, requestBody: {name: $response.nope}}
   /pets/{id}:
     get:
       operationId: getPet
@@ -62,7 +64,11 @@ func TestLinks(t *testing.T) {
 		for _, l := range r.Links {
 			var values []string
 			for _, v := range l.Values {
-				values = append(values, v.Param.In+"."+v.Param.Name+"="+v.Expression)
+				key := "body"
+				if v.Param != nil {
+					key = v.Param.In + "." + v.Param.Name
+				}
+				values = append(values, key+"="+v.Expression)
 			}
 			got = append(got, fmt.Sprintf("%s %s %s %s [%s]", r.TypeName, l.Name, l.Method, l.Operation.Name, strings.Join(values, " ")))
 		}
@@ -76,10 +82,15 @@ func TestLinks(t *testing.T) {
 		"CreatePet201JSONResponse server ServerLink GetPet []",
 		"CreatePet201JSONResponse byRequestFacts ByRequestFactsLink GetPet [path.id=$statusCode query.mode=$method header.mode=$url]",
 		"CreatePet201JSONResponse embedded EmbeddedLink GetPet [path.id={$response.body#/id} query.mode={$method} {$url}?s={$statusCode}&h={$response.header.X-Id}]",
+		"CreatePet201JSONResponse embeddedArray EmbeddedArrayLink GetPet [query.tags=a{$statusCode}]",
+		"CreatePet201JSONResponse embeddedBody EmbeddedBodyLink CreatePet [body=x{$statusCode}]",
+		`CreatePet201JSONResponse nested NestedLink CreatePet [body={"name":"copy of {$response.body#/id}","tags":["$statusCode","{$response.header.X-Id}","$5"],"id":"{$statusCode}","raw":"{\"a\": \"{$method}\"}"}]`,
 		"CreatePet201TextResponse byHeader ByHeaderLink GetPet [path.id=$response.header.x-id]",
 		"CreatePet201TextResponse byRequest ByRequestLink GetPet [path.id=$request.body#/name]",
 		"CreatePet201TextResponse server ServerLink GetPet []",
 		"CreatePet201TextResponse byRequestFacts ByRequestFactsLink GetPet [path.id=$statusCode query.mode=$method header.mode=$url]",
+		"CreatePet201TextResponse embeddedArray EmbeddedArrayLink GetPet [query.tags=a{$statusCode}]",
+		"CreatePet201TextResponse embeddedBody EmbeddedBodyLink CreatePet [body=x{$statusCode}]",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("links:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -105,6 +116,21 @@ func TestLinks(t *testing.T) {
 			if l.ServerURL != "https://other.example.com" {
 				t.Errorf("server link's server = %q", l.ServerURL)
 			}
+		case "nested":
+			// "$5" does not begin like an expression, so it is text.
+			var fills []string
+			for _, f := range l.Values[0].Fills {
+				v := f.Value
+				fills = append(fills, fmt.Sprintf("%s %t %t %s %d", f.Pointer, f.Item, v.StatusCode, v.Header, len(v.Parts)))
+			}
+			want := []string{"/id false true  0", "/name false false  2", "/raw false false  1", "/tags/0 true true  0", "/tags/1 true false X-Id 0"}
+			if !slices.Equal(fills, want) {
+				t.Errorf("nested fills = %q, want %q", fills, want)
+			}
+			// Braces that do not open an expression are text.
+			if p := l.Values[0].Fills[2].Value.Parts; p[0].Text != `{"a": "POST"}` {
+				t.Errorf("raw parts = %+v", p)
+			}
 		}
 	}
 
@@ -120,8 +146,7 @@ func TestLinks(t *testing.T) {
 		`the link "unknownParam" of response 201 of CreatePet: GetPet has no parameter color`,
 		`the link "badExpression" of response 201 of CreatePet: parameter id: $foo is not a value of the response or request`,
 		`the link "noHeader" of response 201 of CreatePet reads a body or header no variant of the response has`,
-		`the link "embeddedArray" of response 201 of CreatePet: parameter tags: an expression embedded in text gives text, which tags is not`,
-		`the link "embeddedBody" of response 201 of CreatePet: requestBody: an expression embedded in text gives text, which a body is not`,
+		`the link "nestedBad" of response 201 of CreatePet: requestBody: /name: $response.nope is not a value of the response or request`,
 		`the link "embeddedBad" of response 201 of CreatePet: parameter id: $response.header.X-Nope refers to a header no response declares`,
 	} {
 		if !slices.ContainsFunc(warnings, func(s string) bool { return strings.Contains(s, w) }) {
@@ -132,8 +157,10 @@ func TestLinks(t *testing.T) {
 	// Selection leaves out the links to operations it leaves out.
 	m = build(t, linksDoc, Options{Operations: true, Select: &Selection{ExcludeTags: []string{"read"}}})
 	for _, r := range operationNamed(t, m, "CreatePet").Responses {
-		if len(r.Links) > 0 {
-			t.Errorf("%s keeps links to GetPet: %v", r.TypeName, r.Links)
+		for _, l := range r.Links {
+			if l.Operation.Name == "GetPet" {
+				t.Errorf("%s keeps the link %s to GetPet", r.TypeName, l.Name)
+			}
 		}
 	}
 }

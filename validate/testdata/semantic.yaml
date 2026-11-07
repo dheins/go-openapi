@@ -118,3 +118,9 @@ components:
         bad: {type: string, pattern: "(?=unclosed"}
       patternProperties:
         "[": {type: string}
+  links:
+    Copy:
+      operationId: getPet
+      parameters:
+        id: "{$response.body#/id}"
+      requestBody: {name: $response.body#/name, note: "for {$url}", price: $5, codes: [$statusCode]}

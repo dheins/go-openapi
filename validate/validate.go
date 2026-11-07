@@ -46,6 +46,7 @@ const (
 	RuleSecuritySchemes   = "security-schemes"
 	RuleTags              = "tags"
 	RuleLinkOperation     = "link-operation"
+	RuleLinkNested        = "link-nested-expression"
 	RuleDiscriminatorProp = "discriminator-property"
 	RuleAllOfConflict     = "allof-conflict"
 	RuleOneOfAmbiguous    = "oneof-ambiguous"

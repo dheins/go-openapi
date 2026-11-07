@@ -200,6 +200,16 @@ Links:
   - `petId` = `$response.body#/id`
 - `Archive` to [getPet](#get-petspetid) on `/archive`
   - `petId` = `$response.body#/id`
+- `Reports` to [getReports](#get-reportsids): Text given to arrays and objects, as JSON or as their styles write them.
+  - `ids` = `{$response.body#/id},7`
+  - `fields` = `["{$response.body#/name}", "tag"]`
+  - `filter` = `role,{$response.body#/name}`
+  - `X-Meta` = `{"role": "{$response.body#/name}", "age": {$statusCode}}`
+  - `prefs` = `theme,{$response.body#/name}`
+- `Rename` to [createPet](#post-pets): Expressions inside the body, which goapi fills in.
+  - request body = `{"name":"copy of {$response.body#/name}","tag":"$response.body#/tag","secret":"code {$statusCode}"}`
+- `Shout` to [shout](#post-notes)
+  - request body = `hi {$response.body#/name}`
 
 `4XX`:
 

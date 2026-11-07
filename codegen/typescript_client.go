@@ -810,7 +810,13 @@ func (g *tsGen) linkSpec(o *ir.Operation, l *ir.Link) string {
 				parts = append(parts, "{ "+strings.TrimPrefix(g.linkSource(o, l, &src, ownKeys), ", ")+" }")
 			}
 			s += ", parts: [" + strings.Join(parts, ", ") + "]"
-			if t := g.tsType(v.Param.Elem); t != "string" && !strings.HasPrefix(t, "\"") {
+			var elem *ir.Ref
+			if v.Param != nil {
+				elem = v.Param.Elem
+			} else {
+				elem = l.Operation.Body.Fields[0].Value
+			}
+			if t := g.tsType(elem); t != "string" && !strings.HasPrefix(t, "\"") {
 				s += ", parse: true"
 			}
 		} else {

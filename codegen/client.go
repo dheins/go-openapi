@@ -368,49 +368,14 @@ func (f *fileGen) linkMethod(w func(int, string, ...any), o *ir.Operation, r *ir
 		var pre []string
 		switch {
 		case v.Parts != nil:
-			var conds, terms []string
-			for j, p := range v.Parts {
-				name := fmt.Sprintf("v%dp%d", i, j)
-				var c, call string
-				switch {
-				case p.URL:
-					terms = append(terms, "requestURL")
-					continue
-				case p.StatusCode && r.Code != 0:
-					terms = append(terms, strconv.Quote(strconv.Itoa(r.Code)))
-					continue
-				case p.StatusCode:
-					terms = append(terms, f.imp("strconv", "strconv")+".Itoa(r.StatusCode)")
-					continue
-				case p.ResponseBody:
-					call = fmt.Sprintf("client.LinkPart(r.Body, %s.Response, %q)", oapi, p.Pointer)
-				case p.Header != "":
-					h := r.Header(p.Header)
-					var value string
-					c, value = present("r."+h.Field, h.Type)
-					call = fmt.Sprintf("client.ParamValue(%s)", value)
-				case p.Body:
-					field := o.Body.Fields[0]
-					var value string
-					c, value = present("req."+field.Name, field.Type)
-					call = fmt.Sprintf("client.LinkPart(%s, %s.Request, %q)", value, oapi, p.Pointer)
-				case p.Param != nil:
-					var value string
-					c, value = present("req."+p.Param.Field, p.Param.Type)
-					call = fmt.Sprintf("client.ParamValue(%s)", value)
-				default:
-					terms = append(terms, strconv.Quote(p.Text))
-					continue
-				}
-				if c != "" {
-					conds = append(conds, c)
-				}
-				pre = append(pre, fmt.Sprintf("%s, err := %s", name, call), "if err != nil {",
-					fmt.Sprintf("\treturn nil, client.LinkError(%q, %q, err)", l.Name, v.Expression), "}")
-				terms = append(terms, name)
-			}
+			var conds []string
+			var text string
+			conds, pre, text = f.linkText(o, r, l, v, fmt.Sprintf("v%d", i))
 			cond = strings.Join(conds, " && ")
-			stmt = fmt.Sprintf("client.LinkText(%s, %s)", dst, strings.Join(terms, " + "))
+			stmt = f.linkTextStmt(target, v, dst, text)
+		case v.Fills != nil:
+			pre = f.linkFills(o, r, l, v, fmt.Sprintf("v%d", i))
+			stmt = fmt.Sprintf("client.LinkFill(%s, %s(%s), v%dfills...)", dst, f.imp("encoding/json", "json")+".RawMessage", strconv.Quote(string(v.Const)), i)
 		case v.URL:
 			stmt = fmt.Sprintf("client.LinkText(%s, requestURL)", dst)
 		case v.StatusCode && r.Code != 0:
@@ -466,6 +431,145 @@ func (f *fileGen) linkMethod(w func(int, string, ...any), o *ir.Operation, r *ir
 	}
 	w(1, "return &out, nil")
 	w(0, "}")
+}
+
+// linkText returns the statements computing the parts of v's text, the
+// conditions under which they are all there, and the expression of the
+// text. Their variables start with name.
+func (f *fileGen) linkText(o *ir.Operation, r *ir.Response, l *ir.Link, v *ir.LinkValue, name string) (conds, pre []string, text string) {
+	oapi := f.imp(oapiImport, "oapi")
+	var terms []string
+	for j, p := range v.Parts {
+		part := fmt.Sprintf("%sp%d", name, j)
+		var c, call string
+		switch {
+		case p.URL:
+			terms = append(terms, "requestURL")
+			continue
+		case p.StatusCode && r.Code != 0:
+			terms = append(terms, strconv.Quote(strconv.Itoa(r.Code)))
+			continue
+		case p.StatusCode:
+			terms = append(terms, f.imp("strconv", "strconv")+".Itoa(r.StatusCode)")
+			continue
+		case p.ResponseBody:
+			call = fmt.Sprintf("client.LinkPart(r.Body, %s.Response, %q)", oapi, p.Pointer)
+		case p.Header != "":
+			h := r.Header(p.Header)
+			var value string
+			c, value = present("r."+h.Field, h.Type)
+			call = fmt.Sprintf("client.ParamValue(%s)", value)
+		case p.Body:
+			field := o.Body.Fields[0]
+			var value string
+			c, value = present("req."+field.Name, field.Type)
+			call = fmt.Sprintf("client.LinkPart(%s, %s.Request, %q)", value, oapi, p.Pointer)
+		case p.Param != nil:
+			var value string
+			c, value = present("req."+p.Param.Field, p.Param.Type)
+			call = fmt.Sprintf("client.ParamValue(%s)", value)
+		default:
+			terms = append(terms, strconv.Quote(p.Text))
+			continue
+		}
+		if c != "" {
+			conds = append(conds, c)
+		}
+		pre = append(pre, fmt.Sprintf("%s, err := %s", part, call), "if err != nil {",
+			fmt.Sprintf("\treturn nil, client.LinkError(%q, %q, err)", l.Name, v.Expression), "}")
+		terms = append(terms, part)
+	}
+	return conds, pre, strings.Join(terms, " + ")
+}
+
+// linkTextStmt returns the statement giving text, v's text, to dst, a
+// field of target's request: as a string, number or boolean to a scalar
+// or text body, as JSON or the parameter's style to an array or object,
+// and as JSON to any other body.
+func (f *fileGen) linkTextStmt(target *ir.Operation, v *ir.LinkValue, dst, text string) string {
+	p := v.Param
+	parsed := fmt.Sprintf("client.LinkParsed(%s, %s)", dst, text)
+	switch {
+	case p == nil && stringLike(target.Body.Fields[0].Value), p != nil && !p.Array && !p.Object && p.Content == "":
+		return fmt.Sprintf("client.LinkText(%s, %s)", dst, text)
+	case p == nil, p.Content != "" || p.In == "querystring" || p.ItemDelimiter != "":
+		// Content is read from text as JSON; a string is the text itself.
+		if p != nil && stringLike(p.Elem) {
+			return fmt.Sprintf("client.LinkText(%s, %s)", dst, text)
+		}
+		return parsed
+	case p.Array:
+		return fmt.Sprintf("client.LinkArray[%s](%s, %s, %s)", f.goType(p.Elem), dst, text, paramLiteral(p))
+	}
+	return fmt.Sprintf("client.LinkObject[%s](%s, %s, %s, %s)", f.goType(p.Elem), dst, text, paramLiteral(p), f.objectProperty(p.Properties, p.Additional, p.Shape))
+}
+
+// linkFills returns the statements computing the fills of v's constant
+// into the slice <name>fills: a value that is not there is a nil Value.
+func (f *fileGen) linkFills(o *ir.Operation, r *ir.Response, l *ir.Link, v *ir.LinkValue, name string) []string {
+	oapi := f.imp(oapiImport, "oapi")
+	jsonRaw := f.imp("encoding/json", "json") + ".RawMessage"
+	fills := name + "fills"
+	pre := []string{fmt.Sprintf("%s := make([]client.Fill, 0, %d)", fills, len(v.Fills))}
+	for j, fill := range v.Fills {
+		fv, val := fill.Value, fmt.Sprintf("%sf%d", name, j)
+		fail := fmt.Sprintf("\treturn nil, client.LinkError(%q, %q, err)", l.Name, fv.Expression)
+		// The value is expr, or call computes it when cond holds.
+		var cond, call, expr string
+		switch {
+		case fv.Parts != nil:
+			conds, parts, text := f.linkText(o, r, l, fv, val)
+			if len(conds) == 0 {
+				pre = append(pre, parts...)
+				expr = fmt.Sprintf("client.LinkString(%s)", text)
+				break
+			}
+			pre = append(pre, fmt.Sprintf("var %s %s", val, jsonRaw), fmt.Sprintf("if %s {", strings.Join(conds, " && ")))
+			for _, s := range parts {
+				pre = append(pre, "\t"+s)
+			}
+			pre = append(pre, fmt.Sprintf("\t%s = client.LinkString(%s)", val, text), "}")
+		case fv.Const != nil:
+			expr = fmt.Sprintf("%s(%s)", jsonRaw, strconv.Quote(string(fv.Const)))
+		case fv.URL:
+			expr = "client.LinkString(requestURL)"
+		case fv.StatusCode && r.Code != 0:
+			expr = fmt.Sprintf("%s(%q)", jsonRaw, strconv.Itoa(r.Code))
+		case fv.StatusCode:
+			expr = fmt.Sprintf("%s(%s.Itoa(r.StatusCode))", jsonRaw, f.imp("strconv", "strconv"))
+		case fv.ResponseBody:
+			call = fmt.Sprintf("client.LinkJSON(r.Body, %s.Response, %q)", oapi, fv.Pointer)
+		case fv.Header != "":
+			h := r.Header(fv.Header)
+			var value string
+			cond, value = present("r."+h.Field, h.Type)
+			call = fmt.Sprintf("client.LinkJSON(%s, %s.Response, \"\")", value, oapi)
+		case fv.RequestBody:
+			field := o.Body.Fields[0]
+			var value string
+			cond, value = present("req."+field.Name, field.Type)
+			call = fmt.Sprintf("client.LinkJSON(%s, %s.Request, %q)", value, oapi, fv.Pointer)
+		default:
+			var value string
+			cond, value = present("req."+fv.RequestParam.Field, fv.RequestParam.Type)
+			call = fmt.Sprintf("client.LinkJSON(%s, %s.Request, \"\")", value, oapi)
+		}
+		switch {
+		case expr != "":
+			pre = append(pre, fmt.Sprintf("%s := %s", val, expr))
+		case call != "" && cond == "":
+			pre = append(pre, fmt.Sprintf("%s, err := %s", val, call), "if err != nil {", fail, "}")
+		case call != "":
+			pre = append(pre, fmt.Sprintf("var %s %s", val, jsonRaw), fmt.Sprintf("if %s {", cond), "\tvar err error",
+				fmt.Sprintf("\tif %s, err = %s; err != nil {", val, call), "\t"+fail, "\t}", "}")
+		}
+		item := ""
+		if fill.Item {
+			item = ", Item: true"
+		}
+		pre = append(pre, fmt.Sprintf("%s = append(%s, client.Fill{Pointer: %q%s, Value: %s})", fills, fills, fill.Pointer, item, val))
+	}
+	return pre
 }
 
 // present returns the condition under which expr, of type r, holds a

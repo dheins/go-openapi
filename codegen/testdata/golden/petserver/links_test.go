@@ -6,6 +6,7 @@ package petserver
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -73,6 +74,55 @@ func TestLinks(t *testing.T) {
 	page.XTotal = 1 << 40
 	if _, err := page.AllLink(list); err == nil || !strings.Contains(err.Error(), "link All: $response.header.X-Total") {
 		t.Errorf("a limit over int32: %v", err)
+	}
+}
+
+// TestLinkTextValues follows links giving text with expressions embedded
+// to arrays, objects and bodies, and filling in expressions inside a
+// body.
+func TestLinkTextValues(t *testing.T) {
+	ctx := context.Background()
+	s, c := newTestClient(t, petclient.Credentials{})
+	req := &api.CreatePetRequest{Body: model.Pet{Name: "Ann", Tag: oapi.Some("cat")}}
+	created := as[api.CreatePet201JSONResponse](t)(c.CreatePet(ctx, req))
+
+	// Arrays and objects from text as their styles write them, or JSON.
+	rep, err := created.ReportsLink(req)
+	if err != nil {
+		t.Fatalf("Reports link: %v", err)
+	}
+	want := &api.GetReportsRequest{
+		IDs: []int64{created.Body.ID, 7}, Fields: oapi.Some([]string{"Ann", "tag"}),
+		Filter: oapi.Some(model.Filter{Role: "Ann"}), XMeta: oapi.Some(model.Filter{Role: "Ann", Age: oapi.Some(int64(201))}),
+		Prefs: oapi.Some(model.Prefs{Theme: oapi.Some("Ann")}),
+	}
+	if !reflect.DeepEqual(rep, want) {
+		t.Errorf("Reports link:\n got %+v\nwant %+v", rep, want)
+	}
+	as[api.GetReports204Response](t)(c.GetReports(ctx, rep))
+	if got := s.seen["GetReports"].(*api.GetReportsRequest); !reflect.DeepEqual(got, want) {
+		t.Errorf("reports sent:\n got %+v\nwant %+v", got, want)
+	}
+
+	// Expressions inside a body; a value that is not there leaves its
+	// property out.
+	renamed, err := created.RenameLink(req)
+	if err != nil || renamed.Body.Name != "copy of Ann" || renamed.Body.Tag.Value != "cat" || renamed.Body.Secret.Value != "code 201" {
+		t.Fatalf("Rename link: %+v %v", renamed, err)
+	}
+	as[api.CreatePet201JSONResponse](t)(c.CreatePet(ctx, renamed))
+	untagged := as[api.CreatePet201JSONResponse](t)(c.CreatePet(ctx, &api.CreatePetRequest{Body: model.Pet{Name: "Bo"}}))
+	if renamed, err := untagged.RenameLink(req); err != nil || renamed.Body.Name != "copy of Bo" || renamed.Body.Tag.Set {
+		t.Errorf("Rename link of an untagged pet: %+v %v", renamed, err)
+	}
+
+	// Text given to a text body.
+	shout, err := created.ShoutLink(req)
+	if err != nil || shout.Body.Value != "hi Ann" {
+		t.Fatalf("Shout link: %+v %v", shout, err)
+	}
+	if r := as[api.Shout200TextResponse](t)(c.Shout(ctx, shout)); r.Body != "HI ANN!" {
+		t.Errorf("shouted = %q", r.Body)
 	}
 }
 

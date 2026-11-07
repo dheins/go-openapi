@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/client"
 	"github.com/dheins/go-openapi/runtime/server"
@@ -229,6 +230,93 @@ func (r CreatePet201JSONResponse) ArchiveLink(req *CreatePetRequest) (*GetPetReq
 	var out GetPetRequest
 	if err := client.LinkValue(&out.PetID, r.Body, oapi.Response, "/id"); err != nil {
 		return nil, client.LinkError("Archive", "$response.body#/id", err)
+	}
+	return &out, nil
+}
+
+// ReportsLink returns the request of GetReports that the link "Reports" of
+// this response leads to, built from the response and req, the request of
+// CreatePet it answers.
+//
+// Text given to arrays and objects, as JSON or as their styles write them.
+func (r CreatePet201JSONResponse) ReportsLink(req *CreatePetRequest) (*GetReportsRequest, error) {
+	var out GetReportsRequest
+	v0p0, err := client.LinkPart(r.Body, oapi.Response, "/id")
+	if err != nil {
+		return nil, client.LinkError("Reports", "{$response.body#/id},7", err)
+	}
+	if err := client.LinkArray[int64](&out.IDs, v0p0+",7", server.Param{Name: "ids", Style: "matrix", Explode: true, Shape: server.Array}); err != nil {
+		return nil, client.LinkError("Reports", "{$response.body#/id},7", err)
+	}
+	v1p1, err := client.LinkPart(r.Body, oapi.Response, "/name")
+	if err != nil {
+		return nil, client.LinkError("Reports", "[\"{$response.body#/name}\", \"tag\"]", err)
+	}
+	if err := client.LinkArray[string](&out.Fields, "[\""+v1p1+"\", \"tag\"]", server.Param{Name: "fields", Style: "pipeDelimited", Explode: false, Shape: server.Array}); err != nil {
+		return nil, client.LinkError("Reports", "[\"{$response.body#/name}\", \"tag\"]", err)
+	}
+	v2p1, err := client.LinkPart(r.Body, oapi.Response, "/name")
+	if err != nil {
+		return nil, client.LinkError("Reports", "role,{$response.body#/name}", err)
+	}
+	if err := client.LinkObject[model.Filter](&out.Filter, "role,"+v2p1, server.Param{Name: "filter", Style: "deepObject", Explode: true, Shape: server.Object, Properties: []string{"role", "age", "tags", "owner", "labels"}}, server.Property{Type: "object", Properties: map[string]server.Property{"role": {Type: "string"}, "age": {Type: "integer"}, "tags": {Type: "string", Array: true}, "owner": {Type: "object", Properties: map[string]server.Property{"name": {Type: "string"}, "age": {Type: "integer"}}}, "labels": {Type: "object", Additional: &server.Property{Type: "integer"}}}}); err != nil {
+		return nil, client.LinkError("Reports", "role,{$response.body#/name}", err)
+	}
+	v3p1, err := client.LinkPart(r.Body, oapi.Response, "/name")
+	if err != nil {
+		return nil, client.LinkError("Reports", "{\"role\": \"{$response.body#/name}\", \"age\": {$statusCode}}", err)
+	}
+	if err := client.LinkParsed(&out.XMeta, "{\"role\": \""+v3p1+"\", \"age\": "+"201"+"}"); err != nil {
+		return nil, client.LinkError("Reports", "{\"role\": \"{$response.body#/name}\", \"age\": {$statusCode}}", err)
+	}
+	v4p1, err := client.LinkPart(r.Body, oapi.Response, "/name")
+	if err != nil {
+		return nil, client.LinkError("Reports", "theme,{$response.body#/name}", err)
+	}
+	if err := client.LinkObject[model.Prefs](&out.Prefs, "theme,"+v4p1, server.Param{Name: "prefs", Style: "form", Explode: true, Shape: server.Object, Properties: []string{"theme", "compact"}}, server.Property{Type: "object", Properties: map[string]server.Property{"theme": {Type: "string"}, "compact": {Type: "boolean"}}}); err != nil {
+		return nil, client.LinkError("Reports", "theme,{$response.body#/name}", err)
+	}
+	return &out, nil
+}
+
+// RenameLink returns the request of CreatePet that the link "Rename" of
+// this response leads to, built from the response and req, the request of
+// CreatePet it answers.
+//
+// Expressions inside the body, which goapi fills in.
+func (r CreatePet201JSONResponse) RenameLink(req *CreatePetRequest) (*CreatePetRequest, error) {
+	var out CreatePetRequest
+	v0fills := make([]client.Fill, 0, 3)
+	v0f0p1, err := client.LinkPart(r.Body, oapi.Response, "/name")
+	if err != nil {
+		return nil, client.LinkError("Rename", "copy of {$response.body#/name}", err)
+	}
+	v0f0 := client.LinkString("copy of " + v0f0p1)
+	v0fills = append(v0fills, client.Fill{Pointer: "/name", Value: v0f0})
+	v0f1 := client.LinkString("code " + "201")
+	v0fills = append(v0fills, client.Fill{Pointer: "/secret", Value: v0f1})
+	v0f2, err := client.LinkJSON(r.Body, oapi.Response, "/tag")
+	if err != nil {
+		return nil, client.LinkError("Rename", "$response.body#/tag", err)
+	}
+	v0fills = append(v0fills, client.Fill{Pointer: "/tag", Value: v0f2})
+	if err := client.LinkFill(&out.Body, json.RawMessage("{\"name\":\"copy of {$response.body#/name}\",\"tag\":\"$response.body#/tag\",\"secret\":\"code {$statusCode}\"}"), v0fills...); err != nil {
+		return nil, client.LinkError("Rename", "{\"name\":\"copy of {$response.body#/name}\",\"tag\":\"$response.body#/tag\",\"secret\":\"code {$statusCode}\"}", err)
+	}
+	return &out, nil
+}
+
+// ShoutLink returns the request of Shout that the link "Shout" of this
+// response leads to, built from the response and req, the request of
+// CreatePet it answers.
+func (r CreatePet201JSONResponse) ShoutLink(req *CreatePetRequest) (*ShoutRequest, error) {
+	var out ShoutRequest
+	v0p1, err := client.LinkPart(r.Body, oapi.Response, "/name")
+	if err != nil {
+		return nil, client.LinkError("Shout", "hi {$response.body#/name}", err)
+	}
+	if err := client.LinkText(&out.Body, "hi "+v0p1); err != nil {
+		return nil, client.LinkError("Shout", "hi {$response.body#/name}", err)
 	}
 	return &out, nil
 }

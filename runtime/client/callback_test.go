@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -114,5 +116,78 @@ func TestLinkText(t *testing.T) {
 	}
 	if _, err := LinkPart(map[string]any{}, oapi.Response, "/id"); err == nil || err.Error() != "the value has no /id" {
 		t.Errorf("missing part: %v", err)
+	}
+}
+
+func TestLinkStyledText(t *testing.T) {
+	var ids []int64
+	for _, c := range []struct {
+		text string
+		p    server.Param
+		want []int64
+	}{
+		{"[1, 2]", server.Param{Style: "simple", Shape: server.Array}, []int64{1, 2}},
+		{"1,2", server.Param{Style: "matrix", Explode: true, Shape: server.Array}, []int64{1, 2}},
+		{"7", server.Param{Style: "form", Shape: server.Array}, []int64{7}},
+		{"1|2", server.Param{Style: "pipeDelimited", Shape: server.Array}, []int64{1, 2}},
+		{"1 2", server.Param{Style: "spaceDelimited", Shape: server.Array}, []int64{1, 2}},
+		{"1;2", server.Param{Style: "form", Shape: server.Array, Delimiter: ";"}, []int64{1, 2}},
+	} {
+		ids = nil
+		if err := LinkArray[int64](&ids, c.text, c.p); err != nil || !slices.Equal(ids, c.want) {
+			t.Errorf("LinkArray(%q, %s) = %v, %v", c.text, c.p.Style, ids, err)
+		}
+	}
+	if err := LinkArray[int64](&ids, "1,x", server.Param{Style: "simple", Shape: server.Array}); err == nil {
+		t.Errorf("an item that is no number set %v", ids)
+	}
+
+	type filter struct {
+		Role string `json:"role"`
+		Age  int64  `json:"age"`
+	}
+	props := server.Property{Type: "object", Properties: map[string]server.Property{"role": {Type: "string"}, "age": {Type: "integer"}}}
+	obj := server.Param{Style: "form", Shape: server.Object}
+	for _, text := range []string{`{"role":"admin","age":3}`, "role,admin,age,3"} {
+		var f oapi.Optional[filter]
+		if err := LinkObject[filter](&f, text, obj, props); err != nil || f.Value != (filter{"admin", 3}) {
+			t.Errorf("LinkObject(%q) = %+v, %v", text, f, err)
+		}
+	}
+	var f filter
+	if err := LinkObject[filter](&f, "role", obj, props); err == nil {
+		t.Errorf("an odd number of fields set %+v", f)
+	}
+
+	if err := LinkParsed(&f, `{"role":"x"}`); err != nil || f.Role != "x" {
+		t.Errorf("LinkParsed = %+v, %v", f, err)
+	}
+	if err := LinkParsed(&f, "role,x"); err == nil || err.Error() != `"role,x" is not JSON` {
+		t.Errorf("LinkParsed of text: %v", err)
+	}
+}
+
+func TestLinkFill(t *testing.T) {
+	body := map[string]any{"id": 7, "name": "Rex"}
+	id, err := LinkJSON(body, oapi.Response, "/id")
+	if err != nil || string(id) != "7" {
+		t.Fatalf("LinkJSON = %s, %v", id, err)
+	}
+	if missing, err := LinkJSON(body, oapi.Response, "/tag"); err != nil || missing != nil {
+		t.Errorf("LinkJSON of a missing value = %s, %v", missing, err)
+	}
+	var got map[string]any
+	err = LinkFill(&got, json.RawMessage(`{"id":"$response.body#/id","note":"x","tag":"t","items":["a",{"k":"v"}]}`),
+		Fill{Pointer: "/id", Value: id},
+		Fill{Pointer: "/note", Value: LinkString("copy of Rex")},
+		Fill{Pointer: "/tag"},
+		Fill{Pointer: "/items/1/k", Value: json.RawMessage(`[1]`)},
+		Fill{Pointer: "/items/0", Item: true, Value: json.RawMessage(`true`)})
+	data, _ := json.Marshal(got)
+	if want := `{"id":7,"items":[true,{"k":[1]}],"note":"copy of Rex"}`; err != nil || string(data) != want {
+		t.Errorf("LinkFill = %s, %v; want %s", data, err, want)
+	}
+	if err := LinkFill(&got, json.RawMessage(`["a"]`), Fill{Pointer: "/0", Item: true}); err == nil || err.Error() != "the item /0 is not there" {
+		t.Errorf("a missing item: %v", err)
 	}
 }
