@@ -91,6 +91,55 @@ note:
   x-omitempty: false   # Note string `json:"note"`, written as "note":"" when unset
 ```
 
+## `x-order`
+
+On a property, an integer: its place among the object's properties, as
+go-swagger has it. Properties with one come first, by it (equal ones in
+the document's order), then the others in the document's order. It
+orders the fields of Go structs, and so the properties encoded JSON
+has, the properties of TypeScript types and descriptors, and the
+property tables of `goapi generate markdown`. A value that is not an
+integer is a warning, and the property keeps its place.
+
+```yaml
+properties:
+  note: {type: string}
+  id: {type: integer, x-order: 1}
+  name: {type: string, x-order: 0}   # Name, ID, Note; {"name":...,"id":...,"note":...}
+```
+
+## `x-go-json-string`
+
+On an integer, number or boolean property, `true`: its value is written
+and read as a JSON string holding it (`"42"`, `"true"`), as
+`encoding/json`'s `,string` option and go-swagger do, for APIs whose
+clients lose precision on large numbers. The schema keeps its type, so
+the Go field is still `int64` (or `float64`, `bool`, an enum of them,
+nullable or not) and `Validate` checks the value; a response's default
+is written as a string too.
+
+- **Reading** takes only a string holding a valid value: a bare `42`,
+  `"forty-two"` or `" 42"` is a problem at the property's path. `null`
+  stays null when the property is nullable.
+- **Forms, multipart and XML** carry the value's text, which is read as
+  that string.
+- **TypeScript clients** send the value as a string and read it back
+  from one, refusing anything else, so they talk to Go servers.
+- **`middleware.Validate`** checks the string, then the value it holds
+  against the property's schema. Examples in the document are still
+  values of the schema's type.
+- `goapi generate markdown` describes the type as `integer, sent as a
+  string`.
+
+On another property it is a warning, and the value is written as it is.
+
+```yaml
+count:
+  type: integer
+  format: int64
+  x-go-json-string: true   # Count int64; {"count":"9007199254740993"}
+```
+
 ## `x-nullable`, `x-isnullable`
 
 On a schema, `true`: the value may be null, as 3.0's `nullable: true`

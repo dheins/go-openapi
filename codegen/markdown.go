@@ -2,11 +2,13 @@ package codegen
 
 import (
 	"bytes"
+	"cmp"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"slices"
+	"strconv"
 	"strings"
 	"text/template"
 	"unicode"
@@ -761,7 +763,8 @@ func (g *mdGen) addProperties(list *[]*MDProperty, prefix string, s *oas.Schema,
 		required = append(required, m.Required...)
 	}
 	add := func(o *oas.Schema) {
-		for name, p := range o.Properties.All() {
+		for _, name := range byOrder(o.Properties) {
+			p, _ := o.Properties.Get(name)
 			full := prefix + name
 			// A property allOf members both declare is one row.
 			if i := slices.IndexFunc(*list, func(mp *MDProperty) bool { return mp.Name == full }); i >= 0 {
@@ -774,7 +777,11 @@ func (g *mdGen) addProperties(list *[]*MDProperty, prefix string, s *oas.Schema,
 				mp.Constraints = append(mp.Constraints, g.constraints(p)...)
 				continue
 			}
-			*list = append(*list, &MDProperty{Name: full, Type: g.typeText(p), Required: slices.Contains(required, name),
+			typ := g.typeText(p)
+			if jsonString(p) {
+				typ += ", sent as a string"
+			}
+			*list = append(*list, &MDProperty{Name: full, Type: typ, Required: slices.Contains(required, name),
 				Deprecated: p.Deprecated, Description: cmpText(p.Description, p.Title), Constraints: g.constraints(p)})
 			switch {
 			case p.Ref == "" && hasProperties(p):
@@ -790,6 +797,65 @@ func (g *mdGen) addProperties(list *[]*MDProperty, prefix string, s *oas.Schema,
 			add(m)
 		}
 	}
+}
+
+// jsonString reports whether a property's value, an integer, number or
+// boolean, is sent as a JSON string holding it (x-go-json-string).
+func jsonString(s *oas.Schema) bool {
+	if s == nil {
+		return false
+	}
+	raw, ok := s.Extra.Get("x-go-json-string")
+	if !ok || strings.TrimSpace(string(raw)) != "true" {
+		return false
+	}
+	types := s.Type
+	if len(types) == 0 && s.Resolved != nil {
+		types = s.Resolved.Type
+	}
+	scalars := 0
+	for _, t := range types {
+		switch t {
+		case "integer", "number", "boolean":
+			scalars++
+		case "null":
+		default:
+			return false
+		}
+	}
+	return scalars == 1
+}
+
+// byOrder returns the names of properties in the order generated types
+// have them: those with an integer x-order first, by it, then the others.
+func byOrder(properties *oas.OrderedMap[*oas.Schema]) []string {
+	names := properties.Keys()
+	order := func(name string) (int64, bool) {
+		s, _ := properties.Get(name)
+		if s == nil {
+			return 0, false
+		}
+		raw, ok := s.Extra.Get("x-order")
+		if !ok {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+		return n, err == nil
+	}
+	slices.SortStableFunc(names, func(a, b string) int {
+		oa, okA := order(a)
+		ob, okB := order(b)
+		switch {
+		case okA && okB:
+			return cmp.Compare(oa, ob)
+		case okA:
+			return -1
+		case okB:
+			return 1
+		}
+		return 0
+	})
+	return names
 }
 
 // cmpText returns the first of texts that is not empty.

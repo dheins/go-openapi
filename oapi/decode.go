@@ -123,6 +123,25 @@ var (
 	textUnmarshaler = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
 
+// DecodeJSONString decodes raw, a JSON string holding an integer, number
+// or boolean (x-go-json-string, encoding/json's ",string"), into dst as
+// DecodeField decodes the value it holds. Null is decoded as DecodeField
+// decodes it; any other value is an error.
+func DecodeJSONString(raw json.RawMessage, dst any, nullable bool, dir Direction) error {
+	if isNull(raw) {
+		return DecodeField(raw, dst, nullable, dir)
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return &ValidationError{Message: "expected a string holding the value, got " + valueType(raw)}
+	}
+	inner := json.RawMessage(text)
+	if kind := valueType(inner); text != strings.TrimSpace(text) || !json.Valid(inner) || kind != "number" && kind != "boolean" {
+		return &ValidationError{Message: fmt.Sprintf("expected a string holding a number or boolean, got %q", text)}
+	}
+	return DecodeField(inner, dst, false, dir)
+}
+
 // DecodeField decodes raw into dst, a pointer. Null is accepted when
 // nullable is set or the target can represent it (Nullable, any);
 // otherwise it is an error. dir is passed on to generated types. Problems

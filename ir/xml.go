@@ -280,6 +280,10 @@ func (b *builder) xmlStruct(n *XMLNode, t *Type, x *xmlBuild) string {
 		if why != "" {
 			return why
 		}
+		if f.JSONString {
+			// Its text is the string the model reads.
+			fn.Type = "string"
+		}
 		n.Properties = append(n.Properties, XMLProperty{Name: f.JSONName, Node: fn})
 	}
 	for _, u := range t.InlineUnions {

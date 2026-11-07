@@ -557,6 +557,27 @@ const putNotesSpec: OperationSpec = {
   responses: [{ status: "204" }],
 };
 
+/** The inputs of putCounter. */
+export interface PutCounterRequest {
+  body: $m.Counter;
+  /** The media type to send the body as; by default the first of the
+   * property that is set. */
+  contentType?: "application/json" | "application/x-www-form-urlencoded" | "application/xml";
+}
+
+/** The responses of putCounter. */
+export type PutCounterResponse =
+  | { status: 200; contentType: "application/json"; body: $m.Counter }
+  | { status: 200; contentType: "application/xml"; body: $m.Counter };
+
+const putCounterSpec: OperationSpec = {
+  method: "PUT",
+  path: "/counters",
+  params: [],
+  body: { required: true, media: [{ mediaType: "application/json", kind: "json", key: "body", schema: $ref(() => $m.CounterSchema) }, { mediaType: "application/x-www-form-urlencoded", kind: "form", key: "body", schema: $ref(() => $m.CounterSchema) }, { mediaType: "application/xml", kind: "xml", key: "body", schema: $ref(() => $m.CounterSchema), xml: { name: "counter", type: "object", properties: [{ name: "count", node: { name: "count", type: "string" } }, { name: "ratio", node: { name: "ratio", type: "string" } }, { name: "enabled", node: { name: "enabled", type: "string" } }, { name: "limit", node: { name: "limit", type: "string" } }, { name: "label", node: { name: "label", type: "string" } }] } }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.CounterSchema), withContentType: true }, { status: "200", mediaType: "application/xml", kind: "xml", schema: $ref(() => $m.CounterSchema), xml: { name: "counter", type: "object", properties: [{ name: "count", node: { name: "count", type: "string" } }, { name: "ratio", node: { name: "ratio", type: "string" } }, { name: "enabled", node: { name: "enabled", type: "string" } }, { name: "limit", node: { name: "limit", type: "string" } }, { name: "label", node: { name: "label", type: "string" } }] }, withContentType: true }],
+};
+
 /** The inputs of submitForm. */
 export interface SubmitFormRequest {
   body: $m.Filter;
@@ -1098,6 +1119,15 @@ export class Client {
   /** PUT /memos. */
   putNotes(req: PutNotesRequest, call?: CallOptions): Promise<PutNotesResponse> {
     return send(this.#cfg, putNotesSpec, req, call) as Promise<PutNotesResponse>;
+  }
+
+  /**
+   * PUT /counters.
+   *
+   * A counter whose numbers and boolean are sent as strings (x-go-json-string), echoed.
+   */
+  putCounter(req: PutCounterRequest, call?: CallOptions): Promise<PutCounterResponse> {
+    return send(this.#cfg, putCounterSpec, req, call) as Promise<PutCounterResponse>;
   }
 
   /** POST /pets/form. */

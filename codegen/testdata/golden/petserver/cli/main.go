@@ -335,6 +335,20 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "put-counter", Summary: "A counter whose numbers and boolean are sent as strings (x-go-json-string), echoed.", Tag: "",
+			Request: func() any { return new(api.PutCounterRequest) },
+			Media: []cli.Media{
+				{MediaType: "application/json", Kind: "json", Field: "Body"},
+				{MediaType: "application/x-www-form-urlencoded", Kind: "form", Field: "Body"},
+				{MediaType: "application/xml", Kind: "xml", Field: "Body"},
+			},
+			BodyRequired: true,
+			ContentType:  "ContentType",
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PutCounter(ctx, req.(*api.PutCounterRequest))
+			},
+		},
+		{
 			Name: "submit-form", Summary: "", Tag: "",
 			Request: func() any { return new(api.SubmitFormRequest) },
 			Media: []cli.Media{

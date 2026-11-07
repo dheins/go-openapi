@@ -55,7 +55,11 @@ func (f *fileGen) streamDecodeStmts(t *ir.Type) (string, error) {
 			w(3, "}")
 		}
 		w(3, "seen[%d] = true", i)
-		w(3, "problems[%d] = obj.Decode(&v.%s, %t, dir)", i, fd.Name, fd.CyclePointer && fd.Nullable)
+		decode := "Decode"
+		if fd.JSONString {
+			decode = "DecodeString"
+		}
+		w(3, "problems[%d] = obj.%s(&v.%s, %t, dir)", i, decode, fd.Name, fd.CyclePointer && fd.Nullable)
 	}
 	if a != nil && len(t.InlineUnions) > 0 {
 		// The inline unions' properties are not unknown to the object;

@@ -799,6 +799,24 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   which objects it is in.
 - *Not done*: see [features.md](../features.md).
 
+### M41 – Property order and numbers as strings ✅
+- [x] `x-order`: properties put in order in Go structs and their JSON,
+  TypeScript and Markdown
+- [x] `x-go-json-string`: integers, numbers and booleans written and read
+  as strings by Go models, TypeScript clients and `middleware.Validate`
+
+**How it went**
+- *The schema keeps its type*: values stay `int64` or `bool` in Go and
+  `number` in TypeScript, and only the wire form changes, so validation
+  and defaults work as before; the decoders see the string first.
+- *Other media types*: forms and XML reach the models as JSON built from
+  descriptors, which now read these properties' text as a string.
+- *Middleware*: the JSON Schema of such a property is rewritten to a
+  string whose own small vocabulary checks the value it holds, so that
+  other `contentMediaType` keywords are not asserted, and examples, which
+  `goapi validate` checks with the same package, are left as they are.
+- *Not done*: see [features.md](../features.md).
+
 Known bugs and deferred items are tracked in [bugs.md](../bugs.md) and
 [features.md](../features.md).
 

@@ -50,6 +50,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "batchPets", Name: "BatchPets", Method: "POST", Path: "/pets/batch"}, "/pets/batch", api.HandleBatchPets(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "uploadBundle", Name: "UploadBundle", Method: "POST", Path: "/bundle"}, "/bundle", api.HandleUploadBundle(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putNotes", Name: "PutNotes", Method: "PUT", Path: "/memos"}, "/memos", api.HandlePutNotes(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "putCounter", Name: "PutCounter", Method: "PUT", Path: "/counters"}, "/counters", api.HandlePutCounter(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "submitForm", Name: "SubmitForm", Method: "POST", Path: "/pets/form"}, "/pets/form", api.HandleSubmitForm(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "shout", Name: "Shout", Method: "POST", Path: "/notes"}, "/notes", api.HandleShout(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "exportPets", Name: "ExportPets", Method: "GET", Path: "/export"}, "/export", api.HandleExportPets(cfg, h, sec))

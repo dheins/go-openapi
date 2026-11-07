@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 
@@ -39,14 +40,23 @@ type Set struct {
 	mu       sync.Mutex
 	compiler *jsonschema.Compiler
 	compiled map[string]*jsonschema.Schema
+	// jsonStrings is set by JSONStrings.
+	jsonStrings bool
 }
 
 // New returns the Set of spec's schemas, with formats asserted. Every file
 // of the document is a resource; nothing else is fetched.
-func New(spec *loader.Spec) (*Set, error) {
+func New(spec *loader.Spec, opts ...Option) (*Set, error) {
 	s := &Set{spec: spec, compiler: jsonschema.NewCompiler(), compiled: map[string]*jsonschema.Schema{}}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.compiler.AssertFormat()
 	s.compiler.UseLoader(noLoader{})
+	if s.jsonStrings {
+		s.compiler.RegisterVocabulary(jsonStringVocabulary())
+		s.compiler.AssertVocabs()
+	}
 	for _, src := range spec.Sources() {
 		data, err := src.JSON()
 		if err != nil {
@@ -55,6 +65,9 @@ func New(spec *loader.Spec) (*Set, error) {
 		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
 		if err != nil {
 			return nil, err
+		}
+		if s.jsonStrings {
+			rewriteJSONStrings(doc)
 		}
 		if err := s.compiler.AddResource(src.URI(), doc); err != nil {
 			return nil, err
@@ -103,7 +116,7 @@ func (s *Set) Check(compiled *jsonschema.Schema, inst any, dir Direction) []Prob
 	}
 	var problems []Problem
 	Leaves(ve, func(leaf *jsonschema.ValidationError) {
-		where := oas.JoinPointer("", leaf.InstanceLocation...)
+		where := oas.JoinPointer("", slices.DeleteFunc(slices.Clone(leaf.InstanceLocation), func(t string) bool { return t == jsonStringToken })...)
 		if req, ok := leaf.ErrorKind.(*kind.Required); ok {
 			var missing []string
 			for _, name := range req.Missing {

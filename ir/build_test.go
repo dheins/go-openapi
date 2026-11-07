@@ -804,6 +804,77 @@ components:
 	}
 }
 
+func TestOrder(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      properties:
+        z: {type: string}
+    Row:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          properties:
+            a: {type: string}
+            b: {type: string, x-order: 2}
+            c: {type: string, x-order: -1}
+            d: {type: string, x-order: 2}
+            e: {type: string, x-order: first}
+`, Options{})
+	var got []string
+	for _, f := range typeNamed(t, m, "Row").Fields {
+		got = append(got, f.JSONName)
+	}
+	if want := []string{"c", "b", "d", "z", "a", "e"}; !slices.Equal(got, want) {
+		t.Errorf("fields = %v, want %v", got, want)
+	}
+	if len(m.Warnings) != 1 || m.Warnings[0].Location.Pointer != "/components/schemas/Row/allOf/1/properties/e/x-order" ||
+		m.Warnings[0].Message != `x-order must be an integer, not "first"; the property keeps its place` {
+		t.Errorf("warnings = %v", m.Warnings)
+	}
+}
+
+func TestJSONString(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: v}
+paths: {}
+components:
+  schemas:
+    Level: {type: integer, enum: [1, 2]}
+    Row:
+      type: object
+      properties:
+        n: {type: integer, x-go-json-string: true}
+        f: {type: [number, "null"], x-go-json-string: true}
+        b: {type: boolean, x-go-json-string: true}
+        level: {$ref: "#/components/schemas/Level", x-go-json-string: true}
+        off: {type: integer, x-go-json-string: false}
+        s: {type: string, x-go-json-string: true}
+        list: {type: array, items: {type: integer}, x-go-json-string: true}
+`, Options{})
+	row := typeNamed(t, m, "Row")
+	for name, want := range map[string]bool{"N": true, "F": true, "B": true, "Level": true, "Off": false, "S": false, "List": false} {
+		if got := fieldNamed(t, row, name).JSONString; got != want {
+			t.Errorf("%s JSONString = %t, want %t", name, got, want)
+		}
+	}
+	var got []string
+	for _, w := range m.Warnings {
+		got = append(got, w.Location.Pointer+": "+w.Message)
+	}
+	want := []string{
+		"/components/schemas/Row/properties/s/x-go-json-string: x-go-json-string applies to integers, numbers and booleans; the value is written as it is",
+		"/components/schemas/Row/properties/list/x-go-json-string: x-go-json-string applies to integers, numbers and booleans; the value is written as it is",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("warnings:\n%s", strings.Join(got, "\n"))
+	}
+}
+
 func TestCheckStructTags(t *testing.T) {
 	for tags, want := range map[string]string{
 		`db:"a"`:                 "",

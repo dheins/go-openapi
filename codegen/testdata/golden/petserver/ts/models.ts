@@ -142,6 +142,29 @@ export interface Tag {
 /** The schema of Tag, for validation and encoding. */
 export const TagSchema: $Schema = { kind: "object", properties: { code: { schema: { kind: "string", format: "pet-code" }, required: true }, color: { schema: { kind: "string", format: "color" } }, slug: { schema: { kind: "string", minLength: 2, format: "slug" } }, note: { schema: { kind: "string", minLength: 2 }, zeroIsAbsent: true }, labels: { schema: { kind: "array", items: { kind: "string" } }, zeroIsAbsent: true }, alias: { schema: { kind: "nullable", of: { kind: "string" } } } } };
 
+export interface Counter {
+  count: number;
+  ratio?: number;
+  enabled?: boolean;
+  limit?: number | null;
+  label?: string;
+}
+
+/** The schema of Counter, for validation and encoding. */
+export const CounterSchema: $Schema = { kind: "object", properties: { count: { schema: { kind: "integer", minimum: 0 }, required: true, jsonString: true }, ratio: { schema: { kind: "number" }, jsonString: true }, enabled: { schema: { kind: "boolean" }, jsonString: true, default: true }, limit: { schema: { kind: "nullable", of: { kind: "integer" } }, jsonString: true }, label: { schema: { kind: "string" } } } };
+
+/** Properties put in order by x-order; those without one follow. */
+export interface Ranked {
+  name?: string;
+  id?: number;
+  note?: string;
+  extra?: string;
+  rank?: string;
+}
+
+/** The schema of Ranked, for validation and encoding. */
+export const RankedSchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" } }, id: { schema: { kind: "integer" } }, note: { schema: { kind: "string" } }, extra: { schema: { kind: "string" } }, rank: { schema: { kind: "string" } } } };
+
 export interface Settings {
   theme?: SettingsTheme;
   notify?: boolean;
