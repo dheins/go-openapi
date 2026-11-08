@@ -23,7 +23,7 @@ export interface ListPetsRequest {
   limit?: number;
   tags?: string[];
   xRequestID?: string;
-  /** The server's default is "name". */
+  /** The server's default is "name", which receivers set when it is absent. */
   sort?: $m.ListPetsSort;
 }
 
@@ -35,7 +35,7 @@ export type ListPetsResponse =
 const listPetsSpec: OperationSpec = {
   method: "GET",
   path: "/pets",
-  params: [{ key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "tags", name: "tags", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "xRequestID", name: "X-Request-ID", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string", format: "uuid" } }, { key: "sort", name: "sort", in: "query", style: "form", explode: true, shape: "scalar", schema: $ref(() => $m.ListPetsSortSchema) }],
+  params: [{ key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "tags", name: "tags", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "xRequestID", name: "X-Request-ID", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string", format: "uuid" } }, { key: "sort", name: "sort", in: "query", style: "form", explode: true, shape: "scalar", default: "name", schema: $ref(() => $m.ListPetsSortSchema) }],
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: $ref(() => $m.PetSchema) }, headers: [{ key: "xNext", name: "X-Next", schema: { kind: "string" } }, { key: "xTotal", name: "X-Total", required: true, schema: { kind: "integer" } }, { key: "xPage", name: "X-Page", content: "json", schema: $ref(() => $m.ListPets200XPageSchema) }] }, { status: "default", mediaType: "application/json", kind: "json", schema: $ref(() => $m.ErrorSchema) }],
 };
 

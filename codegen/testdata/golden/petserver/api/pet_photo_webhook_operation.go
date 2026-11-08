@@ -16,6 +16,10 @@ type PetPhotoWebhookRequest struct {
 	PetID int64
 	// XTags is the header parameter "X-Tags".
 	XTags oapi.Optional[[]string]
+	// Size is the query parameter "size".
+	Size model.PetPhotoWebhookSize
+	// XQuality is the header parameter "X-Quality".
+	XQuality int64
 	// Body is the request body when it is sent as "multipart/form-data".
 	Body model.PetPhotoWebhookRequestBody
 	// BinaryBody is the request body when it is sent as "image/png".

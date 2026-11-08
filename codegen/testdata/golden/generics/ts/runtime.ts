@@ -1297,6 +1297,9 @@ export interface ParamSpec {
   /** How the value is written as XML, for XML content. */
   readonly xml?: XMLNode;
   readonly required?: boolean;
+  /** The value of the parameter when it is absent, which receivers give
+   * their handlers, as Go servers do. */
+  readonly default?: unknown;
   readonly schema: Schema;
 }
 
@@ -3879,6 +3882,9 @@ async function readRequest(cfg: ReceiverConfig, op: OperationSpec, request: Requ
       const v = paramOf(p, request, url, cookies, params, claimed);
       if (v !== undefined) {
         out[p.key] = v;
+      } else if (p.default !== undefined) {
+        // A copy, so that requests do not share it.
+        out[p.key] = structuredClone(p.default);
       }
     } catch (e) {
       issues.push({ in: p.in, parameter: p.name, pointer: "", message: e instanceof Error ? e.message : String(e) });

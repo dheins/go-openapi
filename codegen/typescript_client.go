@@ -1,6 +1,8 @@
 package codegen
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -257,7 +259,7 @@ func (g *tsGen) requestTypeOf(o *ir.Operation, received bool) (string, bool) {
 
 func paramText(p *ir.Param) string {
 	if p.Default != "" {
-		return strings.TrimSpace(p.Doc + "\n\nThe server's default is " + p.Default + ".")
+		return strings.TrimSpace(p.Doc + "\n\nThe server's default is " + p.Default + ", which receivers set when it is absent.")
 	}
 	return p.Doc
 }
@@ -616,6 +618,12 @@ func (g *tsGen) operationSpecOf(o *ir.Operation, scopes bool) (string, bool) {
 		}
 		if p.Required && p.Default == "" {
 			s += ", required: true"
+		}
+		if p.Default != "" {
+			var lit bytes.Buffer
+			if json.Compact(&lit, []byte(p.Default)) == nil {
+				s += ", default: " + lit.String()
+			}
 		}
 		params = append(params, s+", schema: "+g.schema(p.Type)+" }")
 	}

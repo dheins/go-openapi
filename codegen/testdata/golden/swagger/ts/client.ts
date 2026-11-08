@@ -23,7 +23,7 @@ export interface ListPetsRequest {
   words?: string[];
   grid?: number[][];
   xTags?: string[];
-  /** The server's default is 20. */
+  /** The server's default is 20, which receivers set when it is absent. */
   limit?: number;
   xRequestID?: string;
 }
@@ -35,7 +35,7 @@ export type ListPetsResponse =
 const listPetsSpec: OperationSpec = {
   method: "GET",
   path: "/pets",
-  params: [{ key: "tags", name: "tags", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "ids", name: "ids", in: "query", style: "form", explode: true, shape: "array", schema: { kind: "array", items: { kind: "integer" } } }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "words", name: "words", in: "query", style: "form", explode: false, shape: "array", delimiter: "\t", schema: { kind: "array", items: { kind: "string" } } }, { key: "grid", name: "grid", in: "query", style: "form", explode: false, shape: "array", itemDelimiter: "|", schema: { kind: "array", items: { kind: "array", items: { kind: "integer" } } } }, { key: "xTags", name: "X-Tags", in: "header", style: "simple", explode: false, shape: "array", delimiter: "\t", schema: { kind: "array", items: { kind: "string" } } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "xRequestID", name: "X-Request-ID", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string" } }],
+  params: [{ key: "tags", name: "tags", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "ids", name: "ids", in: "query", style: "form", explode: true, shape: "array", schema: { kind: "array", items: { kind: "integer" } } }, { key: "fields", name: "fields", in: "query", style: "pipeDelimited", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "words", name: "words", in: "query", style: "form", explode: false, shape: "array", delimiter: "\t", schema: { kind: "array", items: { kind: "string" } } }, { key: "grid", name: "grid", in: "query", style: "form", explode: false, shape: "array", itemDelimiter: "|", schema: { kind: "array", items: { kind: "array", items: { kind: "integer" } } } }, { key: "xTags", name: "X-Tags", in: "header", style: "simple", explode: false, shape: "array", delimiter: "\t", schema: { kind: "array", items: { kind: "string" } } }, { key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", default: 20, schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "xRequestID", name: "X-Request-ID", in: "header", style: "simple", explode: false, shape: "scalar", schema: { kind: "string" } }],
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: $ref(() => $m.PetSchema) }, headers: [{ key: "xTotal", name: "X-Total", schema: { kind: "integer" } }] }],
 };
 

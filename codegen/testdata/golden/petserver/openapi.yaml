@@ -1471,6 +1471,18 @@ webhooks:
             type: array
             items:
               type: string
+        - name: size
+          in: query
+          schema:
+            type: string
+            enum: [small, large]
+            default: small
+        - name: X-Quality
+          in: header
+          schema:
+            type: integer
+            minimum: 1
+            default: 80
       requestBody:
         required: true
         content:
