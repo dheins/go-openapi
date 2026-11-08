@@ -128,6 +128,7 @@ type cliBodyField struct {
 type cliParam struct {
 	Flag, Field, In, Name, Help, Kind string
 	Required                          bool
+	Values                            []string
 }
 
 type cliMedia struct {
@@ -170,8 +171,15 @@ func cliCommandOf(o *ir.Operation) (*cliCommand, string) {
 			flag = p.In + "-" + flag
 		}
 		flags[flag] = true
+		var values []string
+		if p.Content == "" && !p.Object {
+			var typ string
+			if typ, values = scalarJSON(unwrapRef(p.Elem)); typ == "boolean" {
+				values = []string{"true", "false"}
+			}
+		}
 		cmd.Params = append(cmd.Params, cliParam{Flag: flag, Field: p.Field, In: p.In, Name: p.Name, Help: firstLine(p.Doc), Kind: kind,
-			Required: p.Required && p.Default == ""})
+			Required: p.Required && p.Default == "", Values: values})
 	}
 	if o.Body == nil {
 		return cmd, ""

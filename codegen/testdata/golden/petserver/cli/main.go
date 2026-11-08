@@ -46,7 +46,7 @@ var app = cli.App[*client.Client]{
 				{Flag: "limit", Field: "Limit", In: "query", Name: "limit", Kind: cli.Text, Help: "How many pets to return."},
 				{Flag: "tags", Field: "Tags", In: "query", Name: "tags", Kind: cli.List},
 				{Flag: "x-request-id", Field: "XRequestID", In: "header", Name: "X-Request-ID", Kind: cli.Text},
-				{Flag: "sort", Field: "Sort", In: "query", Name: "sort", Kind: cli.Text},
+				{Flag: "sort", Field: "Sort", In: "query", Name: "sort", Kind: cli.Text, Values: []string{"name", "id"}},
 			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.ListPets(ctx, req.(*api.ListPetsRequest))
@@ -108,7 +108,7 @@ var app = cli.App[*client.Client]{
 			Request: func() any { return new(api.GetFileRequest) },
 			Params: []cli.Param{
 				{Flag: "name", Field: "Name", In: "path", Name: "name", Kind: cli.Text, Required: true},
-				{Flag: "ext", Field: "Ext", In: "path", Name: "ext", Kind: cli.Text, Required: true},
+				{Flag: "ext", Field: "Ext", In: "path", Name: "ext", Kind: cli.Text, Required: true, Values: []string{"txt", "md"}},
 			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.GetFile(ctx, req.(*api.GetFileRequest))

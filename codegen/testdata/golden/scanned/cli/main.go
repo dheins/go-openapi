@@ -39,7 +39,7 @@ var app = cli.App[*client.Client]{
 			Request: func() any { return new(api.ListPetsRequest) },
 			Params: []cli.Param{
 				{Flag: "limit", Field: "Limit", In: "query", Name: "limit", Kind: cli.Text, Help: "Limit is the most pets to return."},
-				{Flag: "kind", Field: "Kind", In: "query", Name: "kind", Kind: cli.List, Help: "Kinds are the kinds to return."},
+				{Flag: "kind", Field: "Kind", In: "query", Name: "kind", Kind: cli.List, Help: "Kinds are the kinds to return.", Values: []string{"dog", "cat"}},
 			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.ListPets(ctx, req.(*api.ListPetsRequest))

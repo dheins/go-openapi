@@ -48,6 +48,9 @@ type Param struct {
 	Flag, Field, In, Name, Help string
 	Kind                        Kind
 	Required                    bool
+	// Values are the values the parameter may have, for completion: those
+	// of an enum, or true and false.
+	Values []string
 }
 
 // Media is a media type a command's body may be sent as.
@@ -133,6 +136,20 @@ type App[C any] struct {
 // Run runs the command of args, writing the response to stdout and
 // problems to stderr, and returns the exit code.
 func Run[C any](app App[C], args []string, stdout, stderr io.Writer) int {
+	switch {
+	case len(args) > 0 && args[0] == "__complete":
+		app.complete(args[1:], stdout)
+		return ExitOK
+	case len(args) > 0 && args[0] == "__complete-prefixed":
+		app.complete(unprefixed(args[1:]), stdout)
+		return ExitOK
+	case len(args) > 0 && args[0] == "completion":
+		if len(args) != 2 || !app.completion(args[1], stdout) {
+			fmt.Fprintf(stderr, "Usage: %s completion bash|powershell\n", app.Name)
+			return ExitFailure
+		}
+		return ExitOK
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		if len(args) > 1 {
 			if cmd := app.find(args[1]); cmd != nil {
@@ -253,6 +270,7 @@ func (app App[C]) usage(w io.Writer) {
 		}
 	}
 	fmt.Fprintf(w, "\nRun %s help <command> for its flags. The server is -server, %s, or %s by default.\n", app.Name, app.env("SERVER"), app.Server)
+	fmt.Fprintf(w, "Run %s completion bash|powershell for a script completing commands and flags.\n", app.Name)
 }
 
 // given are the flags of a command, as parsed.

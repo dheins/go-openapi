@@ -69,7 +69,7 @@ func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{
 {{- if .Params}}
 			Params: []cli.Param{
 {{- range .Params}}
-				{Flag: {{quote .Flag}}, Field: {{quote .Field}}, In: {{quote .In}}, Name: {{quote .Name}}, Kind: {{.Kind}}{{if .Required}}, Required: true{{end}}{{if .Help}}, Help: {{quote .Help}}{{end}}},
+				{Flag: {{quote .Flag}}, Field: {{quote .Field}}, In: {{quote .In}}, Name: {{quote .Name}}, Kind: {{.Kind}}{{if .Required}}, Required: true{{end}}{{if .Help}}, Help: {{quote .Help}}{{end}}{{with .Values}}, Values: []string{ {{- range $i, $v := .}}{{if $i}}, {{end}}{{quote $v}}{{end -}} }{{end}}},
 {{- end}}
 			},
 {{- end}}
