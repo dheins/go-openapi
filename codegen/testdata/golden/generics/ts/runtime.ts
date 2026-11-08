@@ -1394,6 +1394,9 @@ export interface SchemeSpec {
   readonly in?: "header" | "query" | "cookie";
   readonly name?: string;
   readonly scheme?: string;
+  /** The scopes the operation requires, which a receiver's check is
+   * given. */
+  readonly scopes?: readonly string[];
 }
 
 /** An operation, as client.ts describes it to send. */
@@ -1787,8 +1790,8 @@ function itemText(p: ParamSpec, x: unknown): string {
 }
 
 // contentText writes the value of a parameter with content as its media
-// type has it.
-function contentText(p: ParamSpec, v: unknown): string {
+// type has it (or of a response header, with dir "response").
+function contentText(p: Pick<ParamSpec, "content" | "schema" | "xml">, v: unknown, dir: Direction = "request"): string {
   switch (p.content) {
     case "text":
       return text(v);
@@ -1798,7 +1801,7 @@ function contentText(p: ParamSpec, v: unknown): string {
       return new URLSearchParams(out).toString();
     }
     case "xml":
-      return xmlContent(encode(p.schema, v, "request"), p.xml!);
+      return xmlContent(encode(p.schema, v, dir), p.xml!);
   }
   return JSON.stringify(v);
 }
@@ -2070,7 +2073,7 @@ function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkI
         return it;
       };
       if (typeof v === "object" && v !== null && Symbol.asyncIterator in v) {
-        b.body = itemStream(v as AsyncIterable<unknown>, (x, i) => joinChunks(partChunks(spec, item(x, i), i, boundary)), b, (n) => partsEnd(n, boundary));
+        b.body = itemStream(v as AsyncIterable<unknown>, (x, i) => joinChunks(partChunks(spec, item(x, i), i, boundary)), (e) => (b.failure = e), (n) => partsEnd(n, boundary));
         b.streamed = true;
       } else {
         const chunks: BlobPart[] = [];
@@ -2091,7 +2094,7 @@ function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkI
           ? jsonLine(media.schema, checkItems)
           : (ev: unknown, i: number) => eventText(media.events === undefined ? (ev as ServerEvent) : typedEvent(media.events, ev as ServerEvent<unknown>, i, checkItems));
       if (typeof v === "object" && v !== null && Symbol.asyncIterator in v) {
-        b.body = itemStream(v as AsyncIterable<unknown>, line, b);
+        b.body = itemStream(v as AsyncIterable<unknown>, line, (e) => (b.failure = e));
         b.streamed = true;
       } else {
         // An Iterable, such as an array, is sent at once, which every
@@ -2108,18 +2111,26 @@ function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkI
   }
 }
 
-// jsonLine returns a function writing an item of a JSON Lines body,
-// validating it first if checkItems is set.
-function jsonLine(schema: Schema, checkItems: boolean): (item: unknown, i: number) => string {
+// jsonLine returns a function writing an item of a JSON Lines body, of
+// a request or, with dir "response", a response, validating it first if
+// checkItems is set.
+function jsonLine(schema: Schema, checkItems: boolean, dir: Direction = "request"): (item: unknown, i: number) => string {
   return (item, i) => {
-    if (checkItems) {
-      const issues = validate(schema, item, "request", `/${i}`).map((x) => ({ ...x, in: "body" }));
-      if (issues.length > 0) {
-        throw new InvalidRequestError(issues);
-      }
+    const issues = checkItems ? validate(schema, item, dir, `/${i}`) : [];
+    if (issues.length > 0) {
+      throw itemError(dir, issues);
     }
-    return JSON.stringify(encode(schema, item, "request")) + "\n";
+    return JSON.stringify(encode(schema, item, dir)) + "\n";
   };
+}
+
+// itemError is the error of the issues of an item of a stream being
+// written: an InvalidRequestError for a request's, else an Error.
+function itemError(dir: Direction, issues: readonly Issue[]): Error {
+  if (dir === "request") {
+    return new InvalidRequestError(issues.map((x) => ({ ...x, in: "body" })));
+  }
+  return new Error("invalid response: " + issues.map((x) => `${x.pointer}: ${x.message}`).join("; "));
 }
 
 // eventsSchema returns the schema of the data of ev and whether that data
@@ -2135,20 +2146,19 @@ function eventsSchema(spec: EventsSpec, name: string | undefined): { schema: Sch
   return { schema: kind.schema, text: kind.text === true };
 }
 
-// typedEvent returns ev, the i-th event of a request, with its data
-// written as its kind says, validating it first if checkItems is set.
-function typedEvent(spec: EventsSpec, ev: ServerEvent<unknown>, i: number, checkItems: boolean): ServerEvent {
+// typedEvent returns ev, the i-th event of a request (or with dir
+// "response", of a response), with its data written as its kind says,
+// validating it first if checkItems is set.
+function typedEvent(spec: EventsSpec, ev: ServerEvent<unknown>, i: number, checkItems: boolean, dir: Direction = "request"): ServerEvent {
   const kind = eventsSchema(spec, ev.event);
   if (typeof kind === "string") {
-    throw new InvalidRequestError([{ in: "body", pointer: `/${i}/event`, message: kind }]);
+    throw itemError(dir, [{ pointer: `/${i}/event`, message: kind }]);
   }
-  if (checkItems) {
-    const issues = validate(kind.schema, ev.data, "request", `/${i}/data`).map((x) => ({ ...x, in: "body" }));
-    if (issues.length > 0) {
-      throw new InvalidRequestError(issues);
-    }
+  const issues = checkItems ? validate(kind.schema, ev.data, dir, `/${i}/data`) : [];
+  if (issues.length > 0) {
+    throw itemError(dir, issues);
   }
-  return { ...ev, data: kind.text ? text(ev.data) : JSON.stringify(encode(kind.schema, ev.data, "request")) };
+  return { ...ev, data: kind.text ? text(ev.data) : JSON.stringify(encode(kind.schema, ev.data, dir)) };
 }
 
 // eventText writes an event in the text/event-stream format. Line ends in
@@ -2171,13 +2181,14 @@ function eventText(ev: ServerEvent): string {
   return out + "\n";
 }
 
-// itemStream is a body that writes the items as fetch reads it, and then
+// itemStream is a body that writes the items as it is read, and then
 // end, given how many there were. An item that cannot be written, or an
-// error of the iterator, fails the request with that error, recorded in b.
+// error of the iterator, fails the body with that error, given to
+// onFailure.
 function itemStream(
   items: AsyncIterable<unknown>,
   line: (item: unknown, i: number) => string | Promise<Uint8Array>,
-  b: Built,
+  onFailure: (e: unknown) => void,
   end?: (n: number) => string,
 ): ReadableStream<Uint8Array> {
   const it = items[Symbol.asyncIterator]();
@@ -2197,7 +2208,7 @@ function itemStream(
         const chunk = await line(next.value, i++);
         controller.enqueue(typeof chunk === "string" ? encoder.encode(chunk) : chunk);
       } catch (e) {
-        b.failure = e;
+        onFailure(e);
         controller.error(e);
       }
     },
@@ -2322,10 +2333,11 @@ function headerIssues(enc: PartEncoding, header: Headers | undefined, at: string
 }
 
 // partChunks returns the delimiter, headers and data of item, the part at
-// index i of a body with boundary. A part has the first content type its
-// encoding names, else the file's own, text/plain or application/json,
-// and its length, so that a reader can take it before the next one.
-function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string): BlobPart[] {
+// index i of a body with boundary, of a request or, with dir "response",
+// a response. A part has the first content type its encoding names, else
+// the file's own, text/plain or application/json, and its length, so that
+// a reader can take it before the next one.
+function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string, dir: Direction = "request"): BlobPart[] {
   const part = item.spec.part ? (item.value as Part<unknown>) : undefined;
   const value = part !== undefined ? part.value : item.value;
   const header = new Headers(part?.header);
@@ -2355,7 +2367,7 @@ function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string
       type = "text/plain; charset=utf-8";
       break;
     default:
-      data = encoder.encode(JSON.stringify(encode(item.spec.schema, value, "request")));
+      data = encoder.encode(JSON.stringify(encode(item.spec.schema, value, dir)));
       type = "application/json";
   }
   const declared = encodingAt(spec, i).contentTypes?.[0];
@@ -2472,13 +2484,8 @@ export function config(options: ClientOptions, defaultBaseUrl: string, credentia
   if (baseUrl === "") {
     throw new Error("the document has no absolute server URL: give baseUrl");
   }
-  const codecs = new Map(Object.entries(options.codecs ?? {}).map(([mt, c]) => [codecKey(mt), c]));
-  const missing = codecTypes.filter((mt) => !codecs.has(codecKey(mt)));
-  if (missing.length > 0) {
-    throw new Error(`no codec for ${missing.join(", ")}: give one in the codecs option`);
-  }
   return {
-    codecs,
+    codecs: codecMap(options.codecs, codecTypes),
     baseUrl: baseUrl.replace(/\/+$/, ""),
     operationServers: options.operationServers ?? options.baseUrl === undefined,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
@@ -2487,6 +2494,17 @@ export function config(options: ClientOptions, defaultBaseUrl: string, credentia
     validateResponses: options.validateResponses ?? false,
     credentials: (credentials ?? {}) as Values,
   };
+}
+
+// codecMap returns codecs by codecKey, checking that the media types
+// codecTypes have one.
+function codecMap(codecs: Readonly<Record<string, Codec>> | undefined, codecTypes: readonly string[]): ReadonlyMap<string, Codec> {
+  const m = new Map(Object.entries(codecs ?? {}).map(([mt, c]) => [codecKey(mt), c]));
+  const missing = codecTypes.filter((mt) => !m.has(codecKey(mt)));
+  if (missing.length > 0) {
+    throw new Error(`no codec for ${missing.join(", ")}: give one in the codecs option`);
+  }
+  return m;
 }
 
 /** Returns the configuration of a sender, which sends callbacks to the
@@ -2712,55 +2730,56 @@ function isBytes(schema: Schema | undefined): boolean {
 }
 
 // withDefaults fills the absent properties of v, a response's value of
-// schema, with their defaults, through nested objects, arrays and maps,
-// but for write-only properties, which responses do not have, and reads
-// the values of x-go-json-string properties from their strings, throwing
-// for one that is not a string. It changes v, and returns it.
-function withDefaults<T>(schema: Schema | undefined, v: T): T {
-  fill(schema, v);
+// schema (or with dir "request", a request's a receiver read), with their
+// defaults, through nested objects, arrays and maps, but for write-only
+// properties, which responses do not have (read-only ones, of requests),
+// and reads the values of x-go-json-string properties from their strings,
+// throwing for one that is not a string. It changes v, and returns it.
+function withDefaults<T>(schema: Schema | undefined, v: T, dir: Direction = "response"): T {
+  fill(schema, v, dir);
   return v;
 }
 
 // fill does withDefaults' work. Values parsed from JSON have no cycles.
-function fill(schema: Schema | undefined, v: unknown): void {
+function fill(schema: Schema | undefined, v: unknown, dir: Direction): void {
   if (schema === undefined || v === null || typeof v !== "object") {
     return;
   }
   const s = resolve(schema);
   switch (s.kind) {
     case "nullable":
-      fill(s.of, v);
+      fill(s.of, v, dir);
       return;
     case "all":
       for (const part of s.of) {
-        fill(part, v);
+        fill(part, v, dir);
       }
       return;
     case "array":
       if (Array.isArray(v)) {
         for (const item of v) {
-          fill(s.items, item);
+          fill(s.items, item, dir);
         }
       }
       return;
     case "map":
       for (const x of Object.values(v)) {
-        fill(s.values, x);
+        fill(s.values, x, dir);
       }
       return;
     case "object": {
       const obj = v as Values;
       for (const [k, p] of Object.entries(s.properties)) {
-        if (p.writeOnly) {
+        if (dir === "response" ? p.writeOnly : p.readOnly) {
           continue;
         }
         if (obj[k] === undefined && p.default !== undefined) {
-          // A copy, so that responses do not share it.
+          // A copy, so that values do not share it.
           obj[k] = structuredClone(p.default);
         } else if (p.jsonString && obj[k] !== undefined && obj[k] !== null) {
           obj[k] = unquote(k, obj[k]);
         } else {
-          fill(p.schema, obj[k]);
+          fill(p.schema, obj[k], dir);
         }
       }
       return;
@@ -2847,11 +2866,32 @@ function setField(container: Values, schema: Schema, path: readonly string[], va
   }
 }
 
+// Reader says how a body is read: a response's, by a client, or a
+// request's, by a receiver. fail makes the error of a body that cannot
+// be read or, with validate, does not match its schema.
+interface Reader {
+  readonly direction: Direction;
+  readonly validate: boolean;
+  readonly codecs: ReadonlyMap<string, Codec>;
+  fail(message: string, issues?: readonly Issue[]): Error;
+}
+
+// responseReader reads the responses of a client, of status.
+function responseReader(cfg: Config, status: number): Reader {
+  return {
+    direction: "response",
+    validate: cfg.validateResponses,
+    codecs: cfg.codecs,
+    fail: (message, issues = []) => new InvalidResponseError(status, message, issues),
+  };
+}
+
 async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Promise<unknown> {
   const spec = pick(op, resp);
   if (spec === undefined) {
     throw await unexpected(resp);
   }
+  const rd = responseReader(cfg, resp.status);
   const out: Values = { status: resp.status };
   if (spec.withContentType) {
     out["contentType"] = spec.mediaType;
@@ -2922,16 +2962,16 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
       out["body"] = await readByteRanges(resp);
       break;
     case "parts":
-      out["body"] = await readParts(cfg, spec.parts!, resp);
+      out["body"] = await readParts(rd, spec.parts!, resp.body, resp.headers.get("Content-Type") ?? "");
       break;
     case "partstream":
-      out["items"] = partStream(cfg, spec.parts!, resp);
+      out["items"] = partStream(rd, spec.parts!, resp.body, resp.headers.get("Content-Type") ?? "");
       break;
     case "jsonl":
-      out["items"] = jsonLines(resp, spec.item);
+      out["items"] = jsonLines(resp.body, spec.item);
       break;
     case "sse":
-      out["events"] = spec.events === undefined ? serverEvents(resp) : typedEvents(cfg, spec.events, resp);
+      out["events"] = spec.events === undefined ? serverEvents(resp.body) : typedEvents(rd, spec.events, resp.body);
       break;
     default:
       // Read the empty body so the connection can be reused.
@@ -2940,14 +2980,14 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
   return out;
 }
 
-// lines yields the lines of a response as they arrive, ended by LF (a CR
+// lines yields the lines of a body as they arrive, ended by LF (a CR
 // before it is dropped) or, with cr, also by a CR alone, as in
 // text/event-stream.
-async function* lines(resp: Response, cr = false): AsyncGenerator<string> {
-  if (resp.body === null) {
+async function* lines(body: ReadableStream<Uint8Array<ArrayBuffer>> | null, cr = false): AsyncGenerator<string> {
+  if (body === null) {
     return;
   }
-  const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = body.pipeThrough(new TextDecoderStream()).getReader();
   const end = cr ? /\r\n|\r|\n/ : /\r?\n/;
   let buffer = "";
   try {
@@ -2982,22 +3022,21 @@ async function* lines(resp: Response, cr = false): AsyncGenerator<string> {
 }
 
 /** The items of a JSON Lines response, as they arrive. */
-async function* jsonLines(resp: Response, item: Schema | undefined): AsyncGenerator<unknown> {
-  for await (const line of lines(resp)) {
+async function* jsonLines(body: ReadableStream<Uint8Array<ArrayBuffer>> | null, item: Schema | undefined): AsyncGenerator<unknown> {
+  for await (const line of lines(body)) {
     if (line.trim() !== "") {
       yield withDefaults(item, JSON.parse(line));
     }
   }
 }
 
-/** The events of a server-sent events response, as they arrive. An
- * event is dispatched by a blank line, so one the stream ends inside is
- * dropped. */
-async function* serverEvents(resp: Response): AsyncGenerator<ServerEvent> {
+/** The events of a server-sent events body, as they arrive. An event is
+ * dispatched by a blank line, so one the stream ends inside is dropped. */
+async function* serverEvents(body: ReadableStream<Uint8Array<ArrayBuffer>> | null): AsyncGenerator<ServerEvent> {
   let event: ServerEvent = { data: "" };
   let data: string[] = [];
   let pending = false;
-  for await (const line of lines(resp, true)) {
+  for await (const line of lines(body, true)) {
     if (line === "") {
       if (pending) {
         event.data = data.join("\n");
@@ -3034,29 +3073,28 @@ async function* serverEvents(resp: Response): AsyncGenerator<ServerEvent> {
   }
 }
 
-/** The events of a typed server-sent events response, as they arrive,
- * their data parsed as its kind says and, with validateResponses,
- * validated. An event that does not parse ends the stream with an
- * InvalidResponseError. */
-async function* typedEvents(cfg: Config, spec: EventsSpec, resp: Response): AsyncGenerator<ServerEvent<unknown>> {
+/** The events of a typed server-sent events body, as they arrive, their
+ * data parsed as its kind says and, if rd validates, validated. An event
+ * that does not parse ends the stream with rd's error. */
+async function* typedEvents(rd: Reader, spec: EventsSpec, body: ReadableStream<Uint8Array<ArrayBuffer>> | null): AsyncGenerator<ServerEvent<unknown>> {
   let i = 0;
-  for await (const ev of serverEvents(resp)) {
+  for await (const ev of serverEvents(body)) {
     const kind = eventsSchema(spec, ev.event);
     if (typeof kind === "string") {
-      throw new InvalidResponseError(resp.status, `event ${i}: ${kind}`);
+      throw rd.fail(`event ${i}: ${kind}`, [{ pointer: `/${i}/event`, message: kind }]);
     }
     let data: unknown = ev.data;
     if (!kind.text) {
       try {
-        data = withDefaults(kind.schema, JSON.parse(ev.data));
+        data = withDefaults(kind.schema, JSON.parse(ev.data), rd.direction);
       } catch (e) {
-        throw new InvalidResponseError(resp.status, `event ${i}: ${String(e)}`);
+        throw rd.fail(`event ${i}: ${String(e)}`, [{ pointer: `/${i}/data`, message: String(e) }]);
       }
     }
-    if (cfg.validateResponses) {
-      const issues = validate(kind.schema, data, "response", `/${i}/data`);
+    if (rd.validate) {
+      const issues = validate(kind.schema, data, rd.direction, `/${i}/data`);
       if (issues.length > 0) {
-        throw new InvalidResponseError(resp.status, issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+        throw rd.fail(issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
       }
     }
     yield { ...ev, data };
@@ -3285,7 +3323,7 @@ async function* rawParts(body: ReadableStream<Uint8Array> | null, contentType: s
 
 // readIssues checks a part read at index i against its encoding: the
 // content types it may have, and its headers.
-function readIssues(spec: PartsSpec, raw: RawPart, i: number): Issue[] {
+function readIssues(spec: PartsSpec, raw: RawPart, i: number, dir: Direction): Issue[] {
   const enc = encodingAt(spec, i);
   const ct = raw.header.get("Content-Type");
   const issues: Issue[] = [];
@@ -3295,12 +3333,12 @@ function readIssues(spec: PartsSpec, raw: RawPart, i: number): Issue[] {
       issues.push({ pointer: `/${i}`, message: `content type ${JSON.stringify(ct)} is not allowed; expected ${enc.contentTypes.join(", ")}` });
     }
   }
-  return [...issues, ...headerIssues(enc, raw.header, `/${i}`, "response")];
+  return [...issues, ...headerIssues(enc, raw.header, `/${i}`, dir)];
 }
 
 // partValue returns the item a part is: a Blob (a File, if the part names
 // one), its text, or its body as JSON, in a Part if spec says.
-function partValue(spec: PartItemSpec, raw: RawPart): unknown {
+function partValue(spec: PartItemSpec, raw: RawPart, dir: Direction): unknown {
   let value: unknown;
   const utf8 = new TextDecoder();
   switch (spec.kind) {
@@ -3320,7 +3358,7 @@ function partValue(spec: PartItemSpec, raw: RawPart): unknown {
       value = utf8.decode(raw.data);
       break;
     default:
-      value = withDefaults(spec.schema, JSON.parse(utf8.decode(raw.data)));
+      value = withDefaults(spec.schema, JSON.parse(utf8.decode(raw.data)), dir);
   }
   return spec.part ? ({ header: raw.header, value } satisfies Part<unknown>) : value;
 }
@@ -3348,22 +3386,22 @@ function partBytes(raw: RawPart): string {
 }
 
 // decodePart returns the item of raw, the part at index i, of item, after
-// checking it against its encoding and, with validateResponses, its
-// schema. A problem throws an InvalidResponseError.
-function decodePart(cfg: Config, spec: PartsSpec, item: PartItemSpec, raw: RawPart, i: number, status: number): unknown {
-  const fail = (issues: Issue[]) => new InvalidResponseError(status, issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
-  const encoding = readIssues(spec, raw, i);
+// checking it against its encoding and, if rd validates, its schema. A
+// problem throws rd's error.
+function decodePart(rd: Reader, spec: PartsSpec, item: PartItemSpec, raw: RawPart, i: number): unknown {
+  const fail = (issues: Issue[]) => rd.fail(issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+  const encoding = readIssues(spec, raw, i, rd.direction);
   if (encoding.length > 0) {
     throw fail(encoding);
   }
   let value: unknown;
   try {
-    value = partValue(item, raw);
+    value = partValue(item, raw, rd.direction);
   } catch (e) {
     throw fail([{ pointer: `/${i}`, message: String(e) }]);
   }
-  if (cfg.validateResponses) {
-    const issues = validate(item.schema, item.part ? (value as Part<unknown>).value : value, "response", `/${i}`);
+  if (rd.validate) {
+    const issues = validate(item.schema, item.part ? (value as Part<unknown>).value : value, rd.direction, `/${i}`);
     if (issues.length > 0) {
       throw fail(issues);
     }
@@ -3371,26 +3409,27 @@ function decodePart(cfg: Config, spec: PartsSpec, item: PartItemSpec, raw: RawPa
   return value;
 }
 
-// multipartFailure turns an invalid body into an InvalidResponseError.
-function multipartFailure(e: unknown, status: number): unknown {
-  return e instanceof MultipartError ? new InvalidResponseError(status, `invalid multipart body: ${e.message}`) : e;
+// multipartFailure turns an invalid body into the error fail makes.
+function multipartFailure(e: unknown, fail: (message: string) => Error): unknown {
+  return e instanceof MultipartError ? fail(`invalid multipart body: ${e.message}`) : e;
 }
 
-/** A response of positional parts: an array of its items, or an object
- * with the positions of a tuple and rest for the parts after them. */
-async function readParts(cfg: Config, spec: PartsSpec, resp: Response): Promise<unknown> {
+/** A body of positional parts, of contentType: an array of its items, or
+ * an object with the positions of a tuple and rest for the parts after
+ * them. */
+async function readParts(rd: Reader, spec: PartsSpec, body: ReadableStream<Uint8Array> | null, contentType: string): Promise<unknown> {
   const items: unknown[] = [];
   const tuple: Values = {};
-  const fail = (message: string, pointer: string) => new InvalidResponseError(resp.status, `${pointer}: ${message}`, [{ pointer, message }]);
+  const fail = (message: string, pointer: string) => rd.fail(`${pointer}: ${message}`, [{ pointer, message }]);
   let i = 0;
   try {
-    for await (const raw of rawParts(resp.body, resp.headers.get("Content-Type") ?? "")) {
+    for await (const raw of rawParts(body, contentType)) {
       const position = spec.prefix?.[i];
       const item = position ?? spec.item;
       if (item === undefined) {
         throw fail(`unexpected part: the body has at most ${spec.prefix?.length ?? 0}`, `/${i}`);
       }
-      const value = decodePart(cfg, spec, item, raw, i, resp.status);
+      const value = decodePart(rd, spec, item, raw, i);
       if (position !== undefined) {
         tuple[position.key] = value;
       } else {
@@ -3399,16 +3438,16 @@ async function readParts(cfg: Config, spec: PartsSpec, resp: Response): Promise<
       i++;
     }
   } catch (e) {
-    throw multipartFailure(e, resp.status);
+    throw multipartFailure(e, (m) => rd.fail(m));
   }
   const missing = spec.prefix?.findIndex((p, n) => n >= i && !p.optional) ?? -1;
   if (missing >= 0) {
     throw fail("part is missing", `/${missing}`);
   }
-  if (cfg.validateResponses) {
-    const issues = validate(countSchema(spec), new Array(i), "response");
+  if (rd.validate) {
+    const issues = validate(countSchema(spec), new Array(i), rd.direction);
     if (issues.length > 0) {
-      throw new InvalidResponseError(resp.status, issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+      throw rd.fail(issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
     }
   }
   if (spec.prefix === undefined) {
@@ -3420,17 +3459,17 @@ async function readParts(cfg: Config, spec: PartsSpec, resp: Response): Promise<
   return tuple;
 }
 
-/** The items of a response of streamed positional parts, as they arrive.
- * A part that is not valid ends the stream with an InvalidResponseError. */
-async function* partStream(cfg: Config, spec: PartsSpec, resp: Response): AsyncGenerator<unknown> {
+/** The items of a body of streamed positional parts, as they arrive. A
+ * part that is not valid ends the stream with rd's error. */
+async function* partStream(rd: Reader, spec: PartsSpec, body: ReadableStream<Uint8Array> | null, contentType: string): AsyncGenerator<unknown> {
   let i = 0;
   try {
-    for await (const raw of rawParts(resp.body, resp.headers.get("Content-Type") ?? "")) {
-      yield decodePart(cfg, spec, spec.item!, raw, i, resp.status);
+    for await (const raw of rawParts(body, contentType)) {
+      yield decodePart(rd, spec, spec.item!, raw, i);
       i++;
     }
   } catch (e) {
-    throw multipartFailure(e, resp.status);
+    throw multipartFailure(e, (m) => rd.fail(m));
   }
 }
 
@@ -3465,7 +3504,856 @@ async function readByteRanges(resp: Response): Promise<ByteRange[]> {
       ranges.push({ ...r, contentType, data: new Blob([raw.data], { type: contentType }) });
     }
   } catch (e) {
-    throw multipartFailure(e, resp.status);
+    throw multipartFailure(e, (m) => new InvalidResponseError(resp.status, m));
   }
   return ranges;
+}
+
+// ---- Receiving -------------------------------------------------------------
+
+/** How a receiver's handlers read requests and write responses. */
+export interface ReceiverOptions {
+  /** Check requests before handling them (true by default): one that does
+   * not match the document is answered 400, with its problems. */
+  validateRequests?: boolean;
+  /** Check responses before writing them (false by default): one that
+   * does not match the document is answered 500. */
+  validateResponses?: boolean;
+  /** The codecs of media types the runtime does not know, by media type
+   * (such as "application/msgpack"); the receiver needs one for each it
+   * declares. */
+  codecs?: Readonly<Record<string, Codec>>;
+  /** The longest request body read, in bytes: 10 MiB by default, as a Go
+   * server's. A longer one is answered 413. Streamed bodies (JSON Lines,
+   * server-sent events, streamed parts) are not limited. */
+  maxBodyBytes?: number;
+  /** Told of the error of a handler or security check, or of a response
+   * that cannot be written, which is answered 500 (or ends a streamed
+   * response); console.error by default. */
+  onError?: (error: unknown, request: Request) => void;
+}
+
+/** What a handler is told of the request it handles. */
+export interface Received {
+  /** The request, as it arrived. */
+  readonly request: Request;
+  /** The URL it was sent to: the $url of the URLs of the callbacks it
+   * declares. */
+  readonly url: string;
+}
+
+/** Checks a credential of a security scheme: an API key, or a token of
+ * an HTTP, OAuth 2.0 or OpenID Connect scheme, with the scopes the
+ * operation requires. False refuses it. */
+export type CredentialCheck = (credential: string, scopes: readonly string[], received: Received) => boolean | Promise<boolean>;
+
+/** Checks the credentials of an HTTP basic scheme. False refuses them. */
+export type BasicCheck = (username: string, password: string, received: Received) => boolean | Promise<boolean>;
+
+/** Checks a request of a mutualTLS scheme, whose certificate the server
+ * in front of the handler verified. False refuses it. */
+export type CertificateCheck = (received: Received) => boolean | Promise<boolean>;
+
+/** The parts of a receiver a request needs. */
+export interface ReceiverConfig {
+  readonly validateRequests: boolean;
+  readonly validateResponses: boolean;
+  readonly codecs: ReadonlyMap<string, Codec>;
+  readonly maxBodyBytes: number;
+  readonly onError: (error: unknown, request: Request) => void;
+  /** The checks of the security schemes, by key. */
+  readonly security: Values;
+}
+
+/** Makes the configuration of a receiver's handlers from its options and
+ * the checks of its security schemes. */
+export function receiverConfig(options: ReceiverOptions, security: object | undefined, codecTypes: readonly string[] = []): ReceiverConfig {
+  return {
+    codecs: codecMap(options.codecs, codecTypes),
+    validateRequests: options.validateRequests ?? true,
+    validateResponses: options.validateResponses ?? false,
+    maxBodyBytes: options.maxBodyBytes ?? 10 << 20,
+    onError: options.onError ?? ((e) => console.error(e)),
+    security: (security ?? {}) as Values,
+  };
+}
+
+/** A request answered with a status of its own: a body too long, or of a
+ * media type the operation does not take. */
+class RequestProblem extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const statusTitles: Readonly<Record<number, string>> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  405: "Method Not Allowed",
+  413: "Request Entity Too Large",
+  415: "Unsupported Media Type",
+  500: "Internal Server Error",
+};
+
+// problemResponse is a problem+json response, as a Go server writes one.
+function problemResponse(status: number, detail: string, errors: Problem["errors"] = [], headers: Record<string, string> = {}): Response {
+  const problem: Problem = { title: statusTitles[status] ?? "", status, detail };
+  if (errors.length > 0) {
+    problem.errors = errors;
+  }
+  return new Response(JSON.stringify(problem), {
+    status,
+    headers: { ...headers, "Content-Type": "application/problem+json", "X-Content-Type-Options": "nosniff" },
+  });
+}
+
+/** Answers request, a request of op, a webhook or callback, with handle:
+ * what a generated handler does. It checks the request's credentials,
+ * reads it, validates it, and writes the response handle returns. params
+ * are the values of op's path parameters by name, as they are in the URL,
+ * which the router the handler is mounted on matched. */
+export async function receive(
+  cfg: ReceiverConfig,
+  op: OperationSpec,
+  handle: (req: never, received: Received) => Promise<unknown>,
+  request: Request,
+  params: Readonly<Record<string, string>> = {},
+): Promise<Response> {
+  if (request.method.toUpperCase() !== op.method.toUpperCase()) {
+    return problemResponse(405, `the method ${request.method} is not allowed`, [], { Allow: op.method.toUpperCase() });
+  }
+  const received: Received = { request, url: request.url };
+  try {
+    if (!(await authenticate(cfg, op, request, received))) {
+      return problemResponse(401, "the request has no valid credentials");
+    }
+    const req = await readRequest(cfg, op, request, params);
+    const resp = await handle(req as never, received);
+    return writeResponse(cfg, op, resp, request);
+  } catch (e) {
+    return failure(cfg, e, request);
+  }
+}
+
+// receivedErrors are the errors of the requests receivers read, which
+// are answered 400: a handler's own InvalidRequestError, of a request it
+// sends, is a failure of the handler.
+const receivedErrors = new WeakSet<Error>();
+
+// failure answers a request whose handling threw e: with the problems of
+// the request (which a handler reading a streamed body throws too), the
+// status of a RequestProblem, or else 500, telling onError.
+function failure(cfg: ReceiverConfig, e: unknown, request: Request): Response {
+  if (e instanceof InvalidRequestError && receivedErrors.has(e)) {
+    const errors = e.issues.map((i) => {
+      const x: NonNullable<Problem["errors"]>[number] = { in: i.in, detail: i.message };
+      if (i.parameter !== undefined) {
+        x.parameter = i.parameter;
+      }
+      if (i.pointer !== "") {
+        x.pointer = i.pointer;
+      }
+      return x;
+    });
+    return problemResponse(400, "the request is invalid", errors);
+  }
+  if (e instanceof RequestProblem) {
+    return problemResponse(e.status, e.message);
+  }
+  cfg.onError(e, request);
+  return problemResponse(500, "the request could not be handled");
+}
+
+// cookiePairs returns the cookies of a Cookie header, their values as
+// they are sent.
+function cookiePairs(header: string | null): [string, string][] {
+  const out: [string, string][] = [];
+  for (const c of (header ?? "").split(";")) {
+    const eq = c.indexOf("=");
+    if (eq > 0) {
+      out.push([c.slice(0, eq).trim(), c.slice(eq + 1).trim()]);
+    }
+  }
+  return out;
+}
+
+// authenticate reports whether the request meets a security requirement
+// of op: all its schemes' checks pass. An empty requirement needs none.
+async function authenticate(cfg: ReceiverConfig, op: OperationSpec, request: Request, received: Received): Promise<boolean> {
+  if (op.security === undefined || op.security.length === 0) {
+    return true;
+  }
+  for (const req of op.security) {
+    let met = true;
+    for (const s of req) {
+      if (!(await checkScheme(cfg.security[s.key], s, request, received))) {
+        met = false;
+        break;
+      }
+    }
+    if (met) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// checkScheme reports whether check, the check of scheme s, passes the
+// request's credential of s; a request without one does not.
+async function checkScheme(check: unknown, s: SchemeSpec, request: Request, received: Received): Promise<boolean> {
+  if (typeof check !== "function") {
+    return false;
+  }
+  const scopes = s.scopes ?? [];
+  if (s.type === "mutualTLS") {
+    return (check as CertificateCheck)(received);
+  }
+  if (s.type === "apiKey") {
+    let key: string | null;
+    if (s.in === "query") {
+      key = new URL(request.url).searchParams.get(s.name ?? "");
+    } else if (s.in === "cookie") {
+      const raw = cookiePairs(request.headers.get("Cookie")).find(([k]) => k === s.name)?.[1];
+      key = raw === undefined ? null : decodeURIComponent(raw);
+    } else {
+      key = request.headers.get(s.name ?? "");
+    }
+    return key !== null && (check as CredentialCheck)(key, scopes, received);
+  }
+  const auth = request.headers.get("Authorization") ?? "";
+  const space = auth.indexOf(" ");
+  const scheme = space < 0 ? "" : auth.slice(0, space).toLowerCase();
+  const value = space < 0 ? "" : auth.slice(space + 1).trim();
+  if (s.type === "http" && s.scheme === "basic") {
+    if (scheme !== "basic") {
+      return false;
+    }
+    let pair: string;
+    try {
+      pair = new TextDecoder().decode(fromBase64(value));
+    } catch {
+      // Not base64: no credentials.
+      return false;
+    }
+    const colon = pair.indexOf(":");
+    return colon >= 0 && (check as BasicCheck)(pair.slice(0, colon), pair.slice(colon + 1), received);
+  }
+  const want = s.type === "http" && s.scheme !== undefined ? s.scheme.toLowerCase() : "bearer";
+  return scheme === want && value !== "" && (check as CredentialCheck)(value, scopes, received);
+}
+
+// readRequest reads the parameters and body of request, a request of op,
+// into the request type of its handler, and validates it.
+async function readRequest(cfg: ReceiverConfig, op: OperationSpec, request: Request, params: Readonly<Record<string, string>>): Promise<Values> {
+  const out: Values = {};
+  const issues: (Issue & { in: string; parameter?: string })[] = [];
+  const url = new URL(request.url);
+  const cookies = cookiePairs(request.headers.get("Cookie"));
+  const claimed = new Set(op.params.filter((p) => p.in === "query").map((p) => p.name));
+  for (const p of op.params) {
+    try {
+      const v = paramOf(p, request, url, cookies, params, claimed);
+      if (v !== undefined) {
+        out[p.key] = v;
+      }
+    } catch (e) {
+      issues.push({ in: p.in, parameter: p.name, pointer: "", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  if (op.body !== undefined) {
+    try {
+      await readBody(cfg, op.body, request, out);
+    } catch (e) {
+      if (!(e instanceof InvalidRequestError)) {
+        throw e;
+      }
+      issues.push(...e.issues);
+    }
+  }
+  if (issues.length > 0) {
+    throw received(new InvalidRequestError(issues));
+  }
+  if (cfg.validateRequests) {
+    try {
+      checkRequest(op, out);
+    } catch (e) {
+      throw e instanceof InvalidRequestError ? received(e) : e;
+    }
+  }
+  return out;
+}
+
+// received marks e as an error of a request a receiver read.
+function received(e: InvalidRequestError): InvalidRequestError {
+  receivedErrors.add(e);
+  return e;
+}
+
+// contentValue reads the value of a parameter with content.
+function contentValue(p: ParamSpec, raw: string): unknown {
+  switch (p.content) {
+    case "text":
+      return scalarValue(p.schema, raw);
+    case "form":
+      return withDefaults(p.schema, formValue(p.schema, raw), "request");
+    case "xml":
+      return withDefaults(p.schema, fromXML(raw, p.xml!), "request");
+  }
+  return withDefaults(p.schema, JSON.parse(raw), "request");
+}
+
+// itemValue reads an item of an array parameter: an array itself, of
+// items separated by the parameter's itemDelimiter.
+function itemValue(p: ParamSpec, s: string): unknown {
+  return p.itemDelimiter !== undefined ? s.split(p.itemDelimiter).map((x) => scalarValue(p.schema, x)) : scalarValue(p.schema, s);
+}
+
+// pairs returns the name,value pairs of items, in order.
+function pairs(items: readonly string[]): [string, string][] {
+  if (items.length % 2 !== 0) {
+    throw new Error("expected name,value pairs");
+  }
+  const out: [string, string][] = [];
+  for (let i = 0; i < items.length; i += 2) {
+    out.push([items[i]!, items[i + 1]!]);
+  }
+  return out;
+}
+
+// assignments returns the name=value pairs of items.
+function assignments(items: readonly string[]): [string, string][] {
+  return items.map((item) => {
+    const eq = item.indexOf("=");
+    if (eq < 0) {
+      throw new Error(`expected name=value, got ${JSON.stringify(item)}`);
+    }
+    return [item.slice(0, eq), item.slice(eq + 1)];
+  });
+}
+
+// paramOf returns the value of parameter p of a request, or undefined if
+// the request does not have it. claimed are the names of the query
+// parameters, which an exploded form object's properties are not.
+function paramOf(
+  p: ParamSpec,
+  request: Request,
+  url: URL,
+  cookies: readonly [string, string][],
+  params: Readonly<Record<string, string>>,
+  claimed: ReadonlySet<string>,
+): unknown {
+  switch (p.in) {
+    case "path": {
+      const raw = params[p.name];
+      return raw === undefined ? undefined : pathParam(p, raw);
+    }
+    case "query":
+      return queryParam(p, url.searchParams, claimed);
+    case "querystring": {
+      const raw = url.search.slice(1);
+      if (raw === "") {
+        return undefined;
+      }
+      return p.content === "json" || p.content === "xml" ? contentValue(p, decodeURIComponent(raw)) : withDefaults(p.schema, formValue(p.schema, raw), "request");
+    }
+    case "header": {
+      const raw = request.headers.get(p.name);
+      return raw === null ? undefined : headerParam(p, raw);
+    }
+    case "cookie":
+      return cookieParam(p, cookies);
+  }
+  return undefined;
+}
+
+// pathParam reads a path parameter from raw, its text in the URL, whose
+// pieces are percent-encoded.
+function pathParam(p: ParamSpec, raw: string): unknown {
+  const dec = decodeURIComponent;
+  if (p.content !== undefined) {
+    return contentValue(p, dec(raw));
+  }
+  let text = raw;
+  let sep = p.delimiter === undefined ? "," : encodeURIComponent(p.delimiter);
+  let explodeSep = ",";
+  switch (p.style) {
+    case "label":
+      if (!text.startsWith(".")) {
+        throw new Error(`expected a label, starting with ".", got ${JSON.stringify(raw)}`);
+      }
+      text = text.slice(1);
+      explodeSep = ".";
+      if (p.explode) {
+        sep = ".";
+      }
+      break;
+    case "matrix": {
+      const n = ";" + encodeURIComponent(p.name) + "=";
+      if (p.explode && p.shape !== "scalar") {
+        // ;n=a;n=b, or the ;k=v pairs of an object.
+        const items = text.split(";").slice(1);
+        if (p.shape === "array") {
+          return items.map((item) => {
+            if (!item.startsWith(n.slice(1))) {
+              throw new Error(`expected ${n}, got ${JSON.stringify(";" + item)}`);
+            }
+            return itemValue(p, dec(item.slice(n.length - 1)));
+          });
+        }
+        return pairsObject(p.schema, assignments(items).map(([k, v]) => [dec(k), dec(v)]));
+      }
+      if (!text.startsWith(n)) {
+        throw new Error(`expected ${n}, got ${JSON.stringify(raw)}`);
+      }
+      text = text.slice(n.length);
+      break;
+    }
+  }
+  if (p.shape === "array") {
+    return text === "" ? [] : text.split(sep).map((s) => itemValue(p, dec(s)));
+  }
+  if (p.shape === "object") {
+    const items = text.split(p.explode ? explodeSep : ",");
+    const kv = p.explode ? assignments(items) : pairs(items);
+    return pairsObject(p.schema, kv.map(([k, v]) => [dec(k), dec(v)]));
+  }
+  return scalarValue(p.schema, dec(text));
+}
+
+// queryParam reads a query parameter from q.
+function queryParam(p: ParamSpec, q: URLSearchParams, claimed: ReadonlySet<string>): unknown {
+  if (p.content !== undefined) {
+    const raw = q.get(p.name);
+    return raw === null ? undefined : contentValue(p, raw);
+  }
+  if (p.style === "deepObject") {
+    const fields = [...q].filter(([k]) => k.startsWith(p.name + "["));
+    if (fields.length === 0) {
+      return undefined;
+    }
+    const wrapper: Schema = { kind: "object", properties: { [p.name]: { schema: p.schema } } };
+    return withDefaults(p.schema, formValue(wrapper, new URLSearchParams(fields).toString())[p.name], "request");
+  }
+  if (p.shape === "array") {
+    if (p.style === "form" && p.explode) {
+      const all = q.getAll(p.name);
+      return all.length === 0 ? undefined : all.map((s) => itemValue(p, s));
+    }
+    const raw = q.get(p.name);
+    if (raw === null) {
+      return undefined;
+    }
+    const sep = p.delimiter ?? { spaceDelimited: " ", pipeDelimited: "|" }[p.style] ?? ",";
+    return raw === "" ? [] : raw.split(sep).map((s) => itemValue(p, s));
+  }
+  if (p.shape === "object") {
+    if (p.explode) {
+      const s = resolve(p.schema);
+      const known = s.kind === "object" ? s.properties : {};
+      const additional = s.kind === "map" || (s.kind === "object" && s.additional !== false);
+      const kv = [...q].filter(([k]) => k in known || (additional && !claimed.has(k)));
+      return kv.length === 0 ? undefined : pairsObject(p.schema, kv);
+    }
+    const raw = q.get(p.name);
+    return raw === null ? undefined : pairsObject(p.schema, pairs(raw.split(",")));
+  }
+  const raw = q.get(p.name);
+  return raw === null ? undefined : scalarValue(p.schema, raw);
+}
+
+// headerParam reads a header parameter from raw, its value.
+function headerParam(p: ParamSpec, raw: string): unknown {
+  if (p.content !== undefined) {
+    return contentValue(p, raw);
+  }
+  if (p.shape === "object") {
+    return objectHeader(p.schema, raw, p.explode);
+  }
+  if (p.shape === "array") {
+    return (p.delimiter === undefined ? headerItems(raw) : raw.split(p.delimiter)).map((s) => itemValue(p, s.trim()));
+  }
+  return scalarValue(p.schema, raw.trim());
+}
+
+// cookieParam reads a cookie parameter from cookies, whose values are as
+// they are sent.
+function cookieParam(p: ParamSpec, cookies: readonly [string, string][]): unknown {
+  const dec = decodeURIComponent;
+  const own = cookies.filter(([k]) => k === p.name).map(([, v]) => v);
+  if (p.content !== undefined) {
+    return own.length === 0 ? undefined : contentValue(p, dec(own[0]!));
+  }
+  if (p.shape === "array") {
+    if (own.length === 0) {
+      return undefined;
+    }
+    return p.explode ? own.map((v) => itemValue(p, dec(v))) : own[0]!.split(p.delimiter === undefined ? "," : encodeURIComponent(p.delimiter)).map((s) => itemValue(p, dec(s)));
+  }
+  if (p.shape === "object") {
+    if (p.explode) {
+      const s = resolve(p.schema);
+      const known = s.kind === "object" ? s.properties : {};
+      const kv = cookies.filter(([k]) => k in known).map(([k, v]): [string, string] => [k, dec(v)]);
+      return kv.length === 0 ? undefined : pairsObject(p.schema, kv);
+    }
+    return own.length === 0 ? undefined : pairsObject(p.schema, pairs(own[0]!.split(",").map(dec)));
+  }
+  return own.length === 0 ? undefined : scalarValue(p.schema, dec(own[0]!));
+}
+
+// requestFailure is the error of a request body that cannot be read or
+// does not validate.
+function requestFailure(message: string, issues: readonly Issue[] = []): Error {
+  return received(new InvalidRequestError(issues.length > 0 ? issues.map((x) => ({ ...x, in: "body" })) : [{ in: "body", pointer: "", message }]));
+}
+
+// readLimited reads body, failing with a 413 once it is longer than max
+// bytes.
+async function readLimited(body: ReadableStream<Uint8Array>, max: number): Promise<Uint8Array<ArrayBuffer>> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    n += value.length;
+    if (n > max) {
+      await reader.cancel().catch(() => {});
+      throw new RequestProblem(413, `the request body is longer than ${max} bytes`);
+    }
+    chunks.push(value);
+  }
+  return new Uint8Array(await new Blob(chunks as BlobPart[]).arrayBuffer());
+}
+
+// readBody reads the body of request into out, under the key of its
+// media type, and the media type as contentType if the operation takes
+// several. A streamed body is read as the handler iterates it.
+async function readBody(cfg: ReceiverConfig, body: NonNullable<OperationSpec["body"]>, request: Request, out: Values): Promise<void> {
+  const contentType = request.headers.get("Content-Type");
+  if (request.body === null) {
+    return;
+  }
+  if (contentType === null) {
+    // A body without a media type is no body if it is empty.
+    if ((await readLimited(request.body, cfg.maxBodyBytes)).length === 0) {
+      return;
+    }
+    throw new RequestProblem(415, "the request body has no media type");
+  }
+  const mt = codecKey(contentType);
+  const media = body.media.find((m) => mediaMatches(m.mediaType, mt));
+  if (media === undefined) {
+    throw new RequestProblem(415, `the media type ${JSON.stringify(mt)} is not accepted; expected ${body.media.map((m) => m.mediaType).join(", ")}`);
+  }
+  if (body.media.length > 1) {
+    out["contentType"] = media.mediaType;
+  }
+  const rd: Reader = { direction: "request", validate: cfg.validateRequests, codecs: cfg.codecs, fail: requestFailure };
+  switch (media.kind) {
+    case "jsonl":
+      out[media.key] = requestLines(rd, media.schema, request.body);
+      return;
+    case "sse":
+      out[media.key] = media.events === undefined ? serverEvents(request.body) : typedEvents(rd, media.events, request.body);
+      return;
+    case "partstream":
+      out[media.key] = partStream(rd, media.parts!, request.body, contentType);
+      return;
+  }
+  const data = await readLimited(request.body, cfg.maxBodyBytes);
+  const utf8 = () => new TextDecoder().decode(data);
+  try {
+    switch (media.kind) {
+      case "json":
+        out[media.key] = withDefaults(media.schema, JSON.parse(utf8()), "request");
+        break;
+      case "xml":
+        out[media.key] = withDefaults(media.schema, fromXML(utf8(), media.xml!), "request");
+        break;
+      case "codec":
+        out[media.key] = cfg.codecs.get(codecKey(media.mediaType))!.decode(data);
+        break;
+      case "form":
+        out[media.key] = withDefaults(media.schema, formValue(media.schema, utf8()), "request");
+        break;
+      case "multipart":
+        out[media.key] = await multipartValue(media.schema, data, contentType);
+        break;
+      case "text":
+        out[media.key] = utf8();
+        break;
+      case "binary":
+        out[media.key] = new Blob([data], { type: contentType });
+        break;
+      case "parts":
+        // checkRequest validates the parts once they are read.
+        out[media.key] = await readParts({ ...rd, validate: false }, media.parts!, new Blob([data]).stream(), contentType);
+        break;
+    }
+  } catch (e) {
+    throw e instanceof InvalidRequestError ? e : requestFailure(`invalid ${mt} body: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** The items of a JSON Lines request body, as they arrive, validated if
+ * rd validates. An item that does not parse or validate ends the stream
+ * with an InvalidRequestError. */
+async function* requestLines(rd: Reader, item: Schema, body: ReadableStream<Uint8Array<ArrayBuffer>>): AsyncGenerator<unknown> {
+  let i = 0;
+  for await (const line of lines(body)) {
+    if (line.trim() === "") {
+      continue;
+    }
+    let v: unknown;
+    try {
+      v = withDefaults(item, JSON.parse(line), "request");
+    } catch (e) {
+      throw rd.fail(`/${i}: ${String(e)}`, [{ pointer: `/${i}`, message: String(e) }]);
+    }
+    const issues = rd.validate ? validate(item, v, "request", `/${i}`) : [];
+    if (issues.length > 0) {
+      throw rd.fail(issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+    }
+    yield v;
+    i++;
+  }
+}
+
+// multipartValue reads a multipart/form-data body of schema, an object:
+// a file field is a File (a base64 string for a []byte), an object or
+// array field JSON, and others are converted by their schemas.
+async function multipartValue(schema: Schema, data: Uint8Array<ArrayBuffer>, contentType: string): Promise<Values> {
+  const form = await new Response(data, { headers: { "Content-Type": contentType } }).formData();
+  let object = resolve(schema);
+  if (object.kind === "nullable") {
+    object = resolve(object.of);
+  }
+  const out: Values = {};
+  for (const k of new Set(form.keys())) {
+    let prop: Schema | undefined;
+    if (object.kind === "object") {
+      prop = object.properties[k]?.schema ?? (object.additional === false ? undefined : object.additional);
+    }
+    const array = prop !== undefined && resolve(prop).kind === "array";
+    const item = array ? (resolve(prop!) as ArraySchema).items : prop;
+    const values = await Promise.all(form.getAll(k).map((x) => formEntry(item, x)));
+    out[k] = array ? values : values[0];
+  }
+  return withDefaults(schema, out, "request");
+}
+
+// formEntry reads a field of a multipart/form-data body, of schema.
+async function formEntry(schema: Schema | undefined, x: FormDataEntryValue): Promise<unknown> {
+  if (typeof x !== "string") {
+    return isBytes(schema) ? toBase64(new Uint8Array(await x.arrayBuffer())) : x;
+  }
+  if (schema === undefined) {
+    return x;
+  }
+  let s = resolve(schema);
+  if (s.kind === "nullable") {
+    s = resolve(s.of);
+  }
+  switch (s.kind) {
+    case "object":
+    case "array":
+    case "map":
+    case "all":
+    case "union":
+      return JSON.parse(x) as unknown;
+  }
+  return scalarValue(schema, x);
+}
+
+// writeResponse writes resp, the response a handler of op returned: the
+// declared response of its status (and content type, if it gives one),
+// with its headers and body.
+function writeResponse(cfg: ReceiverConfig, op: OperationSpec, resp: unknown, request: Request): Response {
+  const r = resp as Values;
+  const status = r["status"];
+  if (typeof status !== "number") {
+    throw new Error("the handler's response has no status");
+  }
+  const contentType = typeof r["contentType"] === "string" ? r["contentType"] : undefined;
+  const rank = (s: string) => (s === "default" ? 2 : s.endsWith("XX") ? 1 : 0);
+  const spec = op.responses
+    .filter((x) => statusMatches(x.status, status))
+    .sort((a, b) => rank(a.status) - rank(b.status))
+    .find((x) => contentType === undefined || x.mediaType === undefined || mediaMatches(x.mediaType, codecKey(contentType)));
+  if (spec === undefined) {
+    throw new Error(`the operation declares no ${status} response` + (contentType === undefined ? "" : ` of ${contentType}`));
+  }
+  const invalid = (what: string, issues: readonly Issue[]) => new Error(`invalid ${status} response: ${what}: ` + issues.map((x) => `${x.pointer}: ${x.message}`).join("; "));
+  const headers = new Headers();
+  const values = (r["headers"] ?? {}) as Values;
+  for (const h of spec.headers ?? []) {
+    const v = values[h.key];
+    if (v === undefined) {
+      if (h.required && cfg.validateResponses) {
+        throw new Error(`invalid ${status} response: header ${h.name} is required`);
+      }
+      continue;
+    }
+    const issues = cfg.validateResponses ? validate(h.schema, v, "response") : [];
+    if (issues.length > 0) {
+      throw invalid(`header ${h.name}`, issues);
+    }
+    headers.set(h.name, headerText(h, v));
+  }
+  const body = r["body"];
+  if (cfg.validateResponses && spec.schema !== undefined && (spec.kind === "json" || spec.kind === "xml" || spec.kind === "codec")) {
+    const issues = validate(spec.schema, body, "response");
+    if (issues.length > 0) {
+      throw invalid("body", issues);
+    }
+  }
+  const mediaType = contentType ?? spec.mediaType ?? "";
+  const onFailure = (e: unknown) => cfg.onError(e, request);
+  let out: BodyInit | null = null;
+  switch (spec.kind) {
+    case "json":
+      headers.set("Content-Type", mediaType);
+      out = JSON.stringify(encode(spec.schema!, body, "response"));
+      break;
+    case "xml":
+      headers.set("Content-Type", mediaType);
+      out = toXML(encode(spec.schema!, body, "response"), spec.xml!);
+      break;
+    case "codec":
+      headers.set("Content-Type", mediaType);
+      out = cfg.codecs.get(codecKey(spec.mediaType!))!.encode(encode(spec.schema!, body, "response"));
+      break;
+    case "text":
+      headers.set("Content-Type", mediaType.includes("charset=") ? mediaType : mediaType + "; charset=utf-8");
+      out = text(body);
+      break;
+    case "binary":
+      headers.set("Content-Type", contentType ?? (body instanceof Blob && body.type !== "" && mediaType.includes("*") ? body.type : mediaType));
+      out = body as BodyInit;
+      break;
+    case "byteranges": {
+      const boundary = newBoundary();
+      const ranges = body as ByteRange[];
+      const chunks = ranges.flatMap((x, i): BlobPart[] => [
+        (i === 0 ? "" : "\r\n") + `--${boundary}\r\nContent-Type: ${x.contentType}\r\nContent-Range: bytes ${x.start}-${x.end}/${x.size < 0 ? "*" : x.size}\r\n\r\n`,
+        x.data,
+      ]);
+      headers.set("Content-Type", `multipart/byteranges; boundary=${boundary}`);
+      out = new Blob([...chunks, partsEnd(ranges.length, boundary)]);
+      break;
+    }
+    case "parts": {
+      const boundary = newBoundary();
+      const items = partItems(spec.parts!, body);
+      const chunks = items.flatMap((item, i) => partChunks(spec.parts!, item, i, boundary, "response"));
+      headers.set("Content-Type", `${mediaType}; boundary=${boundary}`);
+      out = new Blob([...chunks, partsEnd(items.length, boundary)]);
+      break;
+    }
+    case "partstream": {
+      const parts = spec.parts!;
+      const boundary = newBoundary();
+      headers.set("Content-Type", `${mediaType}; boundary=${boundary}`);
+      const chunks = (x: unknown, i: number) => {
+        const item = { spec: parts.item!, value: x };
+        const issues = cfg.validateResponses ? partIssues(parts, item, i) : [];
+        if (issues.length > 0) {
+          throw itemError("response", issues);
+        }
+        return partChunks(parts, item, i, boundary, "response");
+      };
+      out = streamBody(r["items"], async (x, i) => joinChunks(chunks(x, i)), onFailure, (n) => partsEnd(n, boundary));
+      break;
+    }
+    case "jsonl":
+      headers.set("Content-Type", mediaType);
+      out = streamBody(r["items"], jsonLine(spec.item ?? { kind: "any" }, cfg.validateResponses, "response"), onFailure);
+      break;
+    case "sse": {
+      headers.set("Content-Type", mediaType);
+      headers.set("Cache-Control", "no-cache");
+      const events = spec.events;
+      out = streamBody(r["events"], (ev, i) => eventText(events === undefined ? (ev as ServerEvent) : typedEvent(events, ev as ServerEvent<unknown>, i, cfg.validateResponses, "response")), onFailure);
+      break;
+    }
+  }
+  return new Response(out, { status, headers });
+}
+
+// streamBody is the body of the items of a streamed response, written by
+// line and ended by end: as they come, for an AsyncIterable, or at once,
+// for an Iterable, such as an array.
+function streamBody(
+  items: unknown,
+  line: (item: unknown, i: number) => string | Promise<Uint8Array>,
+  onFailure: (e: unknown) => void,
+  end?: (n: number) => string,
+): BodyInit {
+  if (typeof items === "object" && items !== null && Symbol.asyncIterator in items) {
+    return itemStream(items as AsyncIterable<unknown>, line, onFailure, end);
+  }
+  async function* all(): AsyncGenerator<unknown> {
+    yield* items as Iterable<unknown>;
+  }
+  return itemStream(all(), line, onFailure, end);
+}
+
+// headerText writes the value of a response header.
+function headerText(h: HeaderSpec, v: unknown): string {
+  if (h.content !== undefined) {
+    return contentText(h, v, "response");
+  }
+  if (h.object) {
+    return entries(v)
+      .map(([k, x]) => (h.explode ? `${k}=${text(x)}` : `${k},${text(x)}`))
+      .join(",");
+  }
+  if (h.array && Array.isArray(v)) {
+    return v.map(text).join(",");
+  }
+  return text(v);
+}
+
+/** A value of a callback's URL that the request or response it is
+ * computed from does not have. */
+export class MissingValueError extends Error {
+  readonly expression: string;
+  constructor(expression: string) {
+    super(`callback URL: ${expression} is not set`);
+    this.name = "MissingValueError";
+    this.expression = expression;
+  }
+}
+
+/** Where a callback is sent, as receiver.ts describes it: the text of
+ * its URL and the values in it, each with its runtime expression. */
+export interface CallbackUrlSpec {
+  readonly parts: readonly (LinkSource & { readonly text?: string; readonly expression?: string })[];
+}
+
+/** Returns the URL of a callback from req, the request of the operation
+ * declaring it, as its handler got it; resp, the response the handler
+ * returns; and url, the URL req was sent to. A value of the request is
+ * written as it is if it is a string, an array parameter's items
+ * separated by commas, and others as JSON. A value that is not there
+ * throws a MissingValueError. */
+export function callbackUrl(spec: CallbackUrlSpec, req: object, resp?: object, url?: string): string {
+  let out = "";
+  for (const p of spec.parts) {
+    if (p.text !== undefined) {
+      out += p.text;
+      continue;
+    }
+    const v = linkValue(p, (resp ?? {}) as Values, req as Values, url);
+    if (v === undefined) {
+      throw new MissingValueError(p.expression ?? "");
+    }
+    out += Array.isArray(v) && p.from === "request" ? v.map(text).join(",") : text(v);
+  }
+  return out;
 }
