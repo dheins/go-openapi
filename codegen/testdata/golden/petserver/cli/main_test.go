@@ -149,6 +149,10 @@ func (h *handler) SubmitForm(_ context.Context, req *api.SubmitFormRequest) (api
 	return api.SubmitForm204Response{}, nil
 }
 
+func (h *handler) PutLabels(_ context.Context, req *api.PutLabelsRequest) (api.PutLabelsResponse, error) {
+	return api.PutLabels200XMLResponse{Body: req.Body}, nil
+}
+
 func (h *handler) Secure(context.Context, *api.SecureRequest) (api.SecureResponse, error) {
 	return api.Secure204Response{}, nil
 }
@@ -375,6 +379,13 @@ func TestCommands(t *testing.T) {
 		t.Errorf("import-lines from stdin: %d, second pet %q", code, name)
 	}
 	os.Stdin = stdin
+
+	// An XML body given as JSON, with a map of arrays, a union's integer
+	// and an additional property.
+	code, out, errOut = runCLI("put-labels", "-body", `{"name":"a","tags":{"color":["red","blue"]},"value":42,"count":3}`)
+	if code != 0 || !strings.Contains(out, "<tags><color>red</color><color>blue</color></tags><value>42</value><count>3</count>") {
+		t.Errorf("put-labels: %d %q %q", code, out, errOut)
+	}
 
 	// Credentials by flag, or by environment variable.
 	if code, _, _ := runCLI("secure"); code != 2 {

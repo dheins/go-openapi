@@ -106,6 +106,13 @@ func TestMiddlewareParity(t *testing.T) {
 		{"GET", "/orders?filter[id]=o&filter[boxes][0][0]=x", "", "", nil},
 		{"PUT", "/orders/o-1/lines", mpw.FormDataContentType(), parts.String(), nil},
 		{"POST", "/trees", "application/x-www-form-urlencoded", "name=root&children[0][children][0][name]=x", nil},
+		// XML maps of arrays, unions of scalars and objects, and typed
+		// additional properties.
+		{"PUT", "/labels", "application/xml", labelsDoc, nil},
+		{"PUT", "/labels", "application/xml", "<labels><name>b</name><count>-1</count></labels>", nil},
+		{"PUT", "/labels", "application/xml", "<labels><name>b</name><other>x</other></labels>", nil},
+		{"PUT", "/labels", "application/xml", `<labels><name>b</name><value unit="kg"></value></labels>`, nil},
+		{"PUT", "/labels", "application/xml", "<labels><value>7</value></labels>", nil},
 	} {
 		want := do(t, generated, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)
 		got := do(t, accept, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)
@@ -169,6 +176,7 @@ func TestMiddlewareResponses(t *testing.T) {
 		{"GET", "/pets/1/settings?view[depth]=2", "", "", nil},
 		{"POST", "/events/typed", "text/event-stream", "data: {\"name\":\"Rex\"}\n\n", nil},
 		{"POST", "/pets/lines", "application/jsonl", "{\"name\":\"Rex\"}\n", nil},
+		{"PUT", "/labels", "application/xml", labelsDoc, nil},
 	} {
 		log.Reset()
 		want := do(t, plain, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)

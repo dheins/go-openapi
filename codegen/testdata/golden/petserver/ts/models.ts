@@ -2,6 +2,30 @@
 
 import { ref as $ref, type Schema as $Schema } from "./runtime.ts";
 
+export interface Labels {
+  name: string;
+  tags?: { [key: string]: string[] };
+  value?: Amount;
+  /** Other properties. */
+  [key: string]: unknown;
+}
+
+/** The schema of Labels, for validation and encoding. */
+export const LabelsSchema: $Schema = { kind: "object", properties: { name: { schema: { kind: "string" }, required: true }, tags: { schema: { kind: "map", values: { kind: "array", items: { kind: "string" } } } }, value: { schema: $ref(() => AmountSchema) } }, additional: { kind: "integer", minimum: 0 } };
+
+export type Amount = number | string | AmountVariant3;
+
+/** The schema of Amount, for validation and encoding. */
+export const AmountSchema: $Schema = { kind: "union", oneOf: true, variants: [{ kind: "integer" }, { kind: "string" }, $ref(() => AmountVariant3Schema)] };
+
+export interface AmountVariant3 {
+  unit?: string;
+  amount: number;
+}
+
+/** The schema of AmountVariant3, for validation and encoding. */
+export const AmountVariant3Schema: $Schema = { kind: "object", properties: { unit: { schema: { kind: "string" } }, amount: { schema: { kind: "number" }, required: true } } };
+
 export interface Order {
   id: string;
   lines?: OrderLine[];

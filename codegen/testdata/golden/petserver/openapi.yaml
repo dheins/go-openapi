@@ -1270,6 +1270,23 @@ paths:
       responses:
         "204":
           description: Stored.
+  /labels:
+    put:
+      operationId: putLabels
+      description: Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/Labels"
+      responses:
+        "200":
+          description: The labels.
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Labels"
   /trees:
     post:
       operationId: plantTree
@@ -1534,6 +1551,38 @@ webhooks:
             text/event-stream: {}
 components:
   schemas:
+    Labels:
+      type: object
+      xml:
+        name: labels
+      required: [name]
+      properties:
+        name:
+          type: string
+        tags:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        value:
+          $ref: "#/components/schemas/Amount"
+      additionalProperties:
+        type: integer
+        minimum: 0
+    Amount:
+      oneOf:
+        - type: integer
+        - type: string
+        - type: object
+          required: [amount]
+          properties:
+            unit:
+              type: string
+              xml:
+                attribute: true
+            amount:
+              type: number
     Order:
       type: object
       required: [id]

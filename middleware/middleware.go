@@ -470,8 +470,8 @@ func xmlNode(n *ir.XMLNode) *server.XMLNode {
 	if n == nil {
 		return nil
 	}
-	out := &server.XMLNode{Name: n.Name, Namespace: n.Namespace, Prefix: n.Prefix, Kind: n.Kind, Type: n.Type,
-		Wrapped: n.Wrapped, Items: xmlNode(n.Items), Values: xmlNode(n.Values), Inline: n.Inline, Ref: n.Ref}
+	out := &server.XMLNode{Name: n.Name, Namespace: n.Namespace, Prefix: n.Prefix, Kind: n.Kind, Type: n.Type, Scalars: n.Scalars,
+		Wrapped: n.Wrapped, Items: xmlNode(n.Items), Values: xmlNode(n.Values), Additional: xmlNode(n.Additional), Inline: n.Inline, Ref: n.Ref}
 	for _, p := range n.Properties {
 		out.Properties = append(out.Properties, server.XMLProperty{Name: p.Name, Node: xmlNode(p.Node)})
 	}

@@ -778,6 +778,13 @@ func tsXMLNode(n *ir.XMLNode) string {
 		}
 	}
 	add("type", jsString(n.Type))
+	if len(n.Scalars) > 0 {
+		scalars := make([]string, len(n.Scalars))
+		for i, s := range n.Scalars {
+			scalars[i] = jsString(s)
+		}
+		add("scalars", "["+strings.Join(scalars, ", ")+"]")
+	}
 	if n.Wrapped {
 		add("wrapped", "true")
 	}
@@ -793,6 +800,9 @@ func tsXMLNode(n *ir.XMLNode) string {
 	}
 	if n.Values != nil {
 		add("values", tsXMLNode(n.Values))
+	}
+	if n.Additional != nil {
+		add("additional", tsXMLNode(n.Additional))
 	}
 	if n.Inline {
 		add("inline", "true")

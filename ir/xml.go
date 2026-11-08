@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/dheins/go-openapi/oas"
@@ -16,15 +17,22 @@ type XMLNode struct {
 	Name, Namespace, Prefix string
 	// Kind is "" for an element, or attribute, text or cdata.
 	Kind string
-	// Type is string, integer, number, boolean, object, array, map or any.
-	Type string
+	// Type is string, integer, number, boolean, object, array, map, union
+	// or any. A union is an object of the Properties of its object
+	// variants when its element has child elements or attributes, and
+	// else its text, a value of the first of its Scalars (JSON types) the
+	// text is.
+	Type    string
+	Scalars []string
 	// Wrapped means an array's Items are inside an element of their own.
 	Wrapped bool
 	Items   *XMLNode
 	// Properties are an object's declared properties.
 	Properties []XMLProperty
-	// Values describes a map's values, an element per key.
-	Values *XMLNode
+	// Values describes a map's values, an element per key (an element per
+	// item for an array), and Additional the values of an object's
+	// undeclared properties, the same way.
+	Values, Additional *XMLNode
 	// Inline means an object's properties are in its parent's element
 	// (nodeType none).
 	Inline bool
@@ -187,17 +195,10 @@ func (b *builder) xmlNode(r *Ref, s *oas.Schema, name string, x *xmlBuild) (*XML
 		if t := deref(s); t != nil {
 			values = t.AdditionalProperties
 		}
-		v, why := b.xmlNode(r.Elem, values, "", x)
+		v, why := b.keyedValues(r.Elem, values, x)
 		if why != "" {
 			return nil, why
 		}
-		switch {
-		case v.Type == "array":
-			return nil, "maps of arrays cannot be written as XML"
-		case v.Kind != "" || v.Inline:
-			return nil, "the values of a map are elements, named by their keys"
-		}
-		v.Name, v.Namespace, v.Prefix = "", "", ""
 		n.Values = v
 	case jsonType(r) != "":
 		n.Type = jsonType(r)
@@ -215,10 +216,8 @@ func (b *builder) xmlNode(r *Ref, s *oas.Schema, name string, x *xmlBuild) (*XML
 			// done.
 			n.Type, n.Ref = "object", t.Name
 			x.shapes[t.Name] = nil
-		case t.Additional != nil && !t.Additional.Forbidden && t.Additional.Value != nil:
-			return nil, fmt.Sprintf("%s has additional properties, which cannot be written as XML yet", t.Name)
 		default:
-			if why := b.xmlStruct(n, t, x); why != "" {
+			if why := b.xmlStruct(n, t, s, x); why != "" {
 				return nil, why
 			}
 		}
@@ -235,12 +234,15 @@ func (b *builder) xmlNode(r *Ref, s *oas.Schema, name string, x *xmlBuild) (*XML
 			x.shapes[u.Name] = nil
 		default:
 			x.seen[u] = true
-			props, why := b.xmlVariants(u, x)
+			props, scalars, why := b.xmlVariants(u, true, x)
 			delete(x.seen, u)
 			if why != "" {
 				return nil, why
 			}
 			n.Properties = props
+			if len(scalars) > 0 {
+				n.Type, n.Scalars = "union", scalars
+			}
 			x.recordShape(u, n)
 		}
 	default:
@@ -250,6 +252,9 @@ func (b *builder) xmlNode(r *Ref, s *oas.Schema, name string, x *xmlBuild) (*XML
 	case "", "element":
 	case "none":
 		if n.Type != "object" {
+			if n.Type == "union" {
+				return nil, fmt.Sprintf("property %q: a union with values that are not objects cannot have the XML node type none", name)
+			}
 			return nil, fmt.Sprintf("property %q: only objects and arrays can have the XML node type none", name)
 		}
 		n.Inline = true
@@ -259,7 +264,7 @@ func (b *builder) xmlNode(r *Ref, s *oas.Schema, name string, x *xmlBuild) (*XML
 			}
 		}
 	case "attribute", "text", "cdata":
-		if n.Type == "object" || n.Type == "map" || n.Type == "any" {
+		if n.Type == "object" || n.Type == "map" || n.Type == "any" || n.Type == "union" && len(n.Properties) > 0 {
 			return nil, fmt.Sprintf("property %q is an object and cannot be an XML %s", name, nodeType)
 		}
 		n.Kind = nodeType
@@ -269,9 +274,31 @@ func (b *builder) xmlNode(r *Ref, s *oas.Schema, name string, x *xmlBuild) (*XML
 	return n, ""
 }
 
-// xmlStruct describes the properties of struct t as those of object n:
-// its fields, then those of its inline unions it does not declare.
-func (b *builder) xmlStruct(n *XMLNode, t *Type, x *xmlBuild) string {
+// keyedValues describes the values of a map, or of an object's
+// additional properties, of type r from schema s: elements named by their
+// keys, an element per item of an array.
+func (b *builder) keyedValues(r *Ref, s *oas.Schema, x *xmlBuild) (*XMLNode, string) {
+	v, why := b.xmlNode(r, s, "", x)
+	if why != "" {
+		return nil, why
+	}
+	if v.Kind != "" || v.Inline || v.Type == "array" && (v.Items.Kind != "" || v.Items.Inline) {
+		return nil, "the values of a map are elements, named by their keys"
+	}
+	v.Name, v.Namespace, v.Prefix = "", "", ""
+	if v.Type == "array" {
+		// Each item is an element named by the key, as the items of an
+		// array property are named by the property.
+		v.Wrapped = false
+		v.Items.Name, v.Items.Namespace, v.Items.Prefix = "", "", ""
+	}
+	return v, ""
+}
+
+// xmlStruct describes the properties of struct t, from schema s, as those
+// of object n: its fields, then those of its inline unions it does not
+// declare, and its additional properties.
+func (b *builder) xmlStruct(n *XMLNode, t *Type, s *oas.Schema, x *xmlBuild) string {
 	x.seen[t] = true
 	defer delete(x.seen, t)
 	n.Type = "object"
@@ -287,11 +314,22 @@ func (b *builder) xmlStruct(n *XMLNode, t *Type, x *xmlBuild) string {
 		n.Properties = append(n.Properties, XMLProperty{Name: f.JSONName, Node: fn})
 	}
 	for _, u := range t.InlineUnions {
-		props, why := b.xmlVariants(u.Type.Type, x)
+		props, _, why := b.xmlVariants(u.Type.Type, false, x)
 		if why != "" {
 			return why
 		}
 		n.Properties = mergeProperties(n.Properties, props)
+	}
+	if a := t.Additional; a != nil && !a.Forbidden && a.Value != nil {
+		var values *oas.Schema
+		if d := deref(s); d != nil {
+			values = d.AdditionalProperties
+		}
+		v, why := b.keyedValues(a.Value, values, x)
+		if why != "" {
+			return fmt.Sprintf("%s: additional properties: %s", t.Name, why)
+		}
+		n.Additional = v
 	}
 	texts := 0
 	for _, p := range n.Properties {
@@ -317,25 +355,42 @@ func (x *xmlBuild) recordShape(t *Type, n *XMLNode) {
 	}
 }
 
-// xmlVariants returns the properties of all the variants of union u, the
-// first variant declaring a property describing it. Every variant must be
-// an object.
-func (b *builder) xmlVariants(u *Type, x *xmlBuild) ([]XMLProperty, string) {
+// xmlVariants returns the properties of all the object variants of union
+// u, the first variant declaring a property describing it, and with
+// scalars the JSON types of its variants that are strings, numbers or
+// booleans; without, every variant must be an object.
+func (b *builder) xmlVariants(u *Type, scalars bool, x *xmlBuild) ([]XMLProperty, []string, string) {
 	var props []XMLProperty
+	var types []string
 	for _, v := range u.Variants {
 		vn, why := b.xmlNode(v.Type, nil, "", x)
 		if why != "" {
-			return nil, why
+			return nil, nil, why
 		}
 		if vn.Ref != "" && x.shapes[vn.Ref] != nil {
 			vn = x.shapes[vn.Ref]
 		}
-		if vn.Type != "object" || vn.Ref != "" {
-			return nil, fmt.Sprintf("%s has a variant that is not an object of its own, or contains the union inside itself, which cannot be written as XML", u.Name)
+		switch vn.Type {
+		case "string", "integer", "number", "boolean":
+			if scalars {
+				if !slices.Contains(types, vn.Type) {
+					types = append(types, vn.Type)
+				}
+				continue
+			}
+		case "object":
+			if vn.Ref == "" {
+				props = mergeProperties(props, vn.Properties)
+				continue
+			}
 		}
-		props = mergeProperties(props, vn.Properties)
+		what := "an object of its own"
+		if scalars {
+			what = "an object of its own, a string, a number or a boolean"
+		}
+		return nil, nil, fmt.Sprintf("%s has a variant that is not %s, or contains the union inside itself, which cannot be written as XML", u.Name, what)
 	}
-	return props, ""
+	return props, types, ""
 }
 
 // mergeProperties adds the properties of more that props does not have.

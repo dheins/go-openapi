@@ -852,6 +852,23 @@ const putLinesSpec: OperationSpec = {
   responses: [{ status: "204" }],
 };
 
+/** The inputs of putLabels. */
+export interface PutLabelsRequest {
+  body: $m.Labels;
+}
+
+/** The responses of putLabels. */
+export type PutLabelsResponse =
+  | { status: 200; body: $m.Labels };
+
+const putLabelsSpec: OperationSpec = {
+  method: "PUT",
+  path: "/labels",
+  params: [],
+  body: { required: true, media: [{ mediaType: "application/xml", kind: "xml", key: "body", schema: $ref(() => $m.LabelsSchema), xml: { name: "labels", type: "object", properties: [{ name: "name", node: { name: "name", type: "string" } }, { name: "tags", node: { name: "tags", type: "map", values: { type: "array", items: { type: "string" } } } }, { name: "value", node: { name: "value", type: "union", scalars: ["integer", "string"], properties: [{ name: "unit", node: { name: "unit", kind: "attribute", type: "string" } }, { name: "amount", node: { name: "amount", type: "number" } }] } }], additional: { type: "integer" } } }] },
+  responses: [{ status: "200", mediaType: "application/xml", kind: "xml", schema: $ref(() => $m.LabelsSchema), xml: { name: "labels", type: "object", properties: [{ name: "name", node: { name: "name", type: "string" } }, { name: "tags", node: { name: "tags", type: "map", values: { type: "array", items: { type: "string" } } } }, { name: "value", node: { name: "value", type: "union", scalars: ["integer", "string"], properties: [{ name: "unit", node: { name: "unit", kind: "attribute", type: "string" } }, { name: "amount", node: { name: "amount", type: "number" } }] } }], additional: { type: "integer" } } }],
+};
+
 /** The inputs of plantTree. */
 export interface PlantTreeRequest {
   body: $m.Tree;
@@ -1305,6 +1322,15 @@ export class Client {
   /** PUT /orders/{id}/lines. */
   putLines(req: PutLinesRequest, call?: CallOptions): Promise<PutLinesResponse> {
     return send(this.#cfg, putLinesSpec, req, call) as Promise<PutLinesResponse>;
+  }
+
+  /**
+   * PUT /labels.
+   *
+   * Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.
+   */
+  putLabels(req: PutLabelsRequest, call?: CallOptions): Promise<PutLabelsResponse> {
+    return send(this.#cfg, putLabelsSpec, req, call) as Promise<PutLabelsResponse>;
   }
 
   /**

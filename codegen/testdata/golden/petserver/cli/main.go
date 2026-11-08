@@ -656,6 +656,21 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "put-labels", Summary: "Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.", Tag: "",
+			Request: func() any { return new(api.PutLabelsRequest) },
+			Media: []cli.Media{
+				{MediaType: "application/xml", Kind: "xml", Field: "Body"},
+			},
+			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+			},
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PutLabels(ctx, req.(*api.PutLabelsRequest))
+			},
+		},
+		{
 			Name: "plant-tree", Summary: "A recursive type as a form.", Tag: "",
 			Request: func() any { return new(api.PlantTreeRequest) },
 			Media: []cli.Media{

@@ -4,6 +4,13 @@
 
 ### Added
 
+- XML bodies, parameters and headers whose schemas have maps of arrays
+  (an element per item, named by its key), unions of string, number,
+  boolean and object variants (`server.XMLNode` type `union`, with
+  `Scalars`), and typed `additionalProperties` next to declared
+  properties (`server.XMLNode.Additional`) are read and written by Go and
+  TypeScript servers, clients and receivers, `middleware.Validate` and
+  generated CLIs, rather than answered with 415.
 - Streamed request bodies can be sent again: the Go client keeps up to
   `client.WithReplayLimit(n)` (`client.DefaultReplayLimit`, 1 MiB) of a
   JSON Lines, event stream or part stream body and sets `GetBody`, for

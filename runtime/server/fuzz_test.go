@@ -204,14 +204,17 @@ func FuzzObjectJSON(f *testing.F) {
 // FuzzXMLToJSON checks that converting XML never panics, gives valid
 // JSON, and that what it gives is written back as XML that reads the
 // same, for documents with maps, shape references and inline objects
-// too.
+// too, maps of arrays, unions of scalars and objects, and additional
+// properties.
 func FuzzXMLToJSON(f *testing.F) {
 	f.Add([]byte(`<p:pet xmlns:p="urn:pets" id="7"><p:name>Rex</p:name><photoUrls><photoUrl>a</photoUrl></photoUrls><tag><name>x</name></tag><category><id>1</id>Dogs</category></p:pet>`))
 	f.Add([]byte(`<p:pet xmlns:p="urn:pets"><extra a="1"><b>2</b><b>3</b>t</extra><vip xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:nil="true"/></p:pet>`))
 	f.Add([]byte(`<tree label="r" owner="o"><size>2</size><child><counts><x>1</x></counts></child><child label="b"><child/></child></tree>`))
 	f.Add([]byte(`<tree info="x" children="y"><info>z</info><counts/><p:pet xmlns:p="urn:pets" photoUrls="a" tags="b"/></tree>`))
+	f.Add([]byte(`<labels><name>a</name><tags><c>r</c><c>b</c></tags><value unit="kg"><amount>1</amount></value><n>2</n></labels>`))
+	f.Add([]byte(`<labels><value>7</value><tags/><x>y</x></labels>`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		for _, root := range []*XMLNode{petXML, treeXML} {
+		for _, root := range []*XMLNode{petXML, treeXML, labelsXML} {
 			out, err := XMLToJSON(data, root)
 			if err != nil {
 				continue

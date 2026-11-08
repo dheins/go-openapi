@@ -1749,3 +1749,7 @@ func TestTupleParts(t *testing.T) {
 		t.Errorf("errors = %q", got)
 	}
 }
+
+func (s *store) PutLabels(_ context.Context, req *api.PutLabelsRequest) (api.PutLabelsResponse, error) {
+	return api.PutLabels200XMLResponse{Body: req.Body}, nil
+}

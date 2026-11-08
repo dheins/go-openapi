@@ -54,6 +54,7 @@ Version `1.0`
   - [`GET` `/orders`](#get-orders)
   - [`POST` `/orders`](#post-orders)
   - [`PUT` `/orders/{id}/lines`](#put-ordersidlines)
+  - [`PUT` `/labels`](#put-labels)
   - [`POST` `/trees`](#post-trees)
   - [`GET` `/public`](#get-public)
   - [`POST` `/subscriptions`](#post-subscriptions)
@@ -62,6 +63,8 @@ Version `1.0`
   - [`POST` webhook `petPhoto`](#post-webhook-petphoto)
   - [`POST` webhook `petFeed`](#post-webhook-petfeed)
 - [Schemas](#schemas)
+  - [Labels](#labels)
+  - [Amount](#amount)
   - [Order](#order)
   - [OrderLine](#orderline)
   - [Tree](#tree)
@@ -1194,6 +1197,26 @@ An order as a form, its lines as an array of objects.
 | --- | --- |
 | `204` | Stored. |
 
+### `PUT` `/labels`
+
+Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.
+
+- Operation ID: `putLabels`
+
+**Request body** (required)
+
+- `application/xml`: [Labels](#labels)
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `200` | The labels. |
+
+`200`:
+
+- `application/xml`: [Labels](#labels)
+
 ### `POST` `/trees`
 
 A recursive type as a form.
@@ -1471,6 +1494,25 @@ The API streams the pets it adds; the consumer answers with an event per pet as 
 - `text/event-stream`
 
 ## Schemas
+
+### Labels
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | yes |  |
+| `tags` | map of array of string | no |  |
+| `value` | [Amount](#amount) | no |  |
+
+### Amount
+
+Type: one of integer, string, object with `unit`, `amount`
+
+Variant 3:
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `unit` | string | no |  |
+| `amount` | number | yes |  |
 
 ### Order
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -27,9 +28,12 @@ type XMLNode struct {
 	// "attribute", "text" or "cdata" (the content of the parent element).
 	Kind string
 	// Type is the JSON type: "string", "integer", "number", "boolean",
-	// "object", "array", "map" (an object of any properties), or "any" for
-	// a value of any type.
-	Type string
+	// "object", "array", "map" (an object of any properties), "union", or
+	// "any" for a value of any type. A union is an object of Properties
+	// when its element has child elements or attributes, and else its
+	// text, a value of the first of Scalars (JSON types) the text is.
+	Type    string
+	Scalars []string
 	// Wrapped means an array's items are inside an element of their own;
 	// otherwise the items are elements of the array's parent. Items
 	// describes them.
@@ -38,8 +42,9 @@ type XMLNode struct {
 	// Properties are the declared properties of an object, by JSON name.
 	Properties []XMLProperty
 	// Values describes the values of a map, each an element named by its
-	// key.
-	Values *XMLNode
+	// key, or an element per item of an array; Additional describes the
+	// values of an object's undeclared properties the same way.
+	Values, Additional *XMLNode
 	// Inline means an object has no element of its own: its properties are
 	// attributes and elements of its parent's element (nodeType none).
 	Inline bool
@@ -202,7 +207,9 @@ func (r *xmlReader) element(dst []byte, start xml.StartElement, node *XMLNode, p
 	node = resolve(r.shapes, node)
 	switch node.Type {
 	case "object":
-		return r.object(dst, start, node, path, depth)
+		return r.object(dst, start, node, path, depth, nil)
+	case "union":
+		return r.union(dst, start, node, path, depth)
 	case "map":
 		return r.mapElement(dst, start, node, path, depth)
 	case "array":
@@ -327,7 +334,87 @@ func (st *objectState) json() []byte {
 	return appendMembers(nil, st.members)
 }
 
-func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, path string, depth int) ([]byte, error) {
+// hasAttributes reports whether an element has attributes other than
+// namespace declarations and xsi ones.
+func hasAttributes(start xml.StartElement) bool {
+	for _, a := range start.Attr {
+		if a.Name.Space != "xmlns" && a.Name.Local != "xmlns" && a.Name.Space != xsiNamespace {
+			return true
+		}
+	}
+	return false
+}
+
+// union reads an element of a union: an object of its object variants'
+// properties if it has child elements or attributes (or is empty, when
+// there are object variants), else its text, as the first of its scalar
+// types that the text is, so that the union's decoder picks the variant.
+func (r *xmlReader) union(dst []byte, start xml.StartElement, node *XMLNode, path string, depth int) ([]byte, error) {
+	objects := len(node.Properties) > 0
+	if objects && hasAttributes(start) {
+		return r.object(dst, start, node, path, depth, nil)
+	}
+	var pending []xml.Token
+	var chars strings.Builder
+	for {
+		tok, err := r.dec.Token()
+		if err != nil {
+			return nil, invalidXML(err)
+		}
+		switch t := tok.(type) {
+		case xml.CharData:
+			chars.Write(t)
+			pending = append(pending, t.Copy())
+		case xml.StartElement:
+			if !objects {
+				return nil, &oapi.ValidationError{Path: path, Message: fmt.Sprintf("expected text, got element <%s>", t.Name.Local)}
+			}
+			return r.object(dst, start, node, path, depth, append(pending, t.Copy()))
+		case xml.EndElement:
+			text := chars.String()
+			if objects && strings.TrimSpace(text) == "" {
+				return append(dst, "{}"...), nil
+			}
+			return appendScalar(dst, text, scalarType(text, node.Scalars)), nil
+		}
+	}
+}
+
+// scalarType returns the first of types, in the order boolean, integer,
+// number, string, that text is a value of; the last of types if none, for
+// the decoder to report.
+func scalarType(text string, types []string) string {
+	s := strings.TrimSpace(text)
+	for _, typ := range []string{"boolean", "integer", "number", "string"} {
+		if !slices.Contains(types, typ) {
+			continue
+		}
+		switch typ {
+		case "boolean":
+			if s == "true" || s == "false" {
+				return typ
+			}
+		case "integer":
+			if _, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return typ
+			}
+		case "number":
+			if f, err := strconv.ParseFloat(s, 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
+				return typ
+			}
+		default:
+			return typ
+		}
+	}
+	if len(types) == 0 {
+		return "string"
+	}
+	return types[len(types)-1]
+}
+
+// object reads an object element; pending are tokens of its content read
+// already, which come first.
+func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, path string, depth int, pending []xml.Token) ([]byte, error) {
 	st := r.newState(node)
 	var text *XMLProperty
 	for i, p := range node.Properties {
@@ -339,15 +426,22 @@ func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, pa
 		if a.Name.Space == "xmlns" || a.Name.Local == "xmlns" || a.Name.Space == xsiNamespace || st.attribute(a) {
 			continue
 		}
-		if isXMLName(a.Name.Local) && !st.declares(a.Name.Local, r.shapes) {
+		// Typed additional properties are elements: other attributes are
+		// not read.
+		if node.Additional == nil && isXMLName(a.Name.Local) && !st.declares(a.Name.Local, r.shapes) {
 			st.members[a.Name.Local] = &member{value: appendScalar(nil, a.Value, "string")}
 		}
 	}
 	var chars strings.Builder
 	for {
-		tok, err := r.dec.Token()
-		if err != nil {
-			return nil, invalidXML(err)
+		var tok xml.Token
+		if len(pending) > 0 {
+			tok, pending = pending[0], pending[1:]
+		} else {
+			var err error
+			if tok, err = r.dec.Token(); err != nil {
+				return nil, invalidXML(err)
+			}
 		}
 		switch t := tok.(type) {
 		case xml.CharData:
@@ -362,6 +456,10 @@ func (r *xmlReader) object(dst []byte, start xml.StartElement, node *XMLNode, pa
 			case st.declares(t.Name.Local, r.shapes):
 				if err := r.dec.Skip(); err != nil {
 					return nil, invalidXML(err)
+				}
+			case node.Additional != nil:
+				if err := r.keyed(st.members, t, node.Additional, path, depth); err != nil {
+					return nil, err
 				}
 			default:
 				if err := r.undeclared(st.members, t, path, depth); err != nil {
@@ -462,16 +560,40 @@ func (r *xmlReader) mapElement(dst []byte, start xml.StartElement, node *XMLNode
 				return nil, &oapi.ValidationError{Path: path, Message: "unexpected text in element <" + start.Name.Local + ">"}
 			}
 		case xml.StartElement:
-			key := t.Name.Local
-			value, err := r.element(nil, t, node.Values, oapi.Field(path, key), depth+1)
-			if err != nil {
+			if err := r.keyed(members, t, node.Values, path, depth); err != nil {
 				return nil, err
 			}
-			members[key] = &member{value: value}
 		case xml.EndElement:
 			return append(dst, appendMembers(nil, members)...), nil
 		}
 	}
+}
+
+// keyed reads an element named by its key, a property of a map or an
+// additional one of an object, as values describes the values: an item
+// of the key's array, if they are arrays.
+func (r *xmlReader) keyed(members map[string]*member, t xml.StartElement, values *XMLNode, path string, depth int) error {
+	key := t.Name.Local
+	values = resolve(r.shapes, values)
+	if values.Type != "array" {
+		value, err := r.element(nil, t, values, oapi.Field(path, key), depth+1)
+		if err != nil {
+			return err
+		}
+		members[key] = &member{value: value}
+		return nil
+	}
+	m := members[key]
+	if m == nil {
+		m = &member{array: true}
+		members[key] = m
+	}
+	item, err := r.element(nil, t, values.Items, oapi.Index(oapi.Field(path, key), len(m.items)), depth+1)
+	if err != nil {
+		return err
+	}
+	m.items = append(m.items, item)
+	return nil
 }
 
 func findProperty(node *XMLNode, name xml.Name, kind string) *XMLProperty {
@@ -642,6 +764,7 @@ func collectPrefixes(n *XMLNode, out map[string]string, seen map[*XMLNode]bool) 
 	}
 	collectPrefixes(n.Items, out, seen)
 	collectPrefixes(n.Values, out, seen)
+	collectPrefixes(n.Additional, out, seen)
 	for _, p := range n.Properties {
 		collectPrefixes(p.Node, out, seen)
 	}
@@ -749,14 +872,31 @@ func (w *xmlWriter) mapElement(name string, n *XMLNode, obj map[string]any, root
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		if !isXMLName(k) {
-			return fmt.Errorf("key %q cannot be written as an XML element", k)
-		}
-		if err := w.element(k, n.Values, obj[k], false); err != nil {
+		if err := w.keyed(k, n.Values, obj[k]); err != nil {
 			return err
 		}
 	}
 	w.close(name, n)
+	return nil
+}
+
+// keyed writes the value of key k, of a map or an additional property of
+// an object, as values describes it: an element named by the key, or one
+// per item of an array.
+func (w *xmlWriter) keyed(k string, values *XMLNode, v any) error {
+	if !isXMLName(k) {
+		return fmt.Errorf("key %q cannot be written as an XML element", k)
+	}
+	values = resolve(w.shapes, values)
+	items, isItems := v.([]any)
+	if values == nil || values.Type != "array" || !isItems {
+		return w.element(k, values, v, false)
+	}
+	for _, item := range items {
+		if err := w.element(k, values.Items, item, false); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -909,11 +1049,21 @@ func (w *xmlWriter) content(n *XMLNode, obj map[string]any) error {
 		}
 	}
 	slices.Sort(others)
+	var additional *XMLNode
+	if n != nil {
+		additional = n.Additional
+	}
 	// The text of an undescribed element, as XMLToJSON reads it.
-	if text, ok := obj["#text"]; ok && !declared["#text"] {
+	if text, ok := obj["#text"]; ok && !declared["#text"] && additional == nil {
 		w.text(text, false)
 	}
 	for _, k := range others {
+		if additional != nil {
+			if err := w.keyed(k, additional, obj[k]); err != nil {
+				return err
+			}
+			continue
+		}
 		if k == "#text" {
 			continue
 		}

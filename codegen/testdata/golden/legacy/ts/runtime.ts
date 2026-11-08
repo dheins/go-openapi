@@ -501,15 +501,23 @@ export interface XMLNode {
   readonly namespace?: string;
   readonly prefix?: string;
   readonly kind?: "attribute" | "text" | "cdata";
-  readonly type: "string" | "integer" | "number" | "boolean" | "object" | "array" | "map" | "any";
+  readonly type: "string" | "integer" | "number" | "boolean" | "object" | "array" | "map" | "union" | "any";
+  /** The JSON types of a union's values that are not objects: its
+   * element's text is the first of them it is, unless the element has
+   * child elements or attributes, which are its object variants'
+   * properties. */
+  readonly scalars?: readonly ("string" | "integer" | "number" | "boolean")[];
   /** An array's items are inside an element of their own; otherwise
    * they are elements of the array's parent. */
   readonly wrapped?: boolean;
   readonly items?: XMLNode;
   /** The declared properties of an object, by JSON name, in order. */
   readonly properties?: readonly XMLProperty[];
-  /** The values of a map, each an element named by its key. */
+  /** The values of a map, each an element named by its key, or an
+   * element per item of an array; additional, those of an object's
+   * undeclared properties the same way. */
   readonly values?: XMLNode;
+  readonly additional?: XMLNode;
   /** An object without an element of its own: its properties are in its
    * parent's element. */
   readonly inline?: boolean;
@@ -806,6 +814,18 @@ function xmlScalar(text: string, type: string): unknown {
   return text;
 }
 
+// scalarType returns the first of types, in the order boolean, integer,
+// number, string, that text is a value of; the last of types if none, for
+// validation to report.
+function scalarType(text: string, types: readonly string[]): string {
+  for (const t of ["boolean", "integer", "number", "string"]) {
+    if (types.includes(t) && (t === "string" || xmlScalar(text, t) !== text)) {
+      return t;
+    }
+  }
+  return types[types.length - 1] ?? "string";
+}
+
 function isNil(e: XMLElement): boolean {
   const a = e.attrs.find((a) => a.space === xsiNamespace && a.local === "nil");
   return a !== undefined && (a.value === "true" || a.value === "1");
@@ -882,10 +902,12 @@ export function fromXML(doc: string, root: XMLNode): unknown {
     switch (n.type) {
       case "object":
         return object(e, n, at, depth);
+      case "union":
+        return union(e, n, at, depth);
       case "map": {
         const members = new Map<string, Member>();
         for (const c of childElements(e, at)) {
-          members.set(c.name.local, { value: element(c, n.values!, child(at, c.name.local), depth + 1) });
+          keyed(members, c, n.values!, at, depth);
         }
         return membersObject(members);
       }
@@ -895,6 +917,38 @@ export function fromXML(doc: string, root: XMLNode): unknown {
         return anyElement(e, at, depth);
     }
     return xmlScalar(textOf(e, at), n.type);
+  };
+  // union reads an element of a union: an object of its object variants'
+  // properties if it has child elements or attributes (or is empty, when
+  // there are object variants), else its text, as the first of its scalar
+  // types it is, as a Go server reads it.
+  const union = (e: XMLElement, n: XMLNode, at: string, depth: number): unknown => {
+    const objects = (n.properties?.length ?? 0) > 0;
+    if (objects && (e.attrs.some((a) => !skippedAttribute(a)) || e.children.some((c) => typeof c !== "string"))) {
+      return object(e, n, at, depth);
+    }
+    const text = textOf(e, at);
+    if (objects && text.trim() === "") {
+      return {};
+    }
+    return xmlScalar(text, scalarType(text, n.scalars ?? []));
+  };
+  // keyed reads an element named by its key, a property of a map or an
+  // additional one of an object: an item of the key's array if its values
+  // are arrays.
+  const keyed = (members: Map<string, Member>, c: XMLElement, values: XMLNode, at: string, depth: number): void => {
+    const key = c.name.local;
+    const vn = resolveShape(shapes, values);
+    if (vn.type !== "array") {
+      members.set(key, { value: element(c, vn, child(at, key), depth + 1) });
+      return;
+    }
+    let m = members.get(key);
+    if (m?.items === undefined) {
+      m = { items: [] };
+      members.set(key, m);
+    }
+    m.items!.push(element(c, vn.items!, child(child(at, key), m.items!.length), depth + 1));
   };
   const wrapped = (e: XMLElement, n: XMLNode, at: string, depth: number): unknown[] =>
     childElements(e, at).map((c, i) => {
@@ -1019,7 +1073,9 @@ export function fromXML(doc: string, root: XMLNode): unknown {
       if (skippedAttribute(a) || attribute(st, a)) {
         continue;
       }
-      if (isXMLName(a.local) && !declares(st, a.local)) {
+      // Typed additional properties are elements: other attributes are
+      // not read.
+      if (n.additional === undefined && isXMLName(a.local) && !declares(st, a.local)) {
         st.members.set(a.local, { value: a.value });
       }
     }
@@ -1028,7 +1084,11 @@ export function fromXML(doc: string, root: XMLNode): unknown {
       if (typeof c === "string") {
         chars += c;
       } else if (!claim(st, c, at, depth) && !declares(st, c.name.local)) {
-        undeclared(st.members, c, at, depth);
+        if (n.additional !== undefined) {
+          keyed(st.members, c, n.additional, at, depth);
+        } else {
+          undeclared(st.members, c, at, depth);
+        }
       }
     }
     if (text !== undefined) {
@@ -1065,6 +1125,7 @@ export function toXML(value: unknown, root: XMLNode): string {
     }
     collect(n.items);
     collect(n.values);
+    collect(n.additional);
     for (const p of n.properties ?? []) {
       collect(p.node);
     }
@@ -1121,10 +1182,7 @@ export function toXML(value: unknown, root: XMLNode): string {
       open(name, n, isRoot);
       out += ">";
       for (const k of Object.keys(v).sort()) {
-        if (!isXMLName(k)) {
-          throw new Error(`key ${JSON.stringify(k)} cannot be written as an XML element`);
-        }
-        element(k, n.values, v[k], false);
+        keyed(k, n.values!, v[k]);
       }
       close(name, n);
       return;
@@ -1134,6 +1192,21 @@ export function toXML(value: unknown, root: XMLNode): string {
     out += ">";
     content(n, v);
     close(name, n);
+  };
+  // keyed writes the value of key k, of a map or an additional property of
+  // an object: an element named by the key, or one per item of an array.
+  const keyed = (k: string, values: XMLNode, v: unknown): void => {
+    if (!isXMLName(k)) {
+      throw new Error(`key ${JSON.stringify(k)} cannot be written as an XML element`);
+    }
+    const vn = resolveShape(shapes, values);
+    if (vn.type === "array" && Array.isArray(v)) {
+      for (const item of v) {
+        element(k, vn.items, item, false);
+      }
+    } else {
+      element(k, values, v, false);
+    }
   };
   const attributes = (n: XMLNode | undefined, obj: Values): void => {
     for (const p of n?.properties ?? []) {
@@ -1184,12 +1257,20 @@ export function toXML(value: unknown, root: XMLNode): string {
         element(pn.name ?? "", pn, v, false);
       }
     }
+    const additional = n?.additional;
     // The text of an undescribed element, as fromXML reads it.
-    if (obj["#text"] !== undefined && !declared.has("#text")) {
+    if (obj["#text"] !== undefined && !declared.has("#text") && additional === undefined) {
       text(obj["#text"], false);
     }
     for (const k of Object.keys(obj).sort()) {
-      if (declared.has(k) || k === "#text" || obj[k] === undefined) {
+      if (declared.has(k) || obj[k] === undefined) {
+        continue;
+      }
+      if (additional !== undefined) {
+        keyed(k, additional, obj[k]);
+        continue;
+      }
+      if (k === "#text") {
         continue;
       }
       if (!isXMLName(k)) {
