@@ -918,6 +918,28 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M54 – Middleware checks of text, streams and responses ✅
+- [x] Requests: text bodies against their schemas, and JSON Lines and
+  event stream bodies item by item as the handler reads them, ending with
+  a `*server.BindError` that `middleware.WriteError` answers
+- [x] Responses: XML, form, text, JSON Lines and event stream bodies, and
+  header values read as header parameters; stream items checked after a
+  flush too
+- [x] Parity with the generated petserver: statuses and locations of
+  invalid requests, and its responses passing the response checks
+
+**How it went**
+- *Checked before handed over*: a stream body holds each item back until
+  it is complete and checked, so a handler never reads part of an invalid
+  item; the same splitter cuts written responses, and a fuzz target
+  checks it cuts any chunking the same way, into the events the server's
+  own reader sees.
+- *A stream cannot be a 500*: once flushed, its status is sent, so a
+  rejected item is withheld and writes fail instead.
+- *Messages*: the parity test compares statuses and locations; making
+  JSON Schema's messages read like generated code's is left open.
+- *Not done*: see [features.md](../features.md).
+
 ### M53 – Arrays of arrays and Rails-style fields ✅
 - [x] Go runtime: fields kept in order (`server.FieldValues`,
   `server.ParseQuery`, ordered multipart fields), `a[][b]` grouped as Rack

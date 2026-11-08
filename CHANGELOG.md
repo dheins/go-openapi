@@ -4,6 +4,15 @@
 
 ### Added
 
+- `middleware.Validate` checks text request bodies against their schemas,
+  and the items of JSON Lines and server-sent event bodies as the handler
+  reads them: reading ends at the first invalid item, or line longer than
+  `WithMaxBodyBytes`, with a `*server.BindError` that the new
+  `middleware.WriteError` answers. `WithResponseValidation` checks XML,
+  form, text, JSON Lines and event stream bodies and the values of
+  declared headers, and the items of streams after a flush.
+  `server.Config.StreamError` returns the error of a stream that cannot be
+  read.
 - Arrays of arrays in form and multipart bodies and object parameters,
   written with indices (`boxes[0][1]=2`), and arrays of objects read as
   Rails and Rack write them (`lines[][sku]=a&lines[][qty]=1`), by Go and
@@ -584,6 +593,11 @@
 
 ### Changed
 
+- `middleware.Validate` no longer reads JSON Lines and event stream
+  request bodies before the handler: the handler reads them as they
+  arrive, each line with its line end, and with `RejectResponses` an
+  invalid item of a flushed stream response is withheld and fails the
+  write rather than being sent unchecked.
 - `server.Values.Fields`, `server.FormFields`, `server.ObjectJSON` and
   `server.DecodeFields` use `server.FieldValues`, fields in the order they
   were sent, rather than maps; `Param.QueryValues`, `server.QueryFields`

@@ -53,6 +53,29 @@ paths:
           application/xml: {schema: {$ref: "#/components/schemas/Pet"}}
       responses:
         "204": {description: ok}
+  /notes:
+    post:
+      operationId: postNotes
+      requestBody:
+        required: true
+        content:
+          text/plain: {schema: {type: string, minLength: 2, pattern: "^[a-z]+$"}}
+          application/jsonl: {itemSchema: {$ref: "#/components/schemas/Pet"}}
+          text/event-stream:
+            itemSchema:
+              oneOf:
+                - type: object
+                  required: [event, data]
+                  properties:
+                    event: {const: add}
+                    data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
+                - type: object
+                  required: [event, data]
+                  properties:
+                    event: {const: note}
+                    data: {type: string, maxLength: 3}
+      responses:
+        "204": {description: ok}
   /files/{name}.{ext}:
     get:
       operationId: getFile
@@ -89,6 +112,31 @@ paths:
           description: a problem
           content:
             application/problem+json: {}
+  /kinds:
+    get:
+      operationId: kinds
+      parameters:
+        - {name: case, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Count: {schema: {type: integer, minimum: 0}}
+            X-Tags: {schema: {type: array, items: {type: string, enum: [a, b]}}}
+            X-Where: {content: {application/json: {schema: {type: object, required: [near], properties: {near: {type: string}}}}}}
+          content:
+            application/xml: {schema: {$ref: "#/components/schemas/Pet"}}
+            application/x-www-form-urlencoded: {schema: {$ref: "#/components/schemas/PetForm"}}
+            text/plain: {schema: {type: string, maxLength: 3}}
+        "201":
+          description: a stream
+          content:
+            application/jsonl: {itemSchema: {$ref: "#/components/schemas/Reply"}}
+            text/event-stream:
+              itemSchema:
+                type: object
+                properties:
+                  data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
 components:
   securitySchemes:
     key: {type: apiKey, in: header, name: X-Key}
@@ -137,8 +185,12 @@ func newHandler(t *testing.T, opts ...Option) (http.Handler, *handled) {
 	got := &handled{}
 	return mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.op, _ = OperationFrom(r.Context())
-		data, _ := io.ReadAll(r.Body)
+		data, err := io.ReadAll(r.Body)
 		got.body = string(data)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})), got
 }

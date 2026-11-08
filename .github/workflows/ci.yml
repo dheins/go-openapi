@@ -96,6 +96,7 @@ jobs:
           runtime/server FuzzStreamBodies
           runtime/server FuzzRange
           runtime/server FuzzForwarded
+          middleware FuzzSplitStream
           ir FuzzCallbackURL
           codescan FuzzParseTag
           codescan FuzzDirectives

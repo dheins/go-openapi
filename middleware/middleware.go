@@ -1,8 +1,10 @@
 // Package middleware checks requests against an OpenAPI document for
 // handlers written by hand, without generated code: the routes of its
-// operations, their parameters in every style, JSON, form, multipart and
-// XML bodies, and that credentials are present, answering as generated
-// servers do. Handlers get what it parsed with OperationFrom.
+// operations, their parameters in every style, JSON, form, multipart,
+// XML and text bodies, the items of JSON Lines and server-sent event
+// streams as the handler reads them, and that credentials are present,
+// answering as generated servers do. Handlers get what it parsed with
+// OperationFrom.
 package middleware
 
 import (
@@ -76,9 +78,11 @@ type Operation struct {
 	// path template as the document writes it.
 	ID, Method, Path string
 	Params           Params
-	// Body is the request body, for JSON, form, multipart and XML bodies
-	// (files are empty strings), or nil.
+	// Body is the request body, for JSON, form, multipart, XML and text
+	// bodies (files are empty strings), or nil.
 	Body any
+
+	cfg *server.Config
 }
 
 // Params are the parameters of a request, by name, as the document
@@ -98,6 +102,22 @@ func OperationFrom(ctx context.Context) (*Operation, bool) {
 	return op, ok
 }
 
+// defaultConfig answers errors of requests the middleware did not route.
+var defaultConfig = server.NewConfig()
+
+// WriteError answers r with err as the middleware answers invalid
+// requests: with the WithErrorHandler handler, or as problem details.
+// Handlers use it for the *server.BindError that reading a JSON Lines or
+// event stream body ends with when an item is invalid (400, located at
+// the item, as "/2/name") or a line is too long (413).
+func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	cfg := defaultConfig
+	if op, ok := OperationFrom(r.Context()); ok && op.cfg != nil {
+		cfg = op.cfg
+	}
+	cfg.HandleError(w, r, err)
+}
+
 // Validate returns middleware checking requests against the operations of
 // spec, as generated servers check them, before handing them to the
 // wrapped handler: invalid ones are answered with problem details (400,
@@ -106,8 +126,12 @@ func OperationFrom(ctx context.Context) (*Operation, bool) {
 // compiled.
 //
 // Operations a generated server would not support are routed but not
-// checked, with a warning logged. Bodies of other media types than JSON,
-// forms, multipart/form-data and XML are not checked.
+// checked, with a warning logged. Binary bodies, positional parts and
+// bodies decoded by codecs are not checked against their schemas. A
+// JSON Lines or event stream body is not read ahead: the handler reads
+// the items once they are checked, and reading ends with an error at the
+// first invalid one, which WriteError answers. Each line arrives with the
+// line end it was sent with.
 func Validate(spec *loader.Spec, opts ...Option) (func(http.Handler) http.Handler, error) {
 	var s settings
 	for _, opt := range opts {
@@ -229,6 +253,9 @@ type media struct {
 	schema *jsonschema.Schema
 	prop   server.Property
 	xml    *server.XMLNode
+	// stream checks the items of a JSON Lines or event stream body, or is
+	// nil.
+	stream *stream
 }
 
 // builder compiles what the middleware checks from the document.
@@ -270,22 +297,28 @@ func (b *builder) operation(o *ir.Operation) (*operation, error) {
 		if def == nil {
 			continue
 		}
-		op.params = append(op.params, b.param(p, def))
+		op.params = append(op.params, b.param(p, def.Schema, def.Content))
 	}
-	op.responses = b.responses(oasOp)
+	op.responses = b.responses(o, oasOp)
 	if o.Body != nil && oasOp.RequestBody != nil {
 		rb := oasOp.RequestBody.Deref()
 		op.body = &body{required: o.Body.Required}
 		for _, m := range o.Body.Media {
 			md := &media{ir: m}
-			if def, ok := rb.Content.Get(m.MediaType); ok && def.Deref().Schema != nil {
-				md.schema = b.set.Compile(def.Deref().Schema)
+			def, _ := rb.Content.Get(m.MediaType)
+			def = def.Deref()
+			if def != nil && def.Schema != nil {
+				md.schema = b.set.Compile(def.Schema)
 			}
 			switch m.Kind {
 			case "form", "multipart":
 				md.prop = objectProperty(m.Properties, m.Additional, m.Shape)
 			case "xml":
 				md.xml = xmlNode(m.XML)
+			case "text":
+				md.prop = server.Property{Type: schemaType(def.Schema)}
+			case "jsonl", "sse":
+				md.stream = b.stream(m.Kind, def, m.Events)
 			}
 			op.body.media = append(op.body.media, md)
 		}
@@ -311,7 +344,8 @@ func (b *builder) find(o *ir.Operation) (*oas.PathItem, *oas.Operation) {
 	return item, nil
 }
 
-func (b *builder) param(p *ir.Param, def *oas.Parameter) *param {
+// param returns how to read and check p, of schema, or with content.
+func (b *builder) param(p *ir.Param, schema *oas.Schema, content *oas.OrderedMap[*oas.MediaType]) *param {
 	shape := server.Scalar
 	switch {
 	case p.Array:
@@ -319,10 +353,12 @@ func (b *builder) param(p *ir.Param, def *oas.Parameter) *param {
 	case p.Object:
 		shape = server.Object
 	}
-	schema := def.Schema
 	if p.Content != "" {
-		if m, ok := def.Content.Get(p.Content); ok {
-			schema = m.Deref().Schema
+		// The IR lowers the media type of content.
+		for mt, m := range content.All() {
+			if strings.EqualFold(mt, p.Content) {
+				schema = m.Deref().Schema
+			}
 		}
 	}
 	out := &param{ir: p, shape: shape}
@@ -451,7 +487,7 @@ func xmlNode(n *ir.XMLNode) *server.XMLNode {
 // handler checks a request of op, then hands it to next.
 func (op *operation) handler(cfg *server.Config, set *schemas.Set, mode ResponseMode, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		out := &Operation{ID: op.ir.ID, Method: op.ir.Method, Path: op.ir.Path}
+		out := &Operation{ID: op.ir.ID, Method: op.ir.Method, Path: op.ir.Path, cfg: cfg}
 		if op.unsupported {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, out)))
 			return
@@ -627,14 +663,27 @@ func (ps *Params) set(in, name string, v any) {
 }
 
 // bind reads and checks the body, recording problems on b, and returns
-// its value for a media type it checks. The handler reads the body again.
+// its value for a media type it checks. The handler reads the body again;
+// a stream is not read ahead, but checked item by item as the handler
+// reads it.
 func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter, r *http.Request, b *server.Binder) any {
 	patterns := make([]string, len(bd.media))
+	streamed := false
 	for i, m := range bd.media {
 		patterns[i] = m.ir.MediaType
+		streamed = streamed || isStream(m.ir.Kind)
 	}
-	data, mediaType, ok := cfg.ReadBody(w, r, b, patterns, bd.required)
-	r.Body = io.NopCloser(bytes.NewReader(data))
+	var data []byte
+	var mediaType string
+	var ok bool
+	if streamed {
+		// As generated servers do: the media type first, then the body,
+		// unless it is a stream.
+		mediaType, ok = cfg.BodyMediaType(r, b, patterns, bd.required)
+	} else {
+		data, mediaType, ok = cfg.ReadBody(w, r, b, patterns, bd.required)
+		r.Body = io.NopCloser(bytes.NewReader(data))
+	}
 	if !ok {
 		return nil
 	}
@@ -645,7 +694,19 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 			break
 		}
 	}
-	if m == nil || m.schema == nil {
+	switch {
+	case m.stream != nil:
+		r.Body = newCheckedBody(cfg, set, m.stream, r.Body)
+		return nil
+	case isStream(m.ir.Kind):
+		return nil
+	case streamed:
+		if data, ok = cfg.ReadAll(w, r, b, bd.required); !ok {
+			return nil
+		}
+		r.Body = io.NopCloser(bytes.NewReader(data))
+	}
+	if m.schema == nil {
 		return nil
 	}
 	var doc []byte
@@ -653,6 +714,8 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 	switch m.ir.Kind {
 	case "json":
 		doc = data
+	case "text":
+		doc, err = server.ValuesJSON(server.Values{Items: []string{string(data)}}, server.Scalar, m.prop)
 	case "form":
 		var fields server.FieldValues
 		if fields, err = server.FormFields(data); err == nil {
@@ -663,8 +726,7 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 	case "xml":
 		doc, err = server.XMLToJSON(data, m.xml)
 	default:
-		// Text, bytes, streams, positional parts and codecs are not
-		// checked.
+		// Bytes, positional parts and codecs are not checked.
 		return nil
 	}
 	if err != nil {
@@ -678,6 +740,9 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 	}
 	return value
 }
+
+// isStream reports whether a body kind is read item by item.
+func isStream(kind string) bool { return kind == "jsonl" || kind == "sse" || kind == "partstream" }
 
 // check returns the value of the JSON document data and how it fails
 // compiled, sent in direction dir, as validation errors, or nil.
