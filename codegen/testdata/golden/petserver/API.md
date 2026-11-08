@@ -1337,6 +1337,7 @@ Headers:
 | --- | --- | --- | --- |
 | `pet` | [Pet](#pet) | yes |  |
 | `by` | string | yes | minLength: `1` |
+| `confirmUrl` | string (uri) | no |  |
 
 **Responses**
 
@@ -1351,6 +1352,49 @@ Headers:
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `ok` | boolean | no |  |
+
+**Callbacks**
+
+**`confirm`: `POST` `{$request.body#/confirmUrl}`**
+
+The consumer confirms the adoption back to the API.
+
+- Operation ID: `confirmAdoption`
+- Security: [apiKey](#apikey)
+
+**Request body** (required)
+
+- `application/json`: object
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `receiptUrl` | string (uri) | yes |  |
+| `note` | string | no |  |
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `204` | Confirmed. |
+
+**Callbacks**
+
+**`receipt`: `POST` `{$request.body#/receiptUrl}`**
+
+The API sends the consumer a receipt.
+
+- Operation ID: `sendReceipt`
+- Security: [hookToken](#hooktoken)
+
+**Request body** (required)
+
+- `text/plain`: string
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `204` | Received. |
 
 ## Schemas
 

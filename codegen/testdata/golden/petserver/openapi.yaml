@@ -1404,6 +1404,9 @@ webhooks:
                 by:
                   type: string
                   minLength: 1
+                confirmUrl:
+                  type: string
+                  format: uri
       responses:
         "200":
           description: Acknowledged.
@@ -1414,6 +1417,45 @@ webhooks:
                 properties:
                   ok:
                     type: boolean
+      callbacks:
+        confirm:
+          "{$request.body#/confirmUrl}":
+            post:
+              operationId: confirmAdoption
+              description: The consumer confirms the adoption back to the API.
+              security: [{apiKey: []}]
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      required: [receiptUrl]
+                      properties:
+                        receiptUrl:
+                          type: string
+                          format: uri
+                        note:
+                          type: string
+              responses:
+                "204":
+                  description: Confirmed.
+              callbacks:
+                receipt:
+                  "{$request.body#/receiptUrl}":
+                    post:
+                      operationId: sendReceipt
+                      description: The API sends the consumer a receipt.
+                      security: [{hookToken: []}]
+                      requestBody:
+                        required: true
+                        content:
+                          text/plain:
+                            schema:
+                              type: string
+                      responses:
+                        "204":
+                          description: Received.
 components:
   schemas:
     Order:

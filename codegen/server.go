@@ -108,16 +108,18 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 				return nil, err
 			}
 		}
-		if err := og.receiverFile(sent, m.SenderSchemes); err != nil {
+		if err := og.receiverFile(sent, m.SenderSchemes, m.InboundSchemes); err != nil {
 			return nil, err
 		}
-		content, err := g.render("sender", senderData{Ops: sent, Schemes: m.SenderSchemes}, func(f *fileGen) {
-			f.imp(clientImport, "client")
-		})
-		if err != nil {
-			return nil, fmt.Errorf("generating sender.go: %w", err)
+		if outbound := slices.DeleteFunc(slices.Clone(sent), func(o *ir.Operation) bool { return o.Inbound }); len(outbound) > 0 {
+			content, err := g.render("sender", senderData{Ops: outbound, Schemes: m.SenderSchemes}, func(f *fileGen) {
+				f.imp(clientImport, "client")
+			})
+			if err != nil {
+				return nil, fmt.Errorf("generating sender.go: %w", err)
+			}
+			g.add("sender.go", content)
 		}
-		g.add("sender.go", content)
 	}
 	pkg := func(dir string) (*generator, error) {
 		return targetPackage(opts, lay, gens, &order, dir)
@@ -133,6 +135,9 @@ func Server(m *ir.Model, opts Options) ([]File, error) {
 type senderData struct {
 	Ops     []*ir.Operation
 	Schemes []*ir.SecurityScheme
+	// Inbound says the sender is a consumer's, of a client package,
+	// sending the callbacks the API receives.
+	Inbound bool
 }
 
 // handlerData is what the handler template needs: the operation, the
