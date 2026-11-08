@@ -14,6 +14,7 @@ func FuzzCallbackURL(f *testing.F) {
 	f.Add("$request.query.cb")
 	f.Add("https://{$request.header.X-Token}.example.com/{$request.path.id}?x={$response.body#/a}")
 	f.Add("{$request.body#/a~1b%2}")
+	f.Add("{$url}")
 	f.Fuzz(func(t *testing.T, key string) {
 		parent := &Operation{Method: "POST", Body: &Body{}, Params: []*Param{
 			{In: "query", Name: "cb"}, {In: "header", Name: "X-Token"}, {In: "path", Name: "id"},
@@ -26,11 +27,11 @@ func FuzzCallbackURL(f *testing.F) {
 			return
 		}
 		for i, p := range parts {
-			text := p.Param == nil && !p.Body
+			text := p.IsText()
 			switch {
 			case text && p.Text == "":
 				t.Fatalf("%q: empty text part %d", key, i)
-			case text && i > 0 && parts[i-1].Param == nil && !parts[i-1].Body:
+			case text && i > 0 && parts[i-1].IsText():
 				t.Fatalf("%q: text parts %d and %d are not joined", key, i-1, i)
 			case p.Param != nil && !slices.Contains(parent.Params, p.Param):
 				t.Fatalf("%q: parameter %v is not the operation's", key, p.Param)
