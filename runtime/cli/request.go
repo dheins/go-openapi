@@ -49,7 +49,7 @@ func request[C any](g *given, cmd *Command[C]) (any, error) {
 	if len(cmd.Media) == 0 {
 		return req, nil
 	}
-	if g.body == "" && len(g.files) == 0 {
+	if g.body == "" && len(g.files) == 0 && len(g.parts) == 0 {
 		if cmd.BodyRequired {
 			return nil, errors.New("-body is required")
 		}
@@ -57,9 +57,11 @@ func request[C any](g *given, cmd *Command[C]) (any, error) {
 	}
 	m := cmd.Media[0]
 	if g.contentType != "" {
+		// A multipart document's media type names its boundary too.
+		base, _, _ := strings.Cut(g.contentType, ";")
 		found := false
 		for _, candidate := range cmd.Media {
-			if candidate.MediaType == g.contentType {
+			if strings.EqualFold(candidate.MediaType, strings.TrimSpace(base)) {
 				m, found = candidate, true
 				break
 			}
@@ -71,14 +73,54 @@ func request[C any](g *given, cmd *Command[C]) (any, error) {
 	if cmd.ContentType != "" {
 		v.FieldByName(cmd.ContentType).SetString(m.MediaType)
 	}
+	field := v.FieldByName(m.Field)
+	if !field.IsValid() {
+		return nil, fmt.Errorf("the request has no field %s", m.Field)
+	}
+	if m.Kind == "parts" || m.Kind == "partstream" {
+		if err := setPartsBody(settable(field), g); err != nil {
+			return nil, err
+		}
+		return req, nil
+	}
+	if len(g.parts) > 0 {
+		return nil, fmt.Errorf("-part is for bodies of parts, not %s", m.MediaType)
+	}
 	data, err := readSource(g.body)
 	if err != nil {
 		return nil, fmt.Errorf("-body: %w", err)
 	}
-	if err := setBody(v.FieldByName(m.Field), m, data, g.files); err != nil {
+	if err := setBody(field, m, data, g.files); err != nil {
 		return nil, fmt.Errorf("-body: %w", err)
 	}
 	return req, nil
+}
+
+// setPartsBody sets a body of positional parts from the -part flags, or
+// from -body, a multipart document.
+func setPartsBody(target reflect.Value, g *given) error {
+	if len(g.parts) > 0 {
+		if g.body != "" {
+			return errors.New("give the parts with -part or as -body, not both")
+		}
+		parts, err := readParts(g.parts)
+		if err != nil {
+			return err
+		}
+		return setParts(target, parts)
+	}
+	data, err := readSource(g.body)
+	if err != nil {
+		return fmt.Errorf("-body: %w", err)
+	}
+	parts, err := multipartParts(data, g.contentType)
+	if err != nil {
+		return fmt.Errorf("-body: %w", err)
+	}
+	if err := setParts(target, parts); err != nil {
+		return fmt.Errorf("-body: %w", err)
+	}
+	return nil
 }
 
 // readSource reads a flag's value: the contents of @file, stdin for -, or

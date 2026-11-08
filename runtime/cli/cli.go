@@ -10,7 +10,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/textproto"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,7 +54,8 @@ type Param struct {
 type Media struct {
 	MediaType string
 	// Kind is json, xml, form, codec or multipart (the body is its JSON),
-	// text or binary.
+	// text, binary, or parts or partstream (positional parts, given with
+	// -part or as a multipart document).
 	Kind string
 	// Field is the request's field holding the body.
 	Field string
@@ -241,6 +244,7 @@ type given struct {
 	body        string
 	contentType string
 	files       map[string]string
+	parts       []partArg
 	server      string
 	headers     multi
 	timeout     time.Duration
@@ -284,6 +288,23 @@ func (app App[C]) flags(cmd *Command[C], stderr io.Writer) (*flag.FlagSet, *give
 		fs.StringVar(&g.body, "body", "", help)
 		if len(cmd.Media) > 1 {
 			fs.StringVar(&g.contentType, "content-type", cmd.Media[0].MediaType, "the media type of the body: "+strings.Join(kinds, ", "))
+		}
+		if slices.ContainsFunc(cmd.Media, func(m Media) bool { return m.Kind == "parts" || m.Kind == "partstream" }) {
+			fs.Func("part", "a part of the body, in order: @file, - for stdin, or the text itself (repeatable); without it, -body is a multipart document", func(v string) error {
+				g.parts = append(g.parts, partArg{source: v, header: textproto.MIMEHeader{}})
+				return nil
+			})
+			fs.Func("part-header", "a header of the -part before it, name:value (repeatable)", func(v string) error {
+				if len(g.parts) == 0 {
+					return errors.New("give -part first")
+				}
+				name, value, ok := strings.Cut(v, ":")
+				if !ok {
+					return fmt.Errorf("%q is not name:value", v)
+				}
+				g.parts[len(g.parts)-1].header.Add(strings.TrimSpace(name), strings.TrimSpace(value))
+				return nil
+			})
 		}
 		seen := map[string]bool{}
 		for _, m := range cmd.Media {

@@ -166,7 +166,7 @@ func cliCommandOf(o *ir.Operation) (*cliCommand, string) {
 	fields := map[string]bool{}
 	for _, m := range o.Body.Media {
 		switch m.Kind {
-		case "json", "xml", "form", "codec", "multipart", "text", "binary":
+		case "json", "xml", "form", "codec", "multipart", "text", "binary", "parts", "partstream":
 		default:
 			unsupported = append(unsupported, m.MediaType)
 			continue

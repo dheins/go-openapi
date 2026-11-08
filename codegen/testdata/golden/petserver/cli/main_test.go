@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
+	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/client"
 	"github.com/dheins/go-openapi/runtime/server"
 )
@@ -56,6 +58,30 @@ func (h *handler) ExportPets(_ context.Context, req *api.ExportPetsRequest) (api
 func (h *handler) CreateOrder(_ context.Context, req *api.CreateOrderRequest) (api.CreateOrderResponse, error) {
 	h.seen["CreateOrder"] = req
 	return api.CreateOrder201JSONResponse{Body: req.Body}, nil
+}
+
+func (h *handler) UploadReport(_ context.Context, req *api.UploadReportRequest) (api.UploadReportResponse, error) {
+	h.seen["UploadReport"] = req
+	return api.UploadReport200MixedResponse{Body: api.UploadReport200ResponseParts{Pet: req.Body.Pet, Summary: "stored"}}, nil
+}
+
+func (h *handler) BatchPets(_ context.Context, req *api.BatchPetsRequest) (api.BatchPetsResponse, error) {
+	h.seen["BatchPets"] = req
+	stored := make([]oapi.Part[model.Pet], len(req.Body))
+	for i, p := range req.Body {
+		stored[i] = oapi.Part[model.Pet]{Header: textproto.MIMEHeader{"X-Stored": {"true"}}, Value: p.Value}
+	}
+	return api.BatchPets200MixedResponse{Body: stored}, nil
+}
+
+func (h *handler) PutNotes(_ context.Context, req *api.PutNotesRequest) (api.PutNotesResponse, error) {
+	h.seen["PutNotes"] = req
+	return api.PutNotes204Response{}, nil
+}
+
+func (h *handler) UploadBundle(_ context.Context, req *api.UploadBundleRequest) (api.UploadBundleResponse, error) {
+	h.seen["UploadBundle"] = req
+	return api.UploadBundle200RelatedResponse{Body: req.Body}, nil
 }
 
 func (h *handler) Secure(context.Context, *api.SecureRequest) (api.SecureResponse, error) {
@@ -146,6 +172,49 @@ func TestCommands(t *testing.T) {
 	// A stream is printed item by item.
 	if code, out, errOut := runCLI("export-pets", "-header", "Accept: application/jsonl"); code != 0 || out != "{\"id\":0,\"name\":\"Rex\"}\n{\"id\":0,\"name\":\"Tom\"}\n" {
 		t.Errorf("export-pets: %d %q %q", code, out, errOut)
+	}
+
+	// Positional parts, by -part flags in order, with headers.
+	code, out, errOut = runCLI("upload-report", "-pet-id", "1", "-part", "@"+pet, "-part", "@"+photo, "-part-header", "X-Seq: 2",
+		"-part", "short", "-part-header", "X-Lang: en", "-part", "a,b")
+	// A multipart response is printed as it is.
+	if code != 0 || !strings.Contains(out, "\r\n\r\nstored\r\n") {
+		t.Errorf("upload-report: %d %q %q", code, out, errOut)
+	}
+	if req := h.seen["UploadReport"].(*api.UploadReportRequest); req.Body.Pet.Name != "Kit" || string(req.Body.Part2.Data) != "PNG" ||
+		req.Body.Part2.Header.Get("X-Seq") != "2" || req.Body.Note.Value.Value != "short" || req.Body.Note.Value.Header.Get("X-Lang") != "en" ||
+		len(req.Body.Rest) != 1 || string(req.Body.Rest[0].Data) != "a,b" {
+		t.Errorf("upload-report request = %+v", req.Body)
+	}
+	// A part the document requires a header of is checked before sending.
+	if code, _, errOut := runCLI("upload-report", "-pet-id", "1", "-part", "@"+pet, "-part", "@"+photo); code != 2 || !strings.Contains(errOut, "X-Seq") {
+		t.Errorf("upload-report without X-Seq: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("upload-report", "-pet-id", "1", "-part-header", "X-Seq: 1"); code != 2 || !strings.Contains(errOut, "give -part first") {
+		t.Errorf("-part-header first: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("batch-pets", "-part", `{"name":"Rex"}`, "-part-header", "X-Seq: 1", "-part", `{"name":"Tom"}`, "-part-header", "X-Seq: 2"); code != 0 {
+		t.Errorf("batch-pets: %d %q", code, errOut)
+	}
+	if req := h.seen["BatchPets"].(*api.BatchPetsRequest); len(req.Body) != 2 || req.Body[1].Value.Name != "Tom" {
+		t.Errorf("batch-pets request = %+v", req.Body)
+	}
+	// Or the body is a multipart document, its boundary on its first line.
+	doc := "--b\r\nContent-Type: text/plain\r\n\r\none\r\n--b\r\nContent-Type: text/plain\r\n\r\ntwo\r\n--b--\r\n"
+	if code, _, errOut := runCLI("put-notes", "-body", doc); code != 0 {
+		t.Errorf("put-notes: %d %q", code, errOut)
+	}
+	if req := h.seen["PutNotes"].(*api.PutNotesRequest); !slices.Equal(req.Body, []string{"one", "two"}) {
+		t.Errorf("put-notes request = %+v", req.Body)
+	}
+	if code, _, errOut := runCLI("put-notes", "-body", "not multipart"); code != 2 || !strings.Contains(errOut, "boundary") {
+		t.Errorf("put-notes not multipart: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("upload-bundle", "-part", "@"+photo, "-part", "@"+photo, "-part-header", "X-Order: 2"); code != 0 {
+		t.Errorf("upload-bundle: %d %q", code, errOut)
+	}
+	if req := h.seen["UploadBundle"].(*api.UploadBundleRequest); len(req.Body) != 2 || string(req.Body[0].Data) != "PNG" || req.Body[1].Header.Get("X-Order") != "2" {
+		t.Errorf("upload-bundle request = %+v", req.Body)
 	}
 
 	// Credentials by flag, or by environment variable.

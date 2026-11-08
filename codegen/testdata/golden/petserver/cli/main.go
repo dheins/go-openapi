@@ -224,6 +224,7 @@ var app = cli.App[*client.Client]{
 			},
 			Media: []cli.Media{
 				{MediaType: "multipart/form-data", Kind: "multipart", Field: "Body"},
+				{MediaType: "multipart/mixed", Kind: "parts", Field: "MixedBody"},
 			},
 			BodyRequired: true,
 			ContentType:  "ContentType",
@@ -282,6 +283,34 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "upload-report", Summary: "Parts by position, then attachments.", Tag: "",
+			Request: func() any { return new(api.UploadReportRequest) },
+			Params: []cli.Param{
+				{Flag: "pet-id", Field: "PetID", In: "path", Name: "petId", Kind: cli.Text, Required: true},
+			},
+			Media: []cli.Media{
+				{MediaType: "multipart/related", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.UploadReport(ctx, req.(*api.UploadReportRequest))
+			},
+		},
+		{
+			Name: "stream-photos", Summary: "Photos sent one by one, each acknowledged as it arrives.", Tag: "",
+			Request: func() any { return new(api.StreamPhotosRequest) },
+			Params: []cli.Param{
+				{Flag: "pet-id", Field: "PetID", In: "path", Name: "petId", Kind: cli.Text, Required: true},
+			},
+			Media: []cli.Media{
+				{MediaType: "multipart/mixed", Kind: "partstream", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.StreamPhotos(ctx, req.(*api.StreamPhotosRequest))
+			},
+		},
+		{
 			Name: "import-pet", Summary: "Media types with different schemas.", Tag: "",
 			Request: func() any { return new(api.ImportPetRequest) },
 			Media: []cli.Media{
@@ -332,6 +361,39 @@ var app = cli.App[*client.Client]{
 			BodyRequired: true,
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutFamily(ctx, req.(*api.PutFamilyRequest))
+			},
+		},
+		{
+			Name: "batch-pets", Summary: "Pets as positional JSON parts.", Tag: "",
+			Request: func() any { return new(api.BatchPetsRequest) },
+			Media: []cli.Media{
+				{MediaType: "multipart/mixed", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.BatchPets(ctx, req.(*api.BatchPetsRequest))
+			},
+		},
+		{
+			Name: "upload-bundle", Summary: "", Tag: "",
+			Request: func() any { return new(api.UploadBundleRequest) },
+			Media: []cli.Media{
+				{MediaType: "multipart/related", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.UploadBundle(ctx, req.(*api.UploadBundleRequest))
+			},
+		},
+		{
+			Name: "put-notes", Summary: "", Tag: "",
+			Request: func() any { return new(api.PutNotesRequest) },
+			Media: []cli.Media{
+				{MediaType: "multipart/alternative", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PutNotes(ctx, req.(*api.PutNotesRequest))
 			},
 		},
 		{
