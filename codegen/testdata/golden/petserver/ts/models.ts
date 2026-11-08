@@ -6,10 +6,12 @@ export interface Order {
   id: string;
   lines?: OrderLine[];
   notes?: { [key: string]: string };
+  /** The lines packed in each box, by index. */
+  boxes?: number[][];
 }
 
 /** The schema of Order, for validation and encoding. */
-export const OrderSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "string" }, required: true }, lines: { schema: { kind: "array", items: $ref(() => OrderLineSchema) } }, notes: { schema: { kind: "map", values: { kind: "string" } } } } };
+export const OrderSchema: $Schema = { kind: "object", properties: { id: { schema: { kind: "string" }, required: true }, lines: { schema: { kind: "array", items: $ref(() => OrderLineSchema) } }, notes: { schema: { kind: "map", values: { kind: "string" } } }, boxes: { schema: { kind: "array", items: { kind: "array", items: { kind: "integer" } } } } } };
 
 export interface OrderLine {
   sku: string;

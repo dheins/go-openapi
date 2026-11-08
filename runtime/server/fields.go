@@ -100,27 +100,44 @@ func readFields(dec *jsontext.Decoder, prefix []string, nested bool, fields *[]F
 }
 
 // indexedFields writes the JSON array raw at path with indices, if it
-// holds an object: a[0][b]=x for an object item, a[1]=y for a scalar one.
-// It reports whether it did; an array of scalars is left to the caller,
-// as a=x&a=y.
+// holds an object or an array: a[0][b]=x for an object item, a[0][0]=x
+// for the items of an array item, a[1]=y for a scalar one. It reports
+// whether it did; an array of scalars is left to the caller, as a=x&a=y.
 func indexedFields(raw []byte, path []string, fields *[]Field) (bool, error) {
 	var items []json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return false, err
 	}
-	hasObject := false
+	nested := false
 	for _, it := range items {
-		if len(it) > 0 && it[0] == '{' {
-			hasObject = true
+		if len(it) > 0 && (it[0] == '{' || it[0] == '[') {
+			nested = true
 			break
 		}
 	}
-	if !hasObject {
+	if !nested {
 		return false, nil
 	}
 	for i, it := range items {
 		at := append(append([]string{}, path...), strconv.Itoa(i))
 		switch {
+		case it[0] == '[':
+			// Its scalars get indices too, so that the item is one: an
+			// empty array has no fields, and is not sent.
+			indexed, err := indexedFields(it, at, fields)
+			if err != nil {
+				return false, err
+			}
+			if indexed {
+				continue
+			}
+			values, err := arrayValues(it)
+			if err != nil {
+				return false, err
+			}
+			for j, v := range values {
+				*fields = append(*fields, Field{Path: append(append([]string{}, at...), strconv.Itoa(j)), Values: []string{v}})
+			}
 		case it[0] == '{':
 			dec := jsontext.NewDecoder(bytes.NewReader(it))
 			if _, err := dec.ReadToken(); err != nil {

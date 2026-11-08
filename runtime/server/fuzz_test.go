@@ -21,7 +21,7 @@ func FuzzParamStyles(f *testing.F) {
 	}
 	styles := []string{"simple", "label", "matrix", "form", "spaceDelimited", "pipeDelimited", "deepObject"}
 	f.Fuzz(func(t *testing.T, raw string) {
-		q, _ := url.ParseQuery(raw)
+		q := ParseQuery(&http.Request{URL: &url.URL{RawQuery: raw}})
 		h := http.Header{"X-P": {raw}}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Cookie", "id="+raw)
@@ -176,6 +176,8 @@ func FuzzObjectJSON(f *testing.F) {
 	f.Add("a[b]=1&owner=%7B%22age%22%3A1%7D&x[=1&[c]=3")
 	f.Add("items[0][name]=a&items[0][tags][1]=x&items[3][qty]=2&tree[children][0][children][0][name]=leaf")
 	f.Add("items[0]=v&items[0][name]=b&tree[children][x]=1&items[01][qty]=1")
+	f.Add("items[][name]=a&items[][qty]=1&items[][name]=b&items[][tags][]=x&grid[0][]=1&grid[1][1]=2&grid[2]=3")
+	f.Add("items[][name]=a&items[0][qty]=1&grid=1&grid[][]=2&tree[children][][name]=x&meta[][]=y")
 	tree := &Property{}
 	*tree = Property{Type: "object", Properties: map[string]Property{"name": {Type: "string"}, "children": {Array: true, Ref: tree}}}
 	obj := Property{Type: "object", Properties: map[string]Property{
@@ -185,9 +187,10 @@ func FuzzObjectJSON(f *testing.F) {
 		"a[b]":  {Type: "string"},
 		"items": {Type: "object", Array: true, Properties: map[string]Property{"name": {Type: "string"}, "tags": {Type: "string", Array: true}, "qty": {Type: "integer"}}},
 		"tree":  {Ref: tree},
+		"grid":  {Type: "integer", Array: true, Depth: 1},
 	}}
 	f.Fuzz(func(t *testing.T, query string) {
-		q, err := url.ParseQuery(query)
+		q, err := ParseFields(query)
 		if err != nil {
 			return
 		}

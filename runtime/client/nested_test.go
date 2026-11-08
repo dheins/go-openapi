@@ -1,7 +1,6 @@
 package client
 
 import (
-	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,7 +9,7 @@ import (
 )
 
 // item, order and node are bodies and parameters with arrays of objects,
-// maps of objects, and a recursive type.
+// arrays of arrays, maps of objects, and a recursive type.
 type item struct {
 	Name string   `json:"name"`
 	Tags []string `json:"tags,omitempty"`
@@ -27,6 +26,7 @@ type order struct {
 	Items []item          `json:"items"`
 	Meta  map[string]item `json:"meta,omitempty"`
 	Tree  *node           `json:"tree,omitempty"`
+	Grid  [][]int64       `json:"grid,omitempty"`
 }
 
 var (
@@ -46,6 +46,7 @@ var (
 		"items": {Type: "object", Array: true, Properties: itemShape.Properties},
 		"meta":  {Type: "object", Additional: &itemShape},
 		"tree":  {Ref: nodeShape},
+		"grid":  {Type: "integer", Array: true, Depth: 1},
 	}}
 )
 
@@ -58,6 +59,7 @@ func sampleOrder() order {
 			{Name: "a", Children: []node{{Name: "a1"}, {Name: "a2"}}},
 			{Name: "b"},
 		}},
+		Grid: [][]int64{{1, 2}, {3}},
 	}
 }
 
@@ -69,7 +71,7 @@ func TestNestedFieldsRoundTrip(t *testing.T) {
 	r.FormBody("application/x-www-form-urlencoded", in)
 	form := string(r.body)
 	for _, want := range []string{"items%5B0%5D%5Bname%5D=apple", "items%5B0%5D%5Btags%5D=red", "items%5B1%5D%5Bqty%5D=1",
-		"meta%5Bgift%5D%5Bname%5D=bow", "tree%5Bchildren%5D%5B0%5D%5Bchildren%5D%5B1%5D%5Bname%5D=a2"} {
+		"meta%5Bgift%5D%5Bname%5D=bow", "tree%5Bchildren%5D%5B0%5D%5Bchildren%5D%5B1%5D%5Bname%5D=a2", "grid%5B0%5D%5B1%5D=2"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("form %s lacks %s", form, want)
 		}
@@ -84,11 +86,11 @@ func TestNestedFieldsRoundTrip(t *testing.T) {
 	}
 
 	// A deepObject parameter.
-	p := server.Param{Name: "o", Style: "deepObject", Explode: true, Shape: server.Object, Properties: []string{"id", "items", "meta", "tree"}}
+	p := server.Param{Name: "o", Style: "deepObject", Explode: true, Shape: server.Object, Properties: []string{"id", "items", "meta", "tree", "grid"}}
 	r = NewRequest("GET")
 	r.QueryParam(p, in)
 	req := build(t, r)
-	vals, ok, err := p.QueryValues(req.URL.Query())
+	vals, ok, err := p.QueryValues(server.ParseQuery(req))
 	if err != nil || !ok {
 		t.Fatalf("deepObject: %v %v", ok, err)
 	}
@@ -122,7 +124,7 @@ func TestNestedFieldsErrors(t *testing.T) {
 		{"tree[children][0]=leaf", "expected object, got string"},
 	}
 	for _, tc := range tests {
-		q, err := url.ParseQuery(tc.query)
+		q, err := server.ParseFields(tc.query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +135,7 @@ func TestNestedFieldsErrors(t *testing.T) {
 	}
 
 	// Indices need not start at 0 or be contiguous; items keep their order.
-	q, _ := url.ParseQuery("id=o&items[5][name]=b&items[5][qty]=2&items[2][name]=a&items[2][qty]=1")
+	q, _ := server.ParseFields("id=o&items[5][name]=b&items[5][qty]=2&items[2][name]=a&items[2][qty]=1")
 	out, err := server.DecodeFields[order](q, orderShape)
 	if err != nil || len(out.Items) != 2 || out.Items[0].Name != "a" || out.Items[1].Qty != 2 {
 		t.Errorf("sparse indices: %+v %v", out, err)

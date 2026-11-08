@@ -23,7 +23,7 @@ func HandleGetSettings(c *server.Config, h Handler, sec SecurityHandler) http.Ha
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req GetSettingsRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, err := getSettingsPetIDParam.PathValues(r.PathValue("p0")); err != nil {
 			b.Param("path", "petId", err)
 		} else {

@@ -21,7 +21,7 @@ func HandleListPets(c *server.Config, h Handler, sec SecurityHandler) http.Handl
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req ListPetsRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, ok, err := listPetsLimitParam.QueryValues(query); err != nil {
 			b.Param("query", "limit", err)
 		} else if ok {

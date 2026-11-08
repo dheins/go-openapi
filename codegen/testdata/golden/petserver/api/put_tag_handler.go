@@ -21,7 +21,7 @@ func HandlePutTag(c *server.Config, h Handler, sec SecurityHandler) http.Handler
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req PutTagRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, err := putTagCodeParam.PathValues(r.PathValue("p0")); err != nil {
 			b.Param("path", "code", err)
 		} else {

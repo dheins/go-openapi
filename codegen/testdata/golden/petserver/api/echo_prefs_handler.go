@@ -23,7 +23,7 @@ func HandleEchoPrefs(c *server.Config, h Handler, sec SecurityHandler) http.Hand
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req EchoPrefsRequest
 		var b server.Binder
-		if raw, ok := server.ContentValue(r, nil, "header", "X-Prefs"); ok {
+		if raw, ok := server.ContentValue(r, server.Query{}, "header", "X-Prefs"); ok {
 			if v, err := server.DecodeXMLContent[model.Prefs](raw, echoPrefsXPrefsXMLShape, oapi.Request); err != nil {
 				b.Param("header", "X-Prefs", err)
 			} else {

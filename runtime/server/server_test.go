@@ -22,7 +22,7 @@ import (
 )
 
 func TestPathStyles(t *testing.T) {
-	obj := map[string][]string{"role": {"admin"}, "firstName": {"Alex"}}
+	obj := FieldValues{{"role", "admin"}, {"firstName", "Alex"}}
 	tests := []struct {
 		style   string
 		explode bool
@@ -59,7 +59,7 @@ func TestPathStyles(t *testing.T) {
 }
 
 func TestQueryStyles(t *testing.T) {
-	q, _ := url.ParseQuery("ids=1,2&ids=3&one=a,b&sp=a%20b&pp=a|b&f[role]=admin&f[age]=3&f[owner][name]=Ann&role=user&age=4&rep=1&rep=2")
+	q := queryOf("ids=1,2&ids=3&one=a,b&sp=a%20b&pp=a|b&f[role]=admin&f[age]=3&f[owner][name]=Ann&role=user&age=4&rep=1&rep=2")
 	tests := []struct {
 		p    Param
 		want Values
@@ -69,9 +69,9 @@ func TestQueryStyles(t *testing.T) {
 		{Param{Name: "one", Style: "form", Shape: Array}, Values{Items: []string{"a", "b"}}},
 		{Param{Name: "sp", Style: "spaceDelimited", Shape: Array}, Values{Items: []string{"a", "b"}}},
 		{Param{Name: "pp", Style: "pipeDelimited", Shape: Array}, Values{Items: []string{"a", "b"}}},
-		{Param{Name: "f", Style: "deepObject", Explode: true, Shape: Object}, Values{Fields: map[string][]string{"role": {"admin"}, "age": {"3"}, "owner[name]": {"Ann"}}}},
+		{Param{Name: "f", Style: "deepObject", Explode: true, Shape: Object}, Values{Fields: FieldValues{{"role", "admin"}, {"age", "3"}, {"owner[name]", "Ann"}}}},
 		{Param{Name: "x", Style: "form", Explode: true, Shape: Object, Properties: []string{"role", "age", "missing"}},
-			Values{Fields: map[string][]string{"role": {"user"}, "age": {"4"}}}},
+			Values{Fields: FieldValues{{"role", "user"}, {"age", "4"}}}},
 	}
 	for _, tt := range tests {
 		got, ok, err := tt.p.QueryValues(q)
@@ -88,7 +88,7 @@ func TestQueryStyles(t *testing.T) {
 }
 
 func TestEmptyQueryValues(t *testing.T) {
-	q, _ := url.ParseQuery("e=")
+	q := queryOf("e=")
 	tests := []struct {
 		p       Param
 		want    Values
@@ -124,7 +124,7 @@ func TestHeaderAndCookieStyles(t *testing.T) {
 		t.Errorf("quoted header list = %q", got.Items)
 	}
 	h.Set("X-Obj", "role=admin,age=3")
-	if got, _, _ := (Param{Name: "X-Obj", Shape: Object, Explode: true}).HeaderValues(h); !reflect.DeepEqual(got.Fields, map[string][]string{"role": {"admin"}, "age": {"3"}}) {
+	if got, _, _ := (Param{Name: "X-Obj", Shape: Object, Explode: true}).HeaderValues(h); !reflect.DeepEqual(got.Fields, FieldValues{{"role", "admin"}, {"age", "3"}}) {
 		t.Errorf("header object = %v", got)
 	}
 
@@ -136,15 +136,15 @@ func TestHeaderAndCookieStyles(t *testing.T) {
 	if got, _, _ := (Param{Name: "rep", Style: "form", Explode: true, Shape: Array}).CookieValues(r); !reflect.DeepEqual(got.Items, []string{"1", "2"}) {
 		t.Errorf("exploded cookie array = %v", got)
 	}
-	if got, _, _ := (Param{Name: "o", Style: "form", Explode: true, Shape: Object, Properties: []string{"role"}}).CookieValues(r); !reflect.DeepEqual(got.Fields, map[string][]string{"role": {"admin"}}) {
+	if got, _, _ := (Param{Name: "o", Style: "form", Explode: true, Shape: Object, Properties: []string{"role"}}).CookieValues(r); !reflect.DeepEqual(got.Fields, FieldValues{{"role", "admin"}}) {
 		t.Errorf("exploded cookie object = %v", got)
 	}
 }
 
 func TestObjectJSON(t *testing.T) {
-	got, err := ObjectJSON(map[string][]string{
+	got, err := ObjectJSON(FieldsOf(map[string][]string{
 		"age": {"3"}, "ratio": {"0.5"}, "ok": {"true"}, "bad": {"x"}, "tags": {"a", "b"}, "ids": {"1", "y"}, "extra": {"e"},
-	}, Property{Type: "object", Properties: map[string]Property{
+	}), Property{Type: "object", Properties: map[string]Property{
 		"age": {Type: "integer"}, "ratio": {Type: "number"}, "ok": {Type: "boolean"}, "bad": {Type: "integer"},
 		"tags": {Type: "string", Array: true}, "ids": {Type: "integer", Array: true},
 	}})
@@ -152,7 +152,7 @@ func TestObjectJSON(t *testing.T) {
 	if err != nil || string(got) != want {
 		t.Errorf("ObjectJSON = %s, %v\nwant %s", got, err, want)
 	}
-	if _, err := ObjectJSON(map[string][]string{"age": {"1", "2"}}, Property{Type: "object", Properties: map[string]Property{"age": {Type: "integer"}}}); err == nil {
+	if _, err := ObjectJSON(FieldValues{{"age", "1"}, {"age", "2"}}, Property{Type: "object", Properties: map[string]Property{"age": {Type: "integer"}}}); err == nil {
 		t.Error("two values accepted for a scalar property")
 	}
 }
@@ -188,7 +188,7 @@ func TestObjectJSONNested(t *testing.T) {
 		{query: "owner[age][x]=1", err: "/owner/age: expected a value, got nested properties"},
 	}
 	for _, tt := range tests {
-		q, err := url.ParseQuery(tt.query)
+		q, err := ParseFields(tt.query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -618,7 +618,7 @@ func TestValuesJSON(t *testing.T) {
 		{Values{Items: []string{"x"}}, Scalar, Property{Type: "integer"}, `"x"`},
 		{Values{Items: []string{"1", "2.5", "y"}}, Array, Property{Type: "number"}, `[1,2.5,"y"]`},
 		{Values{Items: []string{"true"}}, Array, Property{Type: "boolean"}, `[true]`},
-		{Values{Fields: map[string][]string{"a": {"1"}, "b": {"x"}}}, Object, Property{Type: "object", Properties: map[string]Property{"a": {Type: "integer"}}}, `{"a":1,"b":"x"}`},
+		{Values{Fields: FieldValues{{"a", "1"}, {"b", "x"}}}, Object, Property{Type: "object", Properties: map[string]Property{"a": {Type: "integer"}}}, `{"a":1,"b":"x"}`},
 	} {
 		got, err := ValuesJSON(tt.v, tt.shape, tt.prop)
 		if err != nil || string(got) != tt.want {
@@ -627,5 +627,71 @@ func TestValuesJSON(t *testing.T) {
 	}
 	if _, err := ValuesJSON(Values{Items: []string{"a", "b"}}, Scalar, Property{Type: "string"}); err == nil {
 		t.Error("two values of a scalar: no error")
+	}
+}
+
+// queryOf parses raw as the query string of a request.
+func queryOf(raw string) Query {
+	return ParseQuery(&http.Request{URL: &url.URL{RawQuery: raw}})
+}
+
+func TestObjectJSONArrays(t *testing.T) {
+	line := Property{Type: "object", Properties: map[string]Property{"sku": {Type: "string"}, "qty": {Type: "integer"}, "tags": {Type: "string", Array: true}}}
+	line.Array = true
+	obj := Property{Type: "object", Properties: map[string]Property{
+		"lines": line,
+		"grid":  {Type: "integer", Array: true, Depth: 1},
+		"cube":  {Type: "integer", Array: true, Depth: 2},
+	}}
+	tests := []struct{ query, want string }{
+		// Rails and Rack: a property the last item has starts the next.
+		{"lines[][sku]=a&lines[][qty]=1&lines[][sku]=b&lines[][qty]=2", `{"lines":[{"qty":1,"sku":"a"},{"qty":2,"sku":"b"}]}`},
+		{"lines[][sku]=a&lines[][sku]=b&lines[][qty]=2", `{"lines":[{"sku":"a"},{"qty":2,"sku":"b"}]}`},
+		// An array inside an item adds to it.
+		{"lines[][sku]=a&lines[][tags][]=x&lines[][tags][]=y&lines[][sku]=b", `{"lines":[{"sku":"a","tags":["x","y"]},{"sku":"b"}]}`},
+		// Indices, as before.
+		{"lines[1][sku]=b&lines[0][sku]=a", `{"lines":[{"sku":"a"},{"sku":"b"}]}`},
+		// Arrays of arrays: indices, appended items, or repeated values.
+		{"grid[0][0]=1&grid[0][1]=2&grid[1][0]=3", `{"grid":[[1,2],[3]]}`},
+		{"grid[0][]=1&grid[0][]=2&grid[1][]=3", `{"grid":[[1,2],[3]]}`},
+		{"grid[0]=1&grid[0]=2&grid[1]=3", `{"grid":[[1,2],[3]]}`},
+		{"cube[0][0][0]=1&cube[0][1]=2&cube[0][1]=3", `{"cube":[[[1],[2,3]]]}`},
+	}
+	for _, tt := range tests {
+		fields, err := ParseFields(tt.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ObjectJSON(fields, obj)
+		if err != nil || string(got) != tt.want {
+			t.Errorf("%s = %s, %v\nwant %s", tt.query, got, err, tt.want)
+		}
+	}
+	for _, bad := range []struct{ query, want string }{
+		{"lines[][sku]=a&lines[0][sku]=b", `/lines: both items written "[]" and other values or indices`},
+		{"grid=1&grid=2", "/grid: expected the items of an array of arrays"},
+		{"lines[][sku]=a&lines=x", `/lines: both items written "[]"`},
+	} {
+		fields, _ := ParseFields(bad.query)
+		if _, err := ObjectJSON(fields, obj); err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("%s: %v, want %s", bad.query, err, bad.want)
+		}
+	}
+}
+
+func TestParseFields(t *testing.T) {
+	got, err := ParseFields("b=2&a=1&b=3&&c")
+	want := FieldValues{{"b", "2"}, {"a", "1"}, {"b", "3"}, {"c", ""}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseFields = %v, %v", got, err)
+	}
+	// As url.ParseQuery, the fields that parse are kept.
+	got, err = ParseFields("a=%zz&b=1&c;d=2")
+	if err == nil || !reflect.DeepEqual(got, FieldValues{{"b", "1"}}) {
+		t.Errorf("bad fields: %v, %v", got, err)
+	}
+	q := queryOf("x[][a]=1&y=2&x[][a]=3")
+	if q.Get("y") != "2" || len(q.Fields) != 3 || q.Fields[2] != (FieldValue{"x[][a]", "3"}) {
+		t.Errorf("ParseQuery = %+v", q)
 	}
 }

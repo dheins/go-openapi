@@ -230,7 +230,7 @@ components:
 		t.Errorf("params:\n%s\nwant\n%s", strings.Join(got, " "), want)
 	}
 	filter := styles.Params[1]
-	if fmt.Sprint(filter.Properties) != "[{role string false [] <nil> [] []  } {age integer false [] <nil> [] []  } {tags string true [] <nil> [] []  }]" {
+	if fmt.Sprint(filter.Properties) != "[{role string false 0 [] <nil> [] []  } {age integer false 0 [] <nil> [] []  } {tags string true 0 [] <nil> [] []  }]" {
 		t.Errorf("properties = %v", filter.Properties)
 	}
 	if !styles.Params[3].AllowEmptyValue {
@@ -300,7 +300,7 @@ components:
 	if lines := o.Body.Fields[2].Type; lines.Kind != Stream || lines.Elem.Kind != Named || lines.Elem.Type.Name != "Pet" {
 		t.Errorf("stream field = %+v", lines)
 	}
-	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false [] <nil> [] []  } {photo file false [] <nil> [] []  } {tags string true [] <nil> [] []  }]" {
+	if props := fmt.Sprint(o.Body.Media[1].Properties); props != "[{name string false 0 [] <nil> [] []  } {photo file false 0 [] <nil> [] []  } {tags string true 0 [] <nil> [] []  }]" {
 		t.Errorf("multipart properties = %s", props)
 	}
 	var warnings []string
@@ -447,7 +447,7 @@ components:
         pdf: {type: string, contentMediaType: application/pdf}
 `, Options{Operations: true})
 	props := operationNamed(t, m, "Upload").Body.Media[0].Properties
-	if got := fmt.Sprint(props); got != "[{pdf file false [] <nil> [application/pdf] [X-Sum]  } {untyped file false [] <nil> [] []  } {anything file false [] <nil> [] []  } {scans file true [] <nil> [] []  } {caption string false [] <nil> [] []  }]" {
+	if got := fmt.Sprint(props); got != "[{pdf file false 0 [] <nil> [application/pdf] [X-Sum]  } {untyped file false 0 [] <nil> [] []  } {anything file false 0 [] <nil> [] []  } {scans file true 0 [] <nil> [] []  } {caption string false 0 [] <nil> [] []  }]" {
 		t.Errorf("multipart properties = %s", got)
 	}
 	// Outside multipart, a contentMediaType string holds text.
@@ -545,7 +545,7 @@ components:
 	if deep.Unsupported != "" {
 		t.Fatalf("deep: %s", deep.Unsupported)
 	}
-	if got := fmt.Sprint(deep.Params[0].Properties); got != "[{owner object false [{age integer false [] <nil> [] []  }] <nil> [] []  } {any any false [] <nil> [] []  }]" {
+	if got := fmt.Sprint(deep.Params[0].Properties); got != "[{owner object false 0 [{age integer false 0 [] <nil> [] []  }] <nil> [] []  } {any any false 0 [] <nil> [] []  }]" {
 		t.Errorf("nested properties = %s", got)
 	}
 	if a := deep.Params[1].Additional; a == nil || a.Type != "integer" {
@@ -801,7 +801,7 @@ paths:
 		t.Errorf("fields = %s", got)
 	}
 	mixed, related := o.Body.Media[1].Parts, o.Body.Media[2].Parts
-	if mixed.Item != "file" || fmt.Sprint(mixed.Prefix) != "[{  false [] <nil> [image/png] [Content-Id]  }]" || fmt.Sprint(mixed.Rest.ContentTypes) != "[image/*]" {
+	if mixed.Item != "file" || fmt.Sprint(mixed.Prefix) != "[{  false 0 [] <nil> [image/png] [Content-Id]  }]" || fmt.Sprint(mixed.Rest.ContentTypes) != "[image/*]" {
 		t.Errorf("mixed = %+v", mixed)
 	}
 	// Items by position are the fields of a tuple, here a text part; any
@@ -1183,5 +1183,44 @@ components:
 	}
 	if want := "application/* is a wildcard and cannot have a codec, which is registered for one media type"; !strings.Contains(all, want) {
 		t.Errorf("no warning %q in:\n%s", want, all)
+	}
+}
+
+func TestNestedArrayFields(t *testing.T) {
+	m := build(t, `openapi: 3.1.0
+info: {title: t, version: "1"}
+paths:
+  /grid:
+    post:
+      operationId: postGrid
+      parameters:
+        - name: f
+          in: query
+          style: deepObject
+          explode: true
+          schema: {type: object, properties: {cells: {type: array, items: {type: array, items: {type: array, items: {type: integer}}}}}}
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: {type: object, properties: {rows: {type: array, items: {type: array, items: {type: object, properties: {v: {type: string}}}}}}}
+          multipart/form-data:
+            schema: {type: object, properties: {scans: {type: array, items: {type: array, items: {type: string, format: binary}}}}}
+      responses:
+        "204": {description: ok}
+`, Options{Operations: true})
+	o := m.Operations[0]
+	if cells := o.Params[0].Properties[0]; cells.Name != "cells" || !cells.Array || cells.Depth != 2 || cells.Type != "integer" {
+		t.Errorf("cells = %+v", cells)
+	}
+	var media []string
+	for _, md := range o.Body.Media {
+		media = append(media, md.MediaType)
+	}
+	// Files in arrays of arrays are not parts: multipart is answered 415.
+	if strings.Join(media, " ") != "application/x-www-form-urlencoded" {
+		t.Fatalf("media = %v", media)
+	}
+	if rows := o.Body.Media[0].Properties[0]; !rows.Array || rows.Depth != 1 || rows.Type != "object" || rows.Properties[0].Name != "v" {
+		t.Errorf("rows = %+v", rows)
 	}
 }

@@ -25,7 +25,7 @@ func HandleGetReports(c *server.Config, h Handler, sec SecurityHandler) http.Han
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req GetReportsRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, err := getReportsIDsParam.PathValues(r.PathValue("p0")); err != nil {
 			b.Param("path", "ids", err)
 		} else {
@@ -76,7 +76,7 @@ func HandleGetReports(c *server.Config, h Handler, sec SecurityHandler) http.Han
 				req.Limit = oapi.Some(v)
 			}
 		}
-		if raw, ok := server.ContentValue(r, nil, "header", "X-Meta"); ok {
+		if raw, ok := server.ContentValue(r, server.Query{}, "header", "X-Meta"); ok {
 			if v, err := server.DecodeContent[model.Filter](raw); err != nil {
 				b.Param("header", "X-Meta", err)
 			} else {

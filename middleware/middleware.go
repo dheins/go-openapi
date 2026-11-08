@@ -403,13 +403,13 @@ func property(p ir.ParamProperty, shapes map[string]*server.Property) server.Pro
 			def := &server.Property{}
 			shapes[name] = def
 			inner := p
-			inner.Shape, inner.Array, inner.ContentTypes, inner.Headers = "", false, nil, nil
+			inner.Shape, inner.Array, inner.Depth, inner.ContentTypes, inner.Headers = "", false, 0, nil, nil
 			*def = property(inner, shapes)
 		}
 	}
-	out := server.Property{Type: p.Type, Array: p.Array, ContentTypes: p.ContentTypes}
+	out := server.Property{Type: p.Type, Array: p.Array, Depth: p.Depth, ContentTypes: p.ContentTypes}
 	if name != "" {
-		out = server.Property{Ref: shapes[name], Array: p.Array, ContentTypes: p.ContentTypes}
+		out = server.Property{Ref: shapes[name], Array: p.Array, Depth: p.Depth, ContentTypes: p.ContentTypes}
 		return out
 	}
 	if p.Type == "object" && len(p.Properties) > 0 {
@@ -479,7 +479,7 @@ func (op *operation) handler(cfg *server.Config, set *schemas.Set, mode Response
 			}
 		}
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		for _, p := range op.params {
 			p.bind(set, r, query, path, &b, &out.Params)
 		}
@@ -530,7 +530,7 @@ func requirements(r *http.Request, security [][]*ir.SecurityUse) []server.Requir
 
 // bind reads and checks the parameter, recording problems on b and its
 // value in params.
-func (p *param) bind(set *schemas.Set, r *http.Request, query map[string][]string, path map[string]string, b *server.Binder, params *Params) {
+func (p *param) bind(set *schemas.Set, r *http.Request, query server.Query, path map[string]string, b *server.Binder, params *Params) {
 	in, name := p.ir.In, p.ir.Name
 	var data []byte
 	var err error
@@ -654,7 +654,7 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 	case "json":
 		doc = data
 	case "form":
-		var fields map[string][]string
+		var fields server.FieldValues
 		if fields, err = server.FormFields(data); err == nil {
 			doc, err = server.ObjectJSON(fields, m.prop)
 		}

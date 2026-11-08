@@ -725,17 +725,36 @@ lines[0][sku]=apple&lines[0][qty]=3&lines[0][tags][0]=red&lines[1][sku]=pear&lin
 ```
 
 Indices need not start at 0 or follow each other; items keep their
-order, and errors point at them (`/lines/1/sku`). Recursive types work the
-same way (`children[0][children][1][name]=leaf`), to any depth. An object
-sent as one value (`owner={"age":40}`, or a multipart part) is read as
-JSON, the default content type of objects in form and multipart bodies.
-In a multipart body, an array of objects is one JSON part per item. The
-generated client writes the same formats.
+order, and errors point at them (`/lines/1/sku`). Servers also read arrays
+of objects as Rails and Rack write them, without indices, in the order the
+fields are sent: a property the last item has already starts the next
+one, and an array inside an item adds to it.
 
-Arrays of arrays cannot be written as fields. Arrays of objects,
-recursive types, and objects with additional properties cannot use the
-exploded `form` style either, which sends each property as a parameter of
-its own (use `deepObject`, or `explode: false` for the last).
+```
+lines[][sku]=apple&lines[][qty]=3&lines[][tags][]=red&lines[][sku]=pear&lines[][qty]=1
+```
+
+An array cannot mix the two (`lines[][sku]=a&lines[1][sku]=b` is a 400).
+Arrays of arrays are written with indices too, `boxes[0][0]=1&boxes[0][1]=2`,
+or read as `boxes[0][]=1&boxes[0][]=2` or `boxes[0]=1&boxes[0]=2`; an
+empty inner array has no fields, so it is not sent. Recursive types work
+the same way (`children[0][children][1][name]=leaf`), to any depth. An
+object or array sent as one value (`owner={"age":40}`, or a multipart
+part) is read as JSON, the default content type of objects in form and
+multipart bodies. In a multipart body, an array of objects or of arrays is
+one JSON part per item; files cannot be in arrays of arrays. The generated
+Go and TypeScript clients write indices.
+
+Because `a[][b]` depends on the order of fields, servers keep it:
+`server.ParseQuery` parses a query string, and `server.FormFields` a form
+body, into `server.FieldValues` in their order, which `server.ObjectJSON`
+and `server.DecodeFields` read. `server.FieldsOf` turns a map into fields
+for code that only has one, sorted by name, which loses that order.
+
+Arrays of objects or of arrays, recursive types, and objects with
+additional properties cannot use the exploded `form` style, which sends
+each property as a parameter of its own (use `deepObject`, or
+`explode: false` for the last).
 
 Supported request bodies: JSON (`application/json`, `*+json`), XML
 (`application/xml`, `text/xml`, `*+xml`),

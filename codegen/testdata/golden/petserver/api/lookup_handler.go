@@ -23,7 +23,7 @@ func HandleLookup(c *server.Config, h Handler, sec SecurityHandler) http.Handler
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req LookupRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, ok, err := server.QueryFields(query); err != nil {
 			b.Param("querystring", "criteria", err)
 		} else if ok {

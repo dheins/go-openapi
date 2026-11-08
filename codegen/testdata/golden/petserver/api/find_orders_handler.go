@@ -12,7 +12,7 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var findOrdersFilterProperties = server.Property{Type: "object", Properties: map[string]server.Property{"id": {Type: "string"}, "lines": {Type: "object", Array: true, Properties: map[string]server.Property{"sku": {Type: "string"}, "qty": {Type: "integer"}, "tags": {Type: "string", Array: true}}}, "notes": {Type: "object", Additional: &server.Property{Type: "string"}}}}
+var findOrdersFilterProperties = server.Property{Type: "object", Properties: map[string]server.Property{"id": {Type: "string"}, "lines": {Type: "object", Array: true, Properties: map[string]server.Property{"sku": {Type: "string"}, "qty": {Type: "integer"}, "tags": {Type: "string", Array: true}}}, "notes": {Type: "object", Additional: &server.Property{Type: "string"}}, "boxes": {Type: "integer", Array: true, Depth: 1}}}
 
 // HandleFindOrders returns the HTTP handler of FindOrders.
 //
@@ -23,7 +23,7 @@ func HandleFindOrders(c *server.Config, h Handler, sec SecurityHandler) http.Han
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req FindOrdersRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, ok, err := findOrdersFilterParam.QueryValues(query); err != nil {
 			b.Param("query", "filter", err)
 		} else if ok {

@@ -38,7 +38,7 @@ func HandleSubscribePingCallback(c *server.Config, h CallbackHandler, sec Receiv
 		}
 		var req SubscribePingCallbackRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, ok, err := subscribePingCallbackNParam.QueryValues(query); err != nil {
 			b.Param("query", "n", err)
 		} else if ok {
