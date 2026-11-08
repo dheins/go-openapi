@@ -47,6 +47,9 @@ type Config struct {
 	ValidateRequests, ValidateResponses bool
 	// MaxResponseBytes bounds the response bodies read whole.
 	MaxResponseBytes int64
+	// ReplayLimit is how much of a streamed request body is kept to send
+	// it again; see WithReplayLimit.
+	ReplayLimit int64
 	// Codecs encode and decode the bodies of media types goapi does not
 	// know, by server.CodecKey; see WithCodec.
 	Codecs map[string]Codec
@@ -64,7 +67,7 @@ type Config struct {
 type Option func(*Config)
 
 // NewConfig applies opts to the defaults: http.DefaultClient, request
-// validation, and DefaultMaxResponseBytes.
+// validation, DefaultMaxResponseBytes and DefaultReplayLimit.
 func NewConfig(opts ...Option) (*Config, error) {
 	c, err := newConfig(opts)
 	if err != nil {
@@ -84,7 +87,8 @@ func NewSenderConfig(opts ...Option) (*Config, error) {
 }
 
 func newConfig(opts []Option) (*Config, error) {
-	c := &Config{Doer: http.DefaultClient, Header: http.Header{}, ValidateRequests: true, MaxResponseBytes: DefaultMaxResponseBytes}
+	c := &Config{Doer: http.DefaultClient, Header: http.Header{}, ValidateRequests: true, MaxResponseBytes: DefaultMaxResponseBytes,
+		ReplayLimit: DefaultReplayLimit}
 	for _, o := range opts {
 		o(c)
 	}
@@ -184,11 +188,16 @@ func (c *Config) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 	resp, err := c.Doer.Do(req)
+	stream, streamed := req.Body.(*replayReader)
 	if err != nil {
+		if streamed {
+			stream.rec.stop()
+		}
 		return nil, fmt.Errorf("%s %s: %w", req.Method, req.URL.Redacted(), err)
 	}
-	if s, ok := req.Body.(*streamBody); ok {
-		resp.Body = &failedBody{ReadCloser: resp.Body, stream: s}
+	if streamed {
+		// The stream may go on while the response is read.
+		resp.Body = &failedBody{ReadCloser: resp.Body, stream: stream.rec}
 	}
 	return resp, nil
 }
@@ -244,7 +253,7 @@ func (c *Config) Build(ctx context.Context, r *Request) (*http.Request, error) {
 	} else {
 		u.RawQuery = r.query.Encode()
 	}
-	return r.httpRequest(ctx, &u)
+	return r.httpRequest(ctx, &u, c.ReplayLimit)
 }
 
 // BuildTo turns r, a webhook or callback, into an HTTP request to target,
@@ -270,21 +279,31 @@ func (c *Config) BuildTo(ctx context.Context, target string, r *Request) (*http.
 	case extra != "":
 		u.RawQuery = extra
 	}
-	return r.httpRequest(ctx, u)
+	return r.httpRequest(ctx, u, c.ReplayLimit)
 }
 
-// httpRequest makes the HTTP request of r to u: its body and headers.
-func (r *Request) httpRequest(ctx context.Context, u *url.URL) (*http.Request, error) {
+// httpRequest makes the HTTP request of r to u: its body, a stream kept
+// up to replayLimit bytes to be sent again, and headers.
+func (r *Request) httpRequest(ctx context.Context, u *url.URL, replayLimit int64) (*http.Request, error) {
 	var body io.Reader
+	var rec *recording
 	switch {
 	case r.stream != nil:
-		body = &streamBody{write: r.stream}
+		rec = newRecording(r.stream, replayLimit)
+		body = rec.body()
 	case r.body != nil:
 		body = bytes.NewReader(r.body)
 	}
 	req, err := http.NewRequestWithContext(ctx, r.method, u.String(), body)
 	if err != nil {
 		return nil, err
+	}
+	if rec != nil {
+		if replayLimit > 0 {
+			req.GetBody = rec.getBody
+		}
+		// A call given up on ends its stream's writer too.
+		context.AfterFunc(ctx, rec.stop)
 	}
 	for name, values := range r.header {
 		req.Header[name] = values

@@ -13,8 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/server"
@@ -80,7 +78,7 @@ func (r *Request) XMLBody(contentType string, v any, root *server.XMLNode) {
 // checked with validate as it is sent. An invalid item, or an error items
 // yields, ends the request with that error: a *InvalidRequest, with
 // pointers into the item from its index ("/2/name"), for an invalid one.
-// A stream cannot be sent again, so middleware cannot retry it.
+// Up to the replay limit, the stream can be sent again (WithReplayLimit).
 func JSONLinesBody[T any](c *Config, r *Request, contentType string, items iter.Seq2[T, error], validate func(T) error) {
 	if !c.ValidateRequests {
 		validate = nil
@@ -172,67 +170,6 @@ func TypedEventsBody[T any](c *Config, r *Request, events iter.Seq2[server.Typed
 	})
 }
 
-// streamBody is a request body written as the transport reads it. The
-// writer starts on the first read, so a request that is never sent
-// leaves nothing running, and Close stops it.
-type streamBody struct {
-	write  func(io.Writer) error
-	once   sync.Once
-	reader *io.PipeReader
-	// failed is the error the writer stopped with, if it did: a server
-	// may answer before it reads the body, so the response can arrive
-	// before the request fails, and reading it reports this instead.
-	failed atomic.Pointer[error]
-}
-
-func (s *streamBody) Read(p []byte) (int, error) {
-	s.once.Do(s.start)
-	if s.reader == nil {
-		return 0, io.ErrClosedPipe
-	}
-	return s.reader.Read(p)
-}
-
-func (s *streamBody) Close() error {
-	// Closed before it is read, it never starts.
-	s.once.Do(func() {})
-	if s.reader == nil {
-		return nil
-	}
-	return s.reader.Close()
-}
-
-func (s *streamBody) start() {
-	pr, pw := io.Pipe()
-	s.reader = pr
-	go func() {
-		err := s.write(pw)
-		if err != nil {
-			s.failed.Store(&err)
-		}
-		pw.CloseWithError(err)
-	}()
-}
-
-// failedBody is the body of a response to a streamed request: once it
-// ends, or fails, after the request's stream did, reading it returns the
-// error the stream stopped with, which says why the response was cut
-// short.
-type failedBody struct {
-	io.ReadCloser
-	stream *streamBody
-}
-
-func (b *failedBody) Read(p []byte) (int, error) {
-	n, err := b.ReadCloser.Read(p)
-	if err != nil {
-		if failed := b.stream.failed.Load(); failed != nil {
-			return n, *failed
-		}
-	}
-	return n, err
-}
-
 // PartsBody sets the body to items as a multipart body of positional
 // parts (multipart/mixed and the like), as p describes.
 func PartsBody[T any](r *Request, contentType string, items []T, p server.Parts) {
@@ -250,8 +187,8 @@ func PartsBody[T any](r *Request, contentType string, items []T, p server.Parts)
 // checked with validate, and its headers against its encoding, before it
 // is sent. An invalid item, or an error items yields, ends the request
 // with that error: a *InvalidRequest, with pointers into the item from
-// its index ("/2/name"), for an invalid one. A stream cannot be sent
-// again, so middleware cannot retry it.
+// its index ("/2/name"), for an invalid one. Up to the replay limit, the
+// stream can be sent again (WithReplayLimit).
 func PartStreamBody[T any](c *Config, r *Request, contentType string, items iter.Seq2[T, error], p server.Parts, validate func(T) error) {
 	ct, boundary, err := server.PartsContentType(contentType)
 	if err != nil {
