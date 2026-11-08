@@ -26,7 +26,8 @@ import (
 type handler struct {
 	api.Handler
 	seen map[string]any
-	// arrived, if set, is told the name of each pet ImportLines reads.
+	// arrived is told the name of each pet named live-... ImportLines
+	// reads; other requests' handlers may still be reading theirs.
 	arrived chan string
 }
 
@@ -96,7 +97,7 @@ func (h *handler) ImportLines(_ context.Context, req *api.ImportLinesRequest) (a
 		if err != nil {
 			return nil, err
 		}
-		if h.arrived != nil {
+		if strings.HasPrefix(p.Name, "live-") {
 			h.arrived <- p.Name
 		}
 		n++
@@ -174,7 +175,7 @@ func init() {
 }
 
 func TestCommands(t *testing.T) {
-	h := &handler{seen: map[string]any{}}
+	h := &handler{seen: map[string]any{}, arrived: make(chan string, 2)}
 	srv := httptest.NewServer(petserver.NewServer(h, security{}, server.WithLogger(slog.New(slog.DiscardHandler)),
 		server.WithCodec("application/x-tc", codec{}), server.WithCodec("application/x-tc2", codec{})))
 	t.Cleanup(srv.Close)
@@ -355,27 +356,25 @@ func TestCommands(t *testing.T) {
 	stdin := os.Stdin
 	os.Stdin = r
 	t.Cleanup(func() { os.Stdin = stdin })
-	h.arrived = make(chan string, 2)
 	done := make(chan int)
 	go func() {
 		code, _, _ := runCLI("import-lines", "-body", "-")
 		done <- code
 	}()
-	if _, err := w.Write([]byte("{\"name\":\"Rex\"}\n")); err != nil {
+	if _, err := w.Write([]byte("{\"name\":\"live-Rex\"}\n")); err != nil {
 		t.Fatal(err)
 	}
-	if name := <-h.arrived; name != "Rex" {
+	if name := <-h.arrived; name != "live-Rex" {
 		t.Errorf("first pet %q", name)
 	}
-	if _, err := w.Write([]byte("{\"name\":\"Tom\"}\n")); err != nil {
+	if _, err := w.Write([]byte("{\"name\":\"live-Tom\"}\n")); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
-	if code := <-done; code != 0 || <-h.arrived != "Tom" {
-		t.Errorf("import-lines from stdin: %d", code)
+	if code, name := <-done, <-h.arrived; code != 0 || name != "live-Tom" {
+		t.Errorf("import-lines from stdin: %d, second pet %q", code, name)
 	}
 	os.Stdin = stdin
-	h.arrived = nil
 
 	// Credentials by flag, or by environment variable.
 	if code, _, _ := runCLI("secure"); code != 2 {
