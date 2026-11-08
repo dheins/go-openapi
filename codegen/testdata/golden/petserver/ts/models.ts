@@ -359,10 +359,11 @@ export const SubscribePetEventCallbackXEventSchema: $Schema = { kind: "string", 
 export interface PetAdoptedWebhookRequestBody {
   pet: Pet;
   by: string;
+  confirmUrl?: string;
 }
 
 /** The schema of PetAdoptedWebhookRequestBody, for validation and encoding. */
-export const PetAdoptedWebhookRequestBodySchema: $Schema = { kind: "object", properties: { pet: { schema: $ref(() => PetSchema), required: true }, by: { schema: { kind: "string", minLength: 1 }, required: true } } };
+export const PetAdoptedWebhookRequestBodySchema: $Schema = { kind: "object", properties: { pet: { schema: $ref(() => PetSchema), required: true }, by: { schema: { kind: "string", minLength: 1 }, required: true }, confirmUrl: { schema: { kind: "string", format: "uri" } } } };
 
 export interface PetAdoptedWebhook200ResponseBody {
   ok?: boolean;
@@ -370,3 +371,11 @@ export interface PetAdoptedWebhook200ResponseBody {
 
 /** The schema of PetAdoptedWebhook200ResponseBody, for validation and encoding. */
 export const PetAdoptedWebhook200ResponseBodySchema: $Schema = { kind: "object", properties: { ok: { schema: { kind: "boolean" } } } };
+
+export interface ConfirmAdoptionCallbackRequestBody {
+  receiptUrl: string;
+  note?: string;
+}
+
+/** The schema of ConfirmAdoptionCallbackRequestBody, for validation and encoding. */
+export const ConfirmAdoptionCallbackRequestBodySchema: $Schema = { kind: "object", properties: { receiptUrl: { schema: { kind: "string", format: "uri" }, required: true }, note: { schema: { kind: "string" } } } };

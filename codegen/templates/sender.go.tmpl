@@ -1,14 +1,21 @@
 {{- /*
 Template for the sender of webhooks and callbacks: "sender" (Sender, with
-a method per webhook and callback) goes to the server package.
+a method per webhook and callback) goes to the server package, for those
+the API sends, and to the client package, for the callbacks a consumer
+sends back.
 */ -}}
 
-{{/* "sender" gets Ops ([]*ir.Operation) the server sends, and Schemes ([]*ir.SecurityScheme) of their targets. */}}
+{{/* "sender" gets Ops ([]*ir.Operation) sent, Schemes ([]*ir.SecurityScheme) of their targets, and Inbound, true for a consumer's sender. */}}
 {{define "sender"}}
 {{- if .Schemes}}
 // SenderCredentials are the credentials the sender sends, one per security
+{{- if .Inbound}}
+// scheme of the callbacks. Each is given the target URL, so that it can
+// return the credentials the API expects there. A request uses
+{{- else}}
 // scheme of the webhooks and callbacks. Each is given the target URL, so
 // that it can return the credentials of the consumer there. A request uses
+{{- end}}
 // the first of its security requirements whose credentials are all set; a
 // field left nil is not set.
 type SenderCredentials struct {
@@ -19,10 +26,17 @@ type SenderCredentials struct {
 }
 
 {{end -}}
+{{- if .Inbound}}
+// Sender sends the callbacks of the webhooks and callbacks a consumer
+// receives back to the API, with a method per callback, to the URL given
+// with each: the callback's URL function computes it from the request the
+// consumer received and the response it returned. It validates
+{{- else}}
 // Sender sends the document's webhooks and callbacks, with a method per
 // webhook and callback, to the URL given with each: one a consumer
 // registered for a webhook, or the URL of a callback (the callback's URL
 // function computes it from the request that asked for it). It validates
+{{- end}}
 // requests before sending them unless client.WithoutRequestValidation
 // says otherwise, and validates responses with
 // client.WithResponseValidation; retries, queues and request signing are

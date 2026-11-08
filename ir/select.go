@@ -137,12 +137,26 @@ func (b *builder) applySelection(sel *Selection) {
 		}
 	}
 	uses(b.model.Operations, schemes)
-	uses(b.model.Webhooks, senderSchemes)
-	for _, o := range b.model.Operations {
-		uses(o.Callbacks, senderSchemes)
+	inboundSchemes := map[*SecurityScheme]bool{}
+	var callbacks func(ops []*Operation)
+	callbacks = func(ops []*Operation) {
+		for _, o := range ops {
+			for _, c := range o.Callbacks {
+				if c.Inbound {
+					uses([]*Operation{c}, inboundSchemes)
+				} else {
+					uses([]*Operation{c}, senderSchemes)
+				}
+			}
+			callbacks(o.Callbacks)
+		}
 	}
+	uses(b.model.Webhooks, senderSchemes)
+	callbacks(b.model.Operations)
+	callbacks(b.model.Webhooks)
 	b.model.SecuritySchemes = slices.DeleteFunc(b.model.SecuritySchemes, func(s *SecurityScheme) bool { return !schemes[s] })
 	b.model.SenderSchemes = slices.DeleteFunc(b.model.SenderSchemes, func(s *SecurityScheme) bool { return !senderSchemes[s] })
+	b.model.InboundSchemes = slices.DeleteFunc(b.model.InboundSchemes, func(s *SecurityScheme) bool { return !inboundSchemes[s] })
 
 	// Warnings about what is not generated are noise.
 	b.model.Warnings = slices.DeleteFunc(b.model.Warnings, func(w Warning) bool {

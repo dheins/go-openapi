@@ -33,6 +33,11 @@ type WebhookHandler interface {
 // error: a *problem.Problem is sent as it is, anything else is logged and
 // answered with 500 Internal Server Error.
 type CallbackHandler interface {
+	// SendReceiptCallback handles the callback "receipt" of
+	// ConfirmAdoptionCallback (POST {$request.body#/receiptUrl}).
+	//
+	// The API sends the consumer a receipt.
+	SendReceiptCallback(ctx context.Context, req *SendReceiptCallbackRequest) (SendReceiptCallbackResponse, error)
 	// SubscribeStatusCallback handles the callback "status" of Subscribe (POST
 	// {$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode}).
 	SubscribeStatusCallback(ctx context.Context, req *SubscribeStatusCallbackRequest) (SubscribeStatusCallbackResponse, error)
@@ -45,6 +50,26 @@ type CallbackHandler interface {
 	// SubscribePingCallback handles the callback "ping" of Subscribe (GET
 	// {$request.header.X-Callback}).
 	SubscribePingCallback(ctx context.Context, req *SubscribePingCallbackRequest) (SubscribePingCallbackResponse, error)
+}
+
+// InboundCallbackHandler is implemented by the API, to receive the
+// callbacks of the webhooks and callbacks it sends, which their receivers
+// send back, with one method per callback. Route a callback to its
+// handler with server.Config.Handle, at the path of the URL the API gave
+// in the request declaring it; the generated server does not route them:
+//
+//	cfg.Handle(XCallbackOperation, "/replies/x", HandleXCallback(cfg, h))
+//
+// The handler decodes and validates each request before calling the
+// method. A method returns one of the callback's response types, or an
+// error: a *problem.Problem is sent as it is, anything else is logged and
+// answered with 500 Internal Server Error.
+type InboundCallbackHandler interface {
+	// ConfirmAdoptionCallback handles the callback "confirm" of
+	// PetAdoptedWebhook (POST {$request.body#/confirmUrl}).
+	//
+	// The consumer confirms the adoption back to the API.
+	ConfirmAdoptionCallback(ctx context.Context, req *ConfirmAdoptionCallbackRequest) (ConfirmAdoptionCallbackResponse, error)
 }
 
 // ReceiverSecurityHandler checks the credentials the API sends with its
@@ -65,4 +90,12 @@ type ReceiverSecurityHandler interface {
 	HookKey(ctx context.Context, key string, scopes []string) (context.Context, error)
 	// BasicAuth checks HTTP basic credentials (security scheme "basicAuth").
 	BasicAuth(ctx context.Context, username, password string, scopes []string) (context.Context, error)
+}
+
+// InboundSecurityHandler checks the credentials consumers send with the
+// callbacks the API receives, with one method per security scheme they
+// use, as ReceiverSecurityHandler does for consumers.
+type InboundSecurityHandler interface {
+	// APIKey checks the API key sent in the header "X-API-Key" (security scheme "apiKey").
+	APIKey(ctx context.Context, key string, scopes []string) (context.Context, error)
 }

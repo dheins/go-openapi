@@ -4,7 +4,7 @@ of each operation, its descriptor, and the Client class. The descriptors
 (.Spec) are what the runtime sends requests and reads responses with.
 */ -}}
 
-{{/* "client" gets ServerURL, Schemes (as "credentials" gets them), Ops (as "operation" gets each) and Codecs (the media types with codecs, as JavaScript strings joined by commas). */}}
+{{/* "client" gets ServerURL, Schemes (as "credentials" gets them), Ops (as "operation" gets each), Codecs (the media types with codecs, as JavaScript strings joined by commas), and Sent, SenderSchemes and SenderCodecs, as "sender" gets them. */}}
 {{define "client"}}
 /** The URL of the document's first server, if it is absolute. */
 export const defaultServerUrl = {{jsString .ServerURL}};
@@ -17,6 +17,32 @@ export class Client {
     this.#cfg = config(options, defaultServerUrl, {{if .Schemes}}options.credentials{{else}}undefined{{end}}{{with .Codecs}}, [{{.}}]{{end}});
   }
 {{range .Ops}}{{template "method" .}}{{range .Links}}{{template "linkMethod" .}}{{end}}{{end}}}
+{{if .Sent}}{{template "sender" .}}{{end}}{{end}}
+
+{{/* "sender" gets Sent (the callbacks a consumer sends back to the API, as "operation" gets each), SenderSchemes (their security schemes, as "credentials" gets them) and SenderCodecs. */}}
+{{define "sender"}}
+{{- with .SenderSchemes}}
+/** The credentials a Sender sends, by security scheme. A callback uses
+ * the first of its security requirements whose credentials are all
+ * given. */
+export interface SenderCredentials {
+{{range .}}{{tsDoc "  " (schemeDoc .Scheme) false}}  {{.Key}}?: {{.Type}};
+{{end}}}
+{{end}}{{range .Sent}}{{template "operation" .}}{{end}}
+/** Sends the callbacks of the webhooks and callbacks a consumer receives
+ * back to the API, with a method per callback, to the target URL given
+ * with each. */
+export class Sender {
+  readonly #cfg: Config;
+
+  constructor(options: SenderOptions{{if .SenderSchemes}} & { credentials?: SenderCredentials }{{end}} = {}) {
+    this.#cfg = senderConfig(options, {{if .SenderSchemes}}options.credentials{{else}}undefined{{end}}{{with .SenderCodecs}}, [{{.}}]{{end}});
+  }
+{{range .Sent}}
+{{tsDoc "  " (operationDoc .Operation) .Operation.Deprecated}}  {{.Method}}(target: string, req: {{.Operation.RequestType}}{{if .Optional}} = {}{{end}}, call?: CallOptions): Promise<{{.Operation.ResponseType}}> {
+    return sendTo(this.#cfg, {{.Method}}Spec, target, req, call) as Promise<{{.Operation.ResponseType}}>;
+  }
+{{end}}}
 {{end}}
 
 {{/* "credentials" gets the security schemes: Scheme (*ir.SecurityScheme), Key and Type of each credential. */}}

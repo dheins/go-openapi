@@ -58,6 +58,9 @@ type builder struct {
 	// is built, and oasOps the operations of the document's paths.
 	pending []pendingLinks
 	oasOps  map[*Operation]*oas.Operation
+	// declaring are the operations whose callbacks are being built, to
+	// stop at callbacks that declare them again.
+	declaring map[*oas.Operation]bool
 }
 
 // Build maps the schemas of a loaded document to Go types: every

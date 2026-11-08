@@ -1241,6 +1241,10 @@ export interface ClientOptions {
   codecs?: Readonly<Record<string, Codec>>;
 }
 
+/** The options of a Sender: those of a client but for where requests go,
+ * which is the target given with each. */
+export type SenderOptions = Omit<ClientOptions, "baseUrl" | "operationServers">;
+
 /** Encodes and decodes bodies of a media type the runtime does not know,
  * as a Go server's server.Codec does. */
 export interface Codec {
@@ -1885,6 +1889,13 @@ function builtUrl(cfg: Config, op: OperationSpec, b: Built, server: string | und
   return base + b.path + (query === "" ? "" : "?" + query);
 }
 
+// targetUrl returns the URL of b, a request of a callback, sent to
+// target: its query is added to the target's.
+function targetUrl(target: string, b: Built): string {
+  const query = b.rawQuery ?? b.query.toString();
+  return target + b.path + (query === "" ? "" : (target.includes("?") ? "&" : "?") + query);
+}
+
 interface Built {
   path: string;
   query: URLSearchParams;
@@ -2478,9 +2489,22 @@ export function config(options: ClientOptions, defaultBaseUrl: string, credentia
   };
 }
 
+/** Returns the configuration of a sender, which sends callbacks to the
+ * targets given with them rather than below a base URL. */
+export function senderConfig(options: SenderOptions, credentials: object | undefined, codecTypes: readonly string[] = []): Config {
+  return { ...config({ ...options, baseUrl: "http://sender.invalid" }, "", credentials, codecTypes), baseUrl: "", operationServers: false };
+}
+
+/** Sends a request of op, a callback, to target, an absolute URL, and
+ * reads its response: what a generated Sender method does. */
+export async function sendTo(cfg: Config, op: OperationSpec, target: string, req: object, call: CallOptions = {}): Promise<unknown> {
+  return send(cfg, op, req, call, target);
+}
+
 /** Sends a request of op and reads its response: what a generated method
- * does. */
-export async function send(cfg: Config, op: OperationSpec, req: object, call: CallOptions = {}): Promise<unknown> {
+ * does. With target, the request goes there rather than below the base
+ * URL. */
+export async function send(cfg: Config, op: OperationSpec, req: object, call: CallOptions = {}, target?: string): Promise<unknown> {
   const values = req as Values;
   if (cfg.validateRequests) {
     checkRequest(op, values);
@@ -2506,7 +2530,7 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
     // Browsers do not let scripts set Cookie; elsewhere it is sent.
     b.headers.set("Cookie", b.cookies.join("; "));
   }
-  const url = builtUrl(cfg, op, b, call.server ?? op.server);
+  const url = target === undefined ? builtUrl(cfg, op, b, call.server ?? op.server) : targetUrl(target, b);
   const init: RequestInit = { method: op.method, headers: b.headers };
   if (b.body !== undefined) {
     init.body = b.body;

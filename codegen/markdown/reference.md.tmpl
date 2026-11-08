@@ -240,6 +240,9 @@ Authorization server metadata: <{{.}}>
 
 {{with .Op.Description}}{{.}}{{end}}
 
+{{if .Inbound}}- Sent back to the API by the receiver of the operation declaring it
+{{else}}- Sent by the API
+{{end -}}
 {{template "operationFacts" .}}
 {{template "operationBody" .}}
 {{end}}

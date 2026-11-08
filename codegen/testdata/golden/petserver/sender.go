@@ -99,6 +99,29 @@ func (s *Sender) PetAdoptedWebhook(ctx context.Context, target string, req *api.
 	return api.ReadPetAdoptedWebhookResponse(s.cfg, resp)
 }
 
+// SendReceiptCallback sends the callback "receipt" of
+// ConfirmAdoptionCallback (POST {$request.body#/receiptUrl}) to target. A
+// nil req sends no parameters or body.
+//
+// The API sends the consumer a receipt.
+func (s *Sender) SendReceiptCallback(ctx context.Context, target string, req *api.SendReceiptCallbackRequest) (api.SendReceiptCallbackResponse, error) {
+	if req == nil {
+		req = &api.SendReceiptCallbackRequest{}
+	}
+	hreq, err := api.NewSendReceiptCallbackRequest(ctx, s.cfg, target, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Authorize(ctx, hreq, []client.Requirement{{s.schemeHookToken(target)}}); err != nil {
+		return nil, err
+	}
+	resp, err := s.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadSendReceiptCallbackResponse(s.cfg, resp)
+}
+
 // SubscribeStatusCallback sends the callback "status" of Subscribe (POST
 // {$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode})
 // to target. A nil req sends no parameters or body.

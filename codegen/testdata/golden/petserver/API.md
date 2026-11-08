@@ -1270,6 +1270,8 @@ Headers:
 
 **`status`: `POST` `{$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode}`**
 
+- Sent by the API
+
 **Responses**
 
 | Status | Description |
@@ -1278,6 +1280,8 @@ Headers:
 
 **`moved`: `POST` `{$url}/moved?to={$response.header.Location}`**
 
+- Sent by the API
+
 **Responses**
 
 | Status | Description |
@@ -1285,6 +1289,8 @@ Headers:
 | `204` | Received. |
 
 **`petEvent`: `POST` `{$request.body#/url}/pets/{$method}`**
+
+- Sent by the API
 
 **Parameters**
 
@@ -1305,6 +1311,7 @@ Headers:
 
 **`ping`: `GET` `{$request.header.X-Callback}`**
 
+- Sent by the API
 - Security: [hookToken](#hooktoken) or none
 
 **Parameters**
@@ -1337,6 +1344,7 @@ Headers:
 | --- | --- | --- | --- |
 | `pet` | [Pet](#pet) | yes |  |
 | `by` | string | yes | minLength: `1` |
+| `confirmUrl` | string (uri) | no |  |
 
 **Responses**
 
@@ -1351,6 +1359,51 @@ Headers:
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `ok` | boolean | no |  |
+
+**Callbacks**
+
+**`confirm`: `POST` `{$request.body#/confirmUrl}`**
+
+The consumer confirms the adoption back to the API.
+
+- Sent back to the API by the receiver of the operation declaring it
+- Operation ID: `confirmAdoption`
+- Security: [apiKey](#apikey)
+
+**Request body** (required)
+
+- `application/json`: object
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `receiptUrl` | string (uri) | yes |  |
+| `note` | string | no |  |
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `204` | Confirmed. |
+
+**Callbacks**
+
+**`receipt`: `POST` `{$request.body#/receiptUrl}`**
+
+The API sends the consumer a receipt.
+
+- Sent by the API
+- Operation ID: `sendReceipt`
+- Security: [hookToken](#hooktoken)
+
+**Request body** (required)
+
+- `text/plain`: string
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `204` | Received. |
 
 ## Schemas
 

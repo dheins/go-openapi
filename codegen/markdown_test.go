@@ -182,3 +182,36 @@ func TestMarkdownTemplates(t *testing.T) {
 		t.Errorf("MarkdownTemplates() = %v, %v", names, err)
 	}
 }
+
+func TestMarkdownCallbackCycle(t *testing.T) {
+	spec, err := loader.LoadBytes([]byte(`openapi: 3.2.0
+info: {title: t, version: v}
+paths: {}
+webhooks:
+  hook:
+    post:
+      responses: {"200": {description: ok}}
+      callbacks:
+        again: {$ref: "#/components/callbacks/Again"}
+components:
+  callbacks:
+    Again:
+      "{$request.body#/x}":
+        post:
+          responses: {"204": {description: ok}}
+          callbacks:
+            again: {$ref: "#/components/callbacks/Again"}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	md, err := Markdown(spec, MarkdownOptions{Source: "openapi.yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The callback of the webhook is sent back; the one it declares again
+	// is described once.
+	if text := string(md); strings.Count(text, "`{$request.body#/x}`") != 1 || !strings.Contains(text, "- Sent back to the API by the receiver") {
+		t.Errorf("callbacks:\n%s", text)
+	}
+}

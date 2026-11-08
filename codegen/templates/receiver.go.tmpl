@@ -4,7 +4,7 @@ WebhookHandler and CallbackHandler interfaces) goes to the operations'
 package, by both the server and the client.
 */ -}}
 
-{{/* "receivers" gets Webhooks and Callbacks ([]*ir.Operation) a server receives, and Schemes ([]*ir.SecurityScheme). */}}
+{{/* "receivers" gets Webhooks and Callbacks ([]*ir.Operation) consumers receive, Inbound ([]*ir.Operation) the API receives, and Schemes and InboundSchemes ([]*ir.SecurityScheme) of each. */}}
 {{define "receivers"}}
 {{- if .Webhooks}}
 // WebhookHandler is implemented by a receiver of the document's webhooks,
@@ -44,6 +44,27 @@ type CallbackHandler interface {
 {{- end}}
 }
 {{- end}}
+{{- if .Inbound}}
+
+// InboundCallbackHandler is implemented by the API, to receive the
+// callbacks of the webhooks and callbacks it sends, which their receivers
+// send back, with one method per callback. Route a callback to its
+// handler with server.Config.Handle, at the path of the URL the API gave
+// in the request declaring it; the generated server does not route them:
+//
+//	cfg.Handle(XCallbackOperation, "/replies/x", HandleXCallback(cfg, h))
+//
+// The handler decodes and validates each request before calling the
+// method. A method returns one of the callback's response types, or an
+// error: a *problem.Problem is sent as it is, anything else is logged and
+// answered with 500 Internal Server Error.
+type InboundCallbackHandler interface {
+{{- range .Inbound}}
+{{handlerDoc .}}
+	{{.Name}}(ctx {{imp "context" "context"}}.Context, req *{{.RequestType}}) ({{.ResponseType}}, error)
+{{- end}}
+}
+{{- end}}
 {{- if .Schemes}}
 
 // ReceiverSecurityHandler checks the credentials the API sends with its
@@ -58,6 +79,18 @@ type CallbackHandler interface {
 // or callback allows anonymous requests.
 type ReceiverSecurityHandler interface {
 {{- range .Schemes}}
+{{securityDoc .}}
+	{{.Method}}(ctx {{imp "context" "context"}}.Context, {{securityParams .}}, scopes []string) (context.Context, error)
+{{- end}}
+}
+{{- end}}
+{{- if .InboundSchemes}}
+
+// InboundSecurityHandler checks the credentials consumers send with the
+// callbacks the API receives, with one method per security scheme they
+// use, as ReceiverSecurityHandler does for consumers.
+type InboundSecurityHandler interface {
+{{- range .InboundSchemes}}
 {{securityDoc .}}
 	{{.Method}}(ctx {{imp "context" "context"}}.Context, {{securityParams .}}, scopes []string) (context.Context, error)
 {{- end}}

@@ -88,10 +88,21 @@ func Client(m *ir.Model, opts Options) ([]File, error) {
 			}
 		}
 		if len(sent) > 0 {
-			if err := og.receiverFile(sent, m.SenderSchemes); err != nil {
+			if err := og.receiverFile(sent, m.SenderSchemes, m.InboundSchemes); err != nil {
 				return nil, err
 			}
 		}
+	}
+	// A client's consumer sends the callbacks of the webhooks and callbacks
+	// it receives, which the API receives.
+	if inbound := slices.DeleteFunc(sentOperations(m), func(o *ir.Operation) bool { return !o.Inbound }); len(inbound) > 0 {
+		content, err := g.render("sender", senderData{Ops: inbound, Schemes: m.InboundSchemes, Inbound: true}, func(f *fileGen) {
+			f.imp(clientImport, "client")
+		})
+		if err != nil {
+			return nil, fmt.Errorf("generating sender.go: %w", err)
+		}
+		g.add("sender.go", content)
 	}
 	content, err := g.render("client", m, func(f *fileGen) {
 		f.imp(clientImport, "client")
@@ -136,10 +147,16 @@ func (g *generator) operationFiles(o *ir.Operation) error {
 	if o.Security != nil {
 		sec = "ReceiverSecurityHandler"
 	}
-	switch o.Kind {
-	case ir.Webhook:
+	switch {
+	case o.Kind == ir.Webhook:
 		return g.handlerFile(handlerData{o, sec, "WebhookHandler"})
-	case ir.Callback:
+	case o.Kind == ir.Callback && o.Inbound:
+		// The API checks the credentials of callbacks it receives.
+		if sec != "" {
+			sec = "InboundSecurityHandler"
+		}
+		return g.handlerFile(handlerData{o, sec, "InboundCallbackHandler"})
+	case o.Kind == ir.Callback:
 		return g.handlerFile(handlerData{o, sec, "CallbackHandler"})
 	}
 	return nil
@@ -147,16 +164,20 @@ func (g *generator) operationFiles(o *ir.Operation) error {
 
 // receiverFile adds receiver.go, the interfaces receivers of the webhooks
 // and callbacks sent implement, checking the credentials of schemes, to
-// the operations' package.
-func (g *generator) receiverFile(sent []*ir.Operation, schemes []*ir.SecurityScheme) error {
+// the operations' package: consumers receive those the API sends, and the
+// API those consumers send back, checking inboundSchemes.
+func (g *generator) receiverFile(sent []*ir.Operation, schemes, inboundSchemes []*ir.SecurityScheme) error {
 	data := struct {
-		Webhooks, Callbacks []*ir.Operation
-		Schemes             []*ir.SecurityScheme
-	}{Schemes: schemes}
+		Webhooks, Callbacks, Inbound []*ir.Operation
+		Schemes, InboundSchemes      []*ir.SecurityScheme
+	}{Schemes: schemes, InboundSchemes: inboundSchemes}
 	for _, o := range sent {
-		if o.Kind == ir.Webhook {
+		switch {
+		case o.Kind == ir.Webhook:
 			data.Webhooks = append(data.Webhooks, o)
-		} else {
+		case o.Inbound:
+			data.Inbound = append(data.Inbound, o)
+		default:
 			data.Callbacks = append(data.Callbacks, o)
 		}
 	}
@@ -169,22 +190,23 @@ func (g *generator) receiverFile(sent []*ir.Operation, schemes []*ir.SecuritySch
 }
 
 // sentOperations returns the webhooks and callbacks of m that are
-// generated: those that are supported, of operations that are.
+// generated, at any depth: those that are supported, of operations that
+// are. The API sends some, and receives the others (Operation.Inbound).
 func sentOperations(m *ir.Model) []*ir.Operation {
 	var ops []*ir.Operation
-	for _, o := range m.Webhooks {
-		if o.Unsupported == "" {
-			ops = append(ops, o)
-		}
-	}
-	for _, o := range m.Operations {
-		if o.Unsupported != "" {
-			continue
-		}
-		for _, c := range o.Callbacks {
+	var add func(cbs []*ir.Operation)
+	add = func(cbs []*ir.Operation) {
+		for _, c := range cbs {
 			if c.Unsupported == "" {
 				ops = append(ops, c)
+				add(c.Callbacks)
 			}
+		}
+	}
+	add(m.Webhooks)
+	for _, o := range m.Operations {
+		if o.Unsupported == "" {
+			add(o.Callbacks)
 		}
 	}
 	return ops

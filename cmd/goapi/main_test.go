@@ -437,12 +437,14 @@ func TestGenerateClient(t *testing.T) {
 		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
 	}
 	for _, name := range []string{"client.go", "api/doc.go", "api/list_pets_operation.go", "api/list_pets_client.go", "model/pet.go",
-		"api/receiver.go", "api/pet_adopted_webhook_handler.go", "api/subscribe_ping_callback_client.go"} {
+		"api/receiver.go", "api/pet_adopted_webhook_handler.go", "api/subscribe_ping_callback_client.go",
+		// The consumer sends back the callbacks of the webhooks it receives.
+		"sender.go", "api/confirm_adoption_callback_handler.go"} {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
 			t.Errorf("%s not generated: %v", name, err)
 		}
 	}
-	for _, name := range []string{"server.go", "sender.go", "openapi.json", "api/handler.go", "api/list_pets_handler.go"} {
+	for _, name := range []string{"server.go", "openapi.json", "api/handler.go", "api/list_pets_handler.go"} {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err == nil {
 			t.Errorf("%s generated for a client", name)
 		}
@@ -453,6 +455,10 @@ func TestGenerateClient(t *testing.T) {
 		if !strings.Contains(c, want) {
 			t.Errorf("client.go does not contain %q", want)
 		}
+	}
+
+	if s := readFile(t, filepath.Join(out, "sender.go")); !strings.Contains(s, "func (s *Sender) ConfirmAdoptionCallback(") || strings.Contains(s, "PetAdoptedWebhook(") {
+		t.Error("the client's sender does not send just the callbacks the API receives")
 	}
 
 	// With -types, only the client package is written, using the types
@@ -466,8 +472,8 @@ func TestGenerateClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "client.go" {
-		t.Errorf("-types wrote %v, want only client.go", entries)
+	if len(entries) != 2 || entries[0].Name() != "client.go" || entries[1].Name() != "sender.go" {
+		t.Errorf("-types wrote %v, want only client.go and sender.go", entries)
 	}
 	if c := readFile(t, filepath.Join(out, "client.go")); !strings.Contains(c, `"example.com/shop/gen/api"`) || !strings.Contains(c, "api.NewListPetsRequest(") {
 		t.Error("the -types package is not used")

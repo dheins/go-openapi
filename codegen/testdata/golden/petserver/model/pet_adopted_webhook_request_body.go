@@ -11,8 +11,9 @@ import (
 
 // PetAdoptedWebhookRequestBody is generated from the schema at /webhooks/petAdopted/post/requestBody/content/application~1json/schema.
 type PetAdoptedWebhookRequestBody struct {
-	Pet Pet    `json:"pet"`
-	By  string `json:"by"`
+	Pet        Pet                   `json:"pet"`
+	By         string                `json:"by"`
+	ConfirmURL oapi.Optional[string] `json:"confirmUrl,omitzero"`
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -42,8 +43,8 @@ func (m *PetAdoptedWebhookRequestBody) UnmarshalJSONFrom(dec *jsontext.Decoder) 
 func (m *PetAdoptedWebhookRequestBody) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	obj := oapi.BeginObject(dec)
 	var v PetAdoptedWebhookRequestBody
-	var seen [2]bool
-	var problems [2]error
+	var seen [3]bool
+	var problems [3]error
 	for obj.Next() {
 		switch obj.Name() {
 		case "pet":
@@ -52,6 +53,9 @@ func (m *PetAdoptedWebhookRequestBody) DecodeJSONFrom(dec *jsontext.Decoder, dir
 		case "by":
 			seen[1] = true
 			problems[1] = obj.Decode(&v.By, false, dir)
+		case "confirmUrl":
+			seen[2] = true
+			problems[2] = obj.Decode(&v.ConfirmURL, false, dir)
 		default:
 			obj.Skip()
 		}
@@ -69,6 +73,9 @@ func (m *PetAdoptedWebhookRequestBody) DecodeJSONFrom(dec *jsontext.Decoder, dir
 		errs.Nested("/by", problems[1])
 	} else {
 		errs.Add("/by", "required property is missing")
+	}
+	if seen[2] {
+		errs.Nested("/confirmUrl", problems[2])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -101,6 +108,11 @@ func (m PetAdoptedWebhookRequestBody) AppendJSON(dst []byte, dir oapi.Direction)
 	dst = append(dst, "\"by\":"...)
 	dst = oapi.AppendString(dst, m.By)
 	dst = append(dst, ',')
+	if m.ConfirmURL.Set {
+		dst = append(dst, "\"confirmUrl\":"...)
+		dst = oapi.AppendString(dst, m.ConfirmURL.Value)
+		dst = append(dst, ',')
+	}
 	return oapi.EndObject(dst, start), nil
 }
 
@@ -110,6 +122,11 @@ func (m PetAdoptedWebhookRequestBody) Validate() error {
 	errs.Nested("/pet", m.Pet.Validate())
 	if oapi.StringLength(m.By) < 1 {
 		errs.Add("/by", "length must be at least 1")
+	}
+	if m.ConfirmURL.Set {
+		if err := oapi.CheckFormat("uri", m.ConfirmURL.Value); err != nil {
+			errs.Add("/confirmUrl", err.Error())
+		}
 	}
 	return errs.Err()
 }
