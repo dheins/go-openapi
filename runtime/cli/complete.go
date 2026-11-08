@@ -94,10 +94,15 @@ func (app App[C]) completion(shell string, w io.Writer) bool {
 	fn := "_" + strings.NewReplacer("-", "_", ".", "_").Replace(name)
 	switch shell {
 	case "bash":
+		// IFS is left as it is for the words: bash 3.2 (macOS) joins a
+		// slice of an array into one word when IFS is changed.
 		fmt.Fprintf(w, `# bash completion of %[1]s: source <(%[1]s completion bash)
 %[2]s() {
-	local IFS=$'\n'
-	COMPREPLY=($(%[1]s __complete "${COMP_WORDS[@]:1:COMP_CWORD}" 2>/dev/null))
+	COMPREPLY=()
+	local line
+	while IFS= read -r line; do
+		COMPREPLY+=("$line")
+	done < <(%[1]s __complete "${COMP_WORDS[@]:1:COMP_CWORD}" 2>/dev/null)
 }
 complete -o default -F %[2]s %[1]s
 `, name, fn)
