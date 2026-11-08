@@ -1354,11 +1354,30 @@ operation it checks:
 - **Parameters** (path, query, header, cookie and querystring), in every
   style and with `content` (JSON, text, forms, XML), against their
   schemas; required ones must be there.
-- **Bodies** of JSON, forms, `multipart/form-data` and XML against their
-  schemas, as requests (required read-only properties may be missing);
-  others (text, binary, streams, positional parts, codecs) are only
-  matched against the declared media types. The handler reads the body
-  as usual.
+- **Bodies** of JSON, forms, `multipart/form-data`, XML and text against
+  their schemas, as requests (required read-only properties may be
+  missing); binary bodies, positional parts and codecs are only matched
+  against the declared media types. The handler reads the body as usual.
+- **Streams**: a JSON Lines or `text/event-stream` body is not read
+  ahead. The handler reads each line, or each event up to the blank line
+  ending it, once it is checked against the `itemSchema` (an event's
+  `data` against its `contentSchema`, by the kind its `event` names), with
+  the line ends it was sent with. Reading ends with a `*server.BindError`
+  at the first invalid item, located at its index (`/2/name`), or at a
+  line longer than `WithMaxBodyBytes` (413), which
+  `middleware.WriteError` answers as the middleware answers other invalid
+  requests:
+
+  ```go
+  sc := bufio.NewScanner(r.Body)
+  for sc.Scan() {
+      // ... each line is valid
+  }
+  if err := sc.Err(); err != nil {
+      middleware.WriteError(w, r, err)
+      return
+  }
+  ```
 - **Credentials**: one of the operation's security requirements must have
   its credentials present (the API key, `Authorization` of the scheme, a
   client certificate), else 401 with the schemes' challenges. Checking
@@ -1374,11 +1393,18 @@ pet := op.Body.(map[string]any) // the JSON body
 ```
 
 `middleware.WithResponseValidation(middleware.LogResponses)` checks
-responses too: the status is declared, the media type, a JSON body
-against its schema (required write-only properties may be missing) and
-required headers. `LogResponses` logs what is wrong and sends the
-response; `RejectResponses` sends a 500 problem instead. Responses are
-buffered to be checked; one the handler flushes is streamed unchecked.
+responses too: the status is declared, the media type, the body against
+its schema for JSON, XML, forms and text (required write-only properties
+may be missing), and the headers, which must be there if required and
+whose values are read as header parameters are and checked against
+their schemas. `LogResponses` logs what is wrong and sends the response;
+`RejectResponses` sends a 500 problem instead. Responses are buffered to
+be checked, and one the handler flushes is streamed from then on. The
+items of a JSON Lines or event stream are still checked, buffered or
+streamed, each sent once it is complete. A flushed stream has sent its
+status, so `RejectResponses` cannot answer 500: it logs the invalid
+item, does not send it, and fails it and every later write, which ends
+the stream the client reads.
 
 Messages come from JSON Schema validation, so they read differently from
 a generated server's, which also stops at values of the wrong type

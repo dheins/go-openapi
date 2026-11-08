@@ -68,10 +68,12 @@ shipped in.
   types, and of streams; and decoding codec bodies with the JSON
   decoder's rules (required properties, read-only and write-only ones,
   defaults, pointers). — later
-- `middleware.Validate`: checking text, binary and stream bodies against
-  their schemas (only their media types are), responses other than JSON,
-  response headers' values, and a generated server's messages for the
-  same problems. — later
+- `middleware.Validate`: checking binary bodies, positional parts (as
+  bodies or streams) and codec bodies against their schemas (only their
+  media types are), response headers holding objects in other styles
+  than the IR types, and a generated server's messages for the same
+  problems (the status and locations match; JSON Schema words messages
+  differently). — later
 
 A chi (or other router) adapter for `server.Mux` is not planned: a generated
 server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
@@ -142,6 +144,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `middleware.Validate` checks text bodies and the items of JSON Lines
+  and event stream bodies as the handler reads them
+  (`middleware.WriteError`), and `WithResponseValidation` XML, form, text
+  and stream bodies and the values of headers, matching the generated
+  server's statuses and locations. (c95800f, a8c1c5b, ac1666d)
 - [x] Arrays of arrays in form and multipart bodies and object parameters
   (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects,
   read in the order fields are sent, in Go and TypeScript servers,
