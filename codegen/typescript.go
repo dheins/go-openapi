@@ -165,7 +165,7 @@ var tsRuntimeExports = []struct {
 	{"ClientOptions", true, false}, {"SenderOptions", true, false}, {"CallOptions", true, false}, {"Credential", true, false}, {"BasicCredential", true, false},
 	{"ServerEvent", true, false}, {"NamedEvent", true, false}, {"Part", true, false}, {"ByteRange", true, false}, {"Problem", true, false}, {"Issue", true, false}, {"Schema", true, false}, {"FormatCheck", true, false}, {"Codec", true, false},
 	{"InvalidRequestError", false, false}, {"UnexpectedResponseError", false, false}, {"InvalidResponseError", false, false},
-	{"NoCredentialsError", false, false}, {"validate", false, false}, {"encode", false, false}, {"registerFormat", false, false},
+	{"NoCredentialsError", false, false}, {"NotReplayableError", false, false}, {"validate", false, false}, {"encode", false, false}, {"registerFormat", false, false},
 	{"ReceiverOptions", true, true}, {"Received", true, true}, {"CredentialCheck", true, true}, {"BasicCheck", true, true},
 	{"CertificateCheck", true, true}, {"MissingValueError", false, true}, {"nodeHandler", false, true},
 	{"NodeHandlerOptions", true, true}, {"NodeRequest", true, true}, {"NodeResponse", true, true},
