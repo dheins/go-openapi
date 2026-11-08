@@ -4,6 +4,14 @@
 
 ### Added
 
+- Streamed request bodies can be sent again: the Go client keeps up to
+  `client.WithReplayLimit(n)` (`client.DefaultReplayLimit`, 1 MiB) of a
+  JSON Lines, event stream or part stream body and sets `GetBody`, for
+  retrying middleware and the transport's resending, returning
+  `client.ErrNotReplayable` past it. TypeScript clients take
+  `replayLimit`, and each read of `init.body` is a new stream of the
+  same body, so a fetch wrapper retries with the same `init`; past it the
+  call rejects with `NotReplayableError`.
 - Generated CLIs send bodies of positional parts, from `-part` and
   `-part-header` flags in order or a multipart document in `-body`, and
   JSON Lines, event stream and part stream bodies read from `-body` as
@@ -607,6 +615,9 @@
 
 ### Changed
 
+- Closing the body of a Go request with a streamed body no longer stops
+  its producer, since the request may be sent again; the call's end does
+  (an error, closing the response body, or the context).
 - TypeScript receivers give an absent parameter that has a `default` its
   default, as Go servers do, rather than leaving it undefined. Parameter
   specs carry `default`.

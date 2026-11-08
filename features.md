@@ -31,8 +31,8 @@ shipped in.
   kind, or a oneOf of kinds with a const event name): kinds told apart by
   other fields, `id` and `retry` schemas, and data of other media
   types than JSON and text. — later
-- Streamed request bodies that can be sent again, for retry middleware
-  (a stream is sent once today). — later
+- Streamed request bodies longer than the replay limit sent again
+  (keeping them on disk rather than in memory). — later
 - XML for maps of arrays, unions of non-object variants, and objects with
   typed `additionalProperties` next to their properties (answered with
   415 today). — later
@@ -145,6 +145,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Streamed request bodies that can be sent again: Go clients keep up
+  to `WithReplayLimit` of them for `GetBody`, TypeScript clients up to
+  `replayLimit` behind `init.body`, so retrying middleware and fetch
+  wrappers resend them. (05b92bd, 2dd4be6, 79ddc8f)
 - [x] `goapi generate cli`: bodies of positional parts (`-part`, or a
   multipart document), JSON Lines and event streams read from `-body` as
   they are sent, a `-body.<path>` flag per property of a body, and bash

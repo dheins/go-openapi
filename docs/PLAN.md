@@ -918,6 +918,28 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M57 – Replayable streamed request bodies ✅
+- [x] Go: a recording in place of the pipe, ranged over once and kept up
+  to `WithReplayLimit` (1 MiB) for `GetBody`; `ErrNotReplayable` past it;
+  the producer stopped when the call is done
+- [x] End to end: a retrying middleware resends JSON Lines, typed events
+  and part streams after a failed first sending; `FuzzReplay`
+- [x] TypeScript: `replayLimit`, `init.body` a getter of new streams,
+  `NotReplayableError`
+
+**How it went**
+- *Record, do not re-range*: an `iter.Seq2` may be single-use (stdin, a
+  socket), so the bytes are kept rather than the items asked for again;
+  the bound keeps long-lived streams as cheap as before.
+- *When to stop*: closing a body no longer ends the producer, since a
+  retry may follow; the call's end does, through `Do`, the response body
+  and the context.
+- *TypeScript*: fetch reads `init.body` once per call, so a getter gives
+  each sending a stream of its own without changing how wrappers are
+  written. Cancelling the source once the response came cut short a
+  request a server answers while reading it; it now only stops keeping.
+- *Not done*: see [features.md](../features.md).
+
 ### M56 – CLI bodies and completion ✅
 - [x] Positional parts: `-part` and `-part-header` in order, or `-body` as
   a multipart document, filling the request's parts type by reflection
