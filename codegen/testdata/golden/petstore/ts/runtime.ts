@@ -1731,8 +1731,8 @@ function entries(v: unknown): [string, unknown][] {
 }
 
 // fields flattens an object into bracketed fields, as forms and deepObject
-// write them: a[b]=1, an array of scalars repeated, an array of objects
-// with indices (a[0][b]=1).
+// write them: a[b]=1, an array of scalars repeated, an array of objects or
+// of arrays with indices (a[0][b]=1, a[0][1]=2).
 function fields(v: unknown, prefix: string, out: [string, string][]): void {
   for (const [k, x] of entries(v)) {
     const name = prefix === "" ? k : `${prefix}[${k}]`;
@@ -1740,13 +1740,25 @@ function fields(v: unknown, prefix: string, out: [string, string][]): void {
   }
 }
 
-function addField(name: string, x: unknown, out: [string, string][]): void {
+// addField writes x as the fields of name; indexed says to write the
+// items of an array of scalars with indices too, as those of an item of
+// an array of arrays are, so that the item is one.
+function addField(name: string, x: unknown, out: [string, string][], indexed = false): void {
   if (x === null) {
     return;
   }
   if (Array.isArray(x)) {
-    if (x.some((item) => isObject(item))) {
-      x.forEach((item, i) => (isObject(item) ? fields(item, `${name}[${i}]`, out) : item === null ? undefined : out.push([`${name}[${i}]`, text(item)])));
+    if (indexed || x.some((item) => isObject(item) || Array.isArray(item))) {
+      x.forEach((item, i) => {
+        const at = `${name}[${i}]`;
+        if (Array.isArray(item)) {
+          addField(at, item, out, true);
+        } else if (isObject(item)) {
+          fields(item, at, out);
+        } else if (item !== null) {
+          out.push([at, text(item)]);
+        }
+      });
     } else {
       for (const item of x) {
         out.push([name, text(item)]);
@@ -2823,48 +2835,157 @@ function scalarValue(schema: Schema, s: string): unknown {
   return s;
 }
 
-// formValue reads an object written as form fields, the inverse of
-// fields: a[b]=1 is a nested property, a repeated field an array, and
-// a[0][b]=1 an item of an array of objects. Values are converted by the
-// schema.
+// formValue reads an object written as form fields, in their order, the
+// inverse of fields, as a Go server reads it: a[b]=1 is a nested
+// property, a repeated field an array, a[0][b]=1 an item of an array of
+// objects, a[0][1]=2 (or a[0][]=2) an item of an array of arrays, and
+// a[][b]=1 an item as Rails and Rack write them, a property the last item
+// has starting the next. Values are converted by the schema.
 function formValue(schema: Schema, raw: string): Values {
-  const out: Values = {};
+  const root = fieldNode();
+  const s = unwrapped(schema);
   for (const [name, value] of new URLSearchParams(raw)) {
-    const open = name.indexOf("[");
-    const path = open < 0 ? [name] : [name.slice(0, open), ...Array.from(name.slice(open).matchAll(/\[([^\]]*)\]/g), (m) => m[1] ?? "")];
-    setField(out, schema, path, value);
+    insertField(root, s.kind === "object" && name in s.properties ? [name] : splitFieldName(name), value);
   }
-  return out;
+  return nodeValue(root, schema, "") as Values;
 }
 
-function setField(container: Values, schema: Schema, path: readonly string[], value: string): void {
+// unwrapped returns schema resolved, without nullable.
+function unwrapped(schema: Schema): Schema {
   let s = resolve(schema);
   if (s.kind === "nullable") {
     s = resolve(s.of);
   }
-  const [key = "", ...rest] = path;
-  let sub: Schema = { kind: "any" };
-  if (s.kind === "object") {
-    const additional = s.additional === false || s.additional === undefined ? sub : s.additional;
-    sub = s.properties[key]?.schema ?? additional;
-  } else if (s.kind === "map") {
-    sub = s.values;
-  } else if (s.kind === "array") {
-    sub = s.items;
+  return s;
+}
+
+/** Fields below a name: its values, or the fields of its properties or
+ * indices, or the items of an array written "a[][b]". */
+interface FieldNode {
+  values: string[];
+  children: Map<string, FieldNode>;
+  items: FieldNode[];
+}
+
+function fieldNode(): FieldNode {
+  return { values: [], children: new Map(), items: [] };
+}
+
+// splitFieldName splits "a[b][c]" into a, b and c, with "" for each "[]".
+// A name not of this form is a name of its own.
+function splitFieldName(name: string): string[] {
+  const open = name.indexOf("[");
+  if (open <= 0 || !/^(\[[^[\]]*\])+$/.test(name.slice(open))) {
+    return [name];
   }
-  let inner = resolve(sub);
-  if (inner.kind === "nullable") {
-    inner = resolve(inner.of);
+  return [name.slice(0, open), ...Array.from(name.slice(open).matchAll(/\[([^\]]*)\]/g), (m) => m[1] ?? "")];
+}
+
+// insertField adds a field of value at path below n. An empty name is an
+// item of an array: a value of its own if it is the last ("a[]=x"), else
+// the last item, unless that has the rest of the path already, when it
+// starts the next.
+function insertField(n: FieldNode, path: readonly string[], value: string): void {
+  for (let i = 0; i < path.length; i++) {
+    const name = path[i]!;
+    if (name === "") {
+      if (i === path.length - 1) {
+        break;
+      }
+      const last = n.items[n.items.length - 1];
+      if (last === undefined || hasField(last, path.slice(i + 1))) {
+        n.items.push(fieldNode());
+      }
+      n = n.items[n.items.length - 1]!;
+      continue;
+    }
+    let child = n.children.get(name);
+    if (child === undefined) {
+      child = fieldNode();
+      n.children.set(name, child);
+    }
+    n = child;
   }
-  if (rest.length > 0) {
-    container[key] ??= inner.kind === "array" ? [] : {};
-    setField(container[key] as Values, inner, rest, value);
-  } else if (inner.kind === "array") {
-    container[key] ??= [];
-    (container[key] as unknown[]).push(scalarValue(inner.items, value));
-  } else {
-    container[key] = scalarValue(inner, value);
+  n.values.push(value);
+}
+
+// hasField reports whether n has a field at path already; a path with an
+// item of an array in it never has ("a[][tags][]=x" adds to the last
+// item's tags).
+function hasField(n: FieldNode, path: readonly string[]): boolean {
+  if (path.includes("")) {
+    return false;
   }
+  for (const name of path) {
+    const child = n.children.get(name);
+    if (child === undefined) {
+      return false;
+    }
+    n = child;
+  }
+  return n.values.length > 0 || n.children.size > 0 || n.items.length > 0;
+}
+
+// nodeValue converts the fields n, at pointer at, to a value of schema.
+function nodeValue(n: FieldNode, schema: Schema, at: string): unknown {
+  const s = unwrapped(schema);
+  const items = s.kind === "array" ? s.items : ({ kind: "any" } as Schema);
+  if (n.items.length > 0) {
+    if (n.children.size > 0 || n.values.length > 0) {
+      throw new Error(`${at}: both items written "[]" and other values or indices`);
+    }
+    return n.items.map((item, i) => nodeValue(item, items, `${at}/${i}`));
+  }
+  if (n.children.size > 0) {
+    if (n.values.length > 0) {
+      throw new Error(`${at}: both a value and nested properties`);
+    }
+    if (s.kind === "array") {
+      const indexed = [...n.children].map(([k, child]): [number, FieldNode] => {
+        if (!/^(0|[1-9][0-9]*)$/.test(k)) {
+          throw new Error(`${at}/${k}: expected an array item with an index`);
+        }
+        return [Number(k), child];
+      });
+      return indexed.sort((a, b) => a[0] - b[0]).map(([, child], i) => nodeValue(child, items, `${at}/${i}`));
+    }
+    const out: Values = {};
+    for (const [k, child] of n.children) {
+      let sub: Schema = { kind: "any" };
+      if (s.kind === "object") {
+        sub = s.properties[k]?.schema ?? (s.additional === false || s.additional === undefined ? sub : s.additional);
+      } else if (s.kind === "map") {
+        sub = s.values;
+      }
+      out[k] = nodeValue(child, sub, `${at}/${k}`);
+    }
+    return out;
+  }
+  if (s.kind === "array") {
+    return n.values.map((v) => leafValue(items, v));
+  }
+  // The last of several values, of a property that is not an array.
+  return n.values.length === 0 ? {} : leafValue(s, n.values[n.values.length - 1]!);
+}
+
+// leafValue converts the text of a field to a value of schema: JSON for
+// an object or array, as the default content type of objects in forms
+// and multipart bodies has them, and by its text otherwise.
+function leafValue(schema: Schema, v: string): unknown {
+  switch (unwrapped(schema).kind) {
+    case "object":
+    case "array":
+    case "map":
+      if (/^\s*[[{]/.test(v)) {
+        try {
+          return JSON.parse(v) as unknown;
+        } catch {
+          // Not JSON: the text, for validation to report.
+        }
+      }
+      return v;
+  }
+  return scalarValue(schema, v);
 }
 
 // Reader says how a body is read: a response's, by a client, or a
@@ -4126,49 +4247,29 @@ async function* requestLines(rd: Reader, item: Schema, body: ReadableStream<Uint
 }
 
 // multipartValue reads a multipart/form-data body of schema, an object:
-// a file field is a File (a base64 string for a []byte), an object or
-// array field JSON, and others are converted by their schemas.
+// a file part is a File (a base64 string for a []byte), other parts are
+// fields read as formValue reads them, in order, an object or array as
+// JSON.
 async function multipartValue(schema: Schema, data: Uint8Array<ArrayBuffer>, contentType: string): Promise<Values> {
   const form = await new Response(data, { headers: { "Content-Type": contentType } }).formData();
-  let object = resolve(schema);
-  if (object.kind === "nullable") {
-    object = resolve(object.of);
-  }
-  const out: Values = {};
-  for (const k of new Set(form.keys())) {
-    let prop: Schema | undefined;
-    if (object.kind === "object") {
-      prop = object.properties[k]?.schema ?? (object.additional === false ? undefined : object.additional);
+  const object = unwrapped(schema);
+  const root = fieldNode();
+  const files = new Map<string, unknown[]>();
+  for (const [k, x] of form) {
+    if (typeof x === "string") {
+      insertField(root, object.kind === "object" && k in object.properties ? [k] : splitFieldName(k), x);
+      continue;
     }
-    const array = prop !== undefined && resolve(prop).kind === "array";
-    const item = array ? (resolve(prop!) as ArraySchema).items : prop;
-    const values = await Promise.all(form.getAll(k).map((x) => formEntry(item, x)));
-    out[k] = array ? values : values[0];
+    const prop = object.kind === "object" ? object.properties[k]?.schema : undefined;
+    const item = prop !== undefined && unwrapped(prop).kind === "array" ? (unwrapped(prop) as ArraySchema).items : prop;
+    files.set(k, [...(files.get(k) ?? []), isBytes(item) ? toBase64(new Uint8Array(await x.arrayBuffer())) : x]);
+  }
+  const out = nodeValue(root, schema, "") as Values;
+  for (const [k, values] of files) {
+    const prop = object.kind === "object" ? object.properties[k]?.schema : undefined;
+    out[k] = prop !== undefined && unwrapped(prop).kind === "array" ? values : values[0];
   }
   return withDefaults(schema, out, "request");
-}
-
-// formEntry reads a field of a multipart/form-data body, of schema.
-async function formEntry(schema: Schema | undefined, x: FormDataEntryValue): Promise<unknown> {
-  if (typeof x !== "string") {
-    return isBytes(schema) ? toBase64(new Uint8Array(await x.arrayBuffer())) : x;
-  }
-  if (schema === undefined) {
-    return x;
-  }
-  let s = resolve(schema);
-  if (s.kind === "nullable") {
-    s = resolve(s.of);
-  }
-  switch (s.kind) {
-    case "object":
-    case "array":
-    case "map":
-    case "all":
-    case "union":
-      return JSON.parse(x) as unknown;
-  }
-  return scalarValue(schema, x);
 }
 
 // writeResponse writes resp, the response a handler of op returned: the

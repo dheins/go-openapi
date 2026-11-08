@@ -314,3 +314,72 @@ test("callback URLs are computed from the request and response", () => {
   assert.equal(callbackUrl(spec, { body: { url: "https://h.test" }, ids: [1, 2] }, { status: 201 }), "https://h.test/pets/1,2?status=201");
   assert.throws(() => callbackUrl(spec, { body: {}, ids: [1] }, { status: 201 }), (e: unknown) => e instanceof MissingValueError && e.expression === "$request.body#/url");
 });
+
+test("arrays of arrays and of objects are written with indices and read back", async () => {
+  const line: Schema = { kind: "object", properties: { sku: { schema: str }, qty: { schema: int }, tags: { schema: { kind: "array", items: str } } } };
+  const order: Schema = { kind: "object", properties: { lines: { schema: { kind: "array", items: line } }, boxes: { schema: { kind: "array", items: ints } } } };
+  const op: OperationSpec = {
+    method: "POST",
+    path: "",
+    params: [param({ key: "filter", in: "query", style: "deepObject", explode: true, shape: "object", schema: order })],
+    body: { required: true, media: [{ mediaType: "application/x-www-form-urlencoded", kind: "form", key: "body", schema: order }] },
+    responses: noContent,
+  };
+  const value = { lines: [{ sku: "a", qty: 1, tags: ["x", "y"] }, { sku: "b", qty: 2 }], boxes: [[0, 1], [1]] };
+  let sent = "";
+  const { got } = await roundTrip(op, { filter: value, body: value }, (_, received) => {
+    sent = decodeURIComponent(new URL(received.request.url).search);
+    return { status: 204 };
+  });
+  assert.deepEqual(got, { filter: value, body: value });
+  assert.match(sent, /filter\[boxes\]\[0\]\[1\]=1/);
+  assert.match(sent, /filter\[lines\]\[1\]\[sku\]=b/);
+});
+
+test("Rails-style fields are read in their order", async () => {
+  const line: Schema = { kind: "object", properties: { sku: { schema: str }, qty: { schema: int }, tags: { schema: { kind: "array", items: str } } } };
+  const order: Schema = { kind: "object", properties: { lines: { schema: { kind: "array", items: line } }, boxes: { schema: { kind: "array", items: ints } } } };
+  const op = body([{ mediaType: "application/x-www-form-urlencoded", kind: "form", key: "body", schema: order }]);
+  const rcfg = receiverConfig({}, undefined);
+  let got: unknown;
+  const post = (form: string) =>
+    receive(
+      rcfg,
+      op,
+      async (req: never) => {
+        got = (req as { body: unknown }).body;
+        return { status: 204 };
+      },
+      new Request("http://hooks.test/", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form }),
+    );
+  const resp = await post("lines[][sku]=a&lines[][tags][]=x&lines[][tags][]=y&lines[][qty]=1&lines[][sku]=b&lines[][qty]=2&boxes[0][]=0&boxes[0][]=1&boxes[1]=1");
+  assert.equal(resp.status, 204);
+  assert.deepEqual(got, { lines: [{ sku: "a", tags: ["x", "y"], qty: 1 }, { sku: "b", qty: 2 }], boxes: [[0, 1], [1]] });
+  const mixed = await post("lines[][sku]=a&lines[1][sku]=b");
+  assert.equal(mixed.status, 400);
+  assert.match(JSON.stringify(await mixed.json()), /both items written/);
+});
+
+test("multipart fields with brackets are read as form fields are", async () => {
+  const line: Schema = { kind: "object", properties: { sku: { schema: str }, qty: { schema: int } } };
+  const upload: Schema = { kind: "object", properties: { lines: { schema: { kind: "array", items: line } }, photo: { schema: { kind: "file" } } } };
+  const op = body([{ mediaType: "multipart/form-data", kind: "multipart", key: "body", schema: upload }]);
+  const form = new FormData();
+  form.append("lines[][sku]", "a");
+  form.append("lines[][qty]", "1");
+  form.append("lines[][sku]", "b");
+  form.append("photo", new File(["png"], "p.png"));
+  let got: Record<string, unknown> = {};
+  const resp = await receive(
+    receiverConfig({}, undefined),
+    op,
+    async (req: never) => {
+      got = (req as { body: Record<string, unknown> }).body;
+      return { status: 204 };
+    },
+    new Request("http://hooks.test/", { method: "POST", body: form }),
+  );
+  assert.equal(resp.status, 204);
+  assert.deepEqual(got["lines"], [{ sku: "a", qty: 1 }, { sku: "b" }]);
+  assert.equal(await (got["photo"] as File).text(), "png");
+});
