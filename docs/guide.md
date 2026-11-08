@@ -1986,7 +1986,39 @@ refuses the request. `ReceiverOptions` turn validation off
 (`validateRequests`), on for responses (`validateResponses`), give
 `codecs`, `maxBodyBytes`, and `onError`, told of what a method throws
 (answered 500), `console.error` by default. Path parameters, which only
-the router knows, are passed as `params`.
+the router knows, are passed as `params`. An absent parameter with a
+`default` gets it, as a Go server gives it, so the handler always has a
+value for it (the field stays optional, as the type is the client's too).
+
+On Node's `http` module or Express, `nodeHandler` serves a fetch handler:
+
+```ts
+import * as http from "node:http";
+import { nodeHandler } from "./api/index.ts";
+
+http.createServer(nodeHandler(adopted)).listen(8080);
+app.post("/hooks/adopted/:petId", nodeHandler(adopted)); // Express: req.params are the params
+```
+
+The request body streams to the handler and the response to the client,
+waiting while the client is slow to read, so JSON Lines and event streams
+stay live; the request's `signal` aborts when the client goes away. Put
+no body parser such as `express.json()` in front: it would read the body
+first. `params(req)` gives the path parameters another way, and
+`onError` is told of a handler that rejects (answered 500) or a response
+that cannot be written. The types it takes, `NodeRequest` and
+`NodeResponse`, are what it uses of Node's, so `@types/node` is not
+needed.
+
+The URL a handler is told of (`received.url`, the `$url` of callback
+URLs) is the request's `Host`, over `https` if the connection is TLS.
+Behind a proxy, `trustProxy` says whom to believe about the URL the
+client sent to: `true` for every proxy, a list of addresses and prefixes
+(`["10.0.0.0/8", "::1"]`), or a function of the address. For requests
+from them, the URL is read from `Forwarded`, or `X-Forwarded-Proto`,
+`-Host`, `-Port` and `-Prefix`, walking back through the trusted hops, as
+a Go server's `server.WithTrustedProxies` does; without it, those headers
+are ignored.
 
 Each callback the consumer sends back has a URL function taking the
 request it received, and the response its handler returns or the URL the

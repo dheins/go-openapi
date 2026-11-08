@@ -81,6 +81,16 @@ checked off under [Fixed](#fixed), by the release they shipped in.
   request carrying invalid credentials gets 401 instead of being treated as
   anonymous. This is deliberate but differs from some frameworks.
 
+## TypeScript
+
+- **`runtime.ts` does not type-check with `@types/node` 20 and the `dom`
+  lib together.** The default `fetch` of a client's config passes a
+  `Request` of Node's `undici-types` to the DOM `fetch`, whose `Request`
+  has `bytes` (TS 7), so `tsc` reports TS2769 at `config`. Found checking
+  `nodeHandler` against `@types/node`; it predates it. *Workaround:*
+  `--skipLibCheck` does not help (the file is the user's); use one of the
+  two libs, or a newer `@types/node`.
+
 ## Fixed
 
 Unreleased:

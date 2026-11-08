@@ -57,9 +57,9 @@ shipped in.
 - Forwarding headers for anything but `$url`: routing, the base path,
   the document page and logs use the request as the server received it.
   — later
-- TypeScript receivers: a Node `http` adapter (handlers take a fetch
-  `Request`), defaults of absent parameters (a Go server applies them),
-  and URL functions of the callbacks the API sends back from inside the
+- TypeScript receivers: adapters for other servers than fetch and Node's
+  `http` module (`http2`, which `nodeHandler` does not take), and URL
+  functions of the callbacks the API sends back from inside the
   callbacks a consumer sends (the API's to compute). — later
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
@@ -144,6 +144,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] TypeScript receivers on Node's `http` module and Express
+  (`nodeHandler`, with `trustProxy`), and defaults of absent parameters,
+  as a Go server gives them. (3856692, 3695874)
 - [x] `middleware.Validate` checks text bodies and the items of JSON Lines
   and event stream bodies as the handler reads them
   (`middleware.WriteError`), and `WithResponseValidation` XML, form, text

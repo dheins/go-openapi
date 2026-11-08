@@ -918,6 +918,23 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M55 – TypeScript receivers on Node ✅
+- [x] Defaults of absent parameters in receivers: parameter specs carry
+  them, and the doc comments of request fields say receivers set them
+- [x] `nodeHandler`: any fetch handler served by Node's `http` module or
+  Express, bodies streamed both ways with backpressure, aborts, Set-Cookie
+  and Express's `req.params`; the URL from `Host`, or from trusted proxies
+  (`trustProxy`) as `server.WithTrustedProxies` reads it
+
+**How it went**
+- *No Node types*: generated code is checked without `@types/node`, so
+  `NodeRequest` and `NodeResponse` hold only what the adapter uses;
+  `IncomingMessage` and `ServerResponse` of `@types/node` 16 and 20 fit
+  them.
+- *Backpressure*: the body is written only as the socket drains, which a
+  test of a client that does not read checks.
+- *Not done*: see [features.md](../features.md).
+
 ### M54 – Middleware checks of text, streams and responses ✅
 - [x] Requests: text bodies against their schemas, and JSON Lines and
   event stream bodies item by item as the handler reads them, ending with
