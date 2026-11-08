@@ -70,7 +70,7 @@ func FuzzParamRoundTrip(f *testing.F) {
 			raw, _ := strings.CutPrefix(req.URL.Path, "/v1/x/")
 			got, err = st.p.PathValues(raw)
 		case "query":
-			got, _, err = st.p.QueryValues(req.URL.Query())
+			got, _, err = st.p.QueryValues(server.ParseQuery(req))
 		case "header":
 			got, _, err = st.p.HeaderValues(req.Header)
 		}
@@ -101,7 +101,7 @@ func FuzzContentRoundTrip(f *testing.F) {
 		r.TextContentParam(in, "t", text)
 		r.FormContentParam(in, "f", owner{Name: name, Age: 2})
 		req := build(t, r)
-		query := req.URL.Query()
+		query := server.ParseQuery(req)
 		raw := func(n string) string {
 			v, ok := server.ContentValue(req, query, in, n)
 			if !ok {

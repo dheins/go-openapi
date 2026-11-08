@@ -1,7 +1,6 @@
 package client
 
 import (
-	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -88,7 +87,7 @@ func TestNestedFieldsRoundTrip(t *testing.T) {
 	r = NewRequest("GET")
 	r.QueryParam(p, in)
 	req := build(t, r)
-	vals, ok, err := p.QueryValues(req.URL.Query())
+	vals, ok, err := p.QueryValues(server.ParseQuery(req))
 	if err != nil || !ok {
 		t.Fatalf("deepObject: %v %v", ok, err)
 	}
@@ -122,7 +121,7 @@ func TestNestedFieldsErrors(t *testing.T) {
 		{"tree[children][0]=leaf", "expected object, got string"},
 	}
 	for _, tc := range tests {
-		q, err := url.ParseQuery(tc.query)
+		q, err := server.ParseFields(tc.query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +132,7 @@ func TestNestedFieldsErrors(t *testing.T) {
 	}
 
 	// Indices need not start at 0 or be contiguous; items keep their order.
-	q, _ := url.ParseQuery("id=o&items[5][name]=b&items[5][qty]=2&items[2][name]=a&items[2][qty]=1")
+	q, _ := server.ParseFields("id=o&items[5][name]=b&items[5][qty]=2&items[2][name]=a&items[2][qty]=1")
 	out, err := server.DecodeFields[order](q, orderShape)
 	if err != nil || len(out.Items) != 2 || out.Items[0].Name != "a" || out.Items[1].Qty != 2 {
 		t.Errorf("sparse indices: %+v %v", out, err)

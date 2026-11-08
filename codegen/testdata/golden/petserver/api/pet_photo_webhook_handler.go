@@ -28,7 +28,7 @@ func HandlePetPhotoWebhook(c *server.Config, h WebhookHandler) http.Handler {
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req PetPhotoWebhookRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, ok, err := petPhotoWebhookPetIDParam.QueryValues(query); err != nil {
 			b.Param("query", "petId", err)
 		} else if ok {

@@ -23,7 +23,7 @@ func HandleGetContent(c *server.Config, h Handler, sec SecurityHandler) http.Han
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req GetContentRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if raw := r.PathValue("p0"); true {
 			if v, err := server.DecodeTextContent[int64](raw); err != nil {
 				b.Param("path", "code", err)
@@ -48,7 +48,7 @@ func HandleGetContent(c *server.Config, h Handler, sec SecurityHandler) http.Han
 				b.Param("query", "where", errs.Err())
 			}
 		}
-		if raw, ok := server.ContentValue(r, nil, "header", "X-Note"); ok {
+		if raw, ok := server.ContentValue(r, server.Query{}, "header", "X-Note"); ok {
 			if v, err := server.DecodeTextContent[string](raw); err != nil {
 				b.Param("header", "X-Note", err)
 			} else {
@@ -62,7 +62,7 @@ func HandleGetContent(c *server.Config, h Handler, sec SecurityHandler) http.Han
 				b.Param("header", "X-Note", errs.Err())
 			}
 		}
-		if raw, ok := server.ContentValue(r, nil, "cookie", "session"); ok {
+		if raw, ok := server.ContentValue(r, server.Query{}, "cookie", "session"); ok {
 			if v, err := server.DecodeContent[model.Prefs](raw); err != nil {
 				b.Param("cookie", "session", err)
 			} else {
@@ -74,7 +74,7 @@ func HandleGetContent(c *server.Config, h Handler, sec SecurityHandler) http.Han
 				b.Param("cookie", "session", errs.Err())
 			}
 		}
-		if raw, ok := server.ContentValue(r, nil, "cookie", "label"); ok {
+		if raw, ok := server.ContentValue(r, server.Query{}, "cookie", "label"); ok {
 			if v, err := server.DecodeTextContent[string](raw); err != nil {
 				b.Param("cookie", "label", err)
 			} else {

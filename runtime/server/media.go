@@ -13,7 +13,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -21,13 +20,14 @@ import (
 	"github.com/dheins/go-openapi/oapi"
 )
 
-// FormFields parses an application/x-www-form-urlencoded body.
-func FormFields(body []byte) (map[string][]string, error) {
-	values, err := url.ParseQuery(string(body))
+// FormFields parses an application/x-www-form-urlencoded body, keeping
+// the order of its fields.
+func FormFields(body []byte) (FieldValues, error) {
+	fields, err := ParseFields(string(body))
 	if err != nil {
 		return nil, &oapi.ValidationError{Message: "invalid form body: " + err.Error()}
 	}
-	return values, nil
+	return fields, nil
 }
 
 // DecodeMultipart decodes a multipart/form-data body into T. Values are
@@ -60,7 +60,7 @@ func MultipartJSON(body []byte, contentType string, obj Property) ([]byte, map[s
 	if err != nil || params["boundary"] == "" {
 		return nil, nil, &oapi.ValidationError{Message: "multipart body without a boundary"}
 	}
-	fields := map[string][]string{}
+	var fields FieldValues
 	files := map[string][]oapi.File{}
 	var errs oapi.ValidationErrors
 	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
@@ -94,16 +94,16 @@ func MultipartJSON(body []byte, contentType string, obj Property) ([]byte, map[s
 				continue
 			}
 			// As JSON has bytes: base64.
-			fields[name] = append(fields[name], base64.StdEncoding.EncodeToString(raw))
+			fields = append(fields, FieldValue{name, base64.StdEncoding.EncodeToString(raw)})
 		case prop.Type == "file":
 			files[name] = append(files[name], oapi.File{Name: part.FileName(), ContentType: part.Header.Get("Content-Type"), Header: part.Header, Data: data})
 			// A placeholder, so that decoding sees the property as present.
-			fields[name] = append(fields[name], "")
+			fields = append(fields, FieldValue{name, ""})
 		case part.FileName() == "" || declared:
 			// A part of a declared value is read as one even with a file
 			// name: browsers' FormData names every Blob part a file, as
 			// JavaScript clients send JSON values.
-			fields[name] = append(fields[name], string(data))
+			fields = append(fields, FieldValue{name, string(data)})
 		}
 	}
 	if err := errs.Err(); err != nil {

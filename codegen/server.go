@@ -500,7 +500,7 @@ func (f *fileGen) bindStmts(o *ir.Operation, cfg string) string {
 	}
 	for _, p := range o.Params {
 		if p.In == "query" || p.In == "querystring" {
-			w(1, "query := r.URL.Query()")
+			w(1, "query := server.ParseQuery(r)")
 			break
 		}
 	}
@@ -1127,7 +1127,7 @@ func (f *fileGen) bindParam(w func(int, string, ...any), o *ir.Operation, p *ir.
 	case p.Content != "" && p.In == "query":
 		extract = fmt.Sprintf("raw, ok := server.ContentValue(r, query, %q, %q)", p.In, p.Name)
 	case p.Content != "":
-		extract = fmt.Sprintf("raw, ok := server.ContentValue(r, nil, %q, %q)", p.In, p.Name)
+		extract = fmt.Sprintf("raw, ok := server.ContentValue(r, server.Query{}, %q, %q)", p.In, p.Name)
 	case p.In == "query":
 		extract = fmt.Sprintf("vals, ok, err := %s.QueryValues(query)", f.paramVar(o, p))
 	case p.In == "header":

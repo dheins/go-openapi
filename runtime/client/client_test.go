@@ -92,7 +92,7 @@ func TestParamsRoundTrip(t *testing.T) {
 		r := NewRequest("GET")
 		r.QueryParam(tt.p, tt.v)
 		req := build(t, r)
-		got, ok, err := tt.p.QueryValues(req.URL.Query())
+		got, ok, err := tt.p.QueryValues(server.ParseQuery(req))
 		if err != nil || !ok {
 			t.Errorf("%s %s: %v, %v (query %s)", tt.p.Style, tt.p.Name, ok, err, req.URL.RawQuery)
 			continue
@@ -622,7 +622,7 @@ func TestContentParamsRoundTrip(t *testing.T) {
 		// JSON keeps its quotes, in cookies too.
 		r.ContentParam(place, "json", owner{`"Ann"; Bo`, 5})
 		req := build(t, r)
-		query := req.URL.Query()
+		query := server.ParseQuery(req)
 		raw := func(name string) string {
 			v, ok := server.ContentValue(req, query, place, name)
 			if !ok {

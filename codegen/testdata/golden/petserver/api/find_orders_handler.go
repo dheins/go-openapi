@@ -23,7 +23,7 @@ func HandleFindOrders(c *server.Config, h Handler, sec SecurityHandler) http.Han
 		c.Log(r.Context(), slog.LevelDebug, "handling request")
 		var req FindOrdersRequest
 		var b server.Binder
-		query := r.URL.Query()
+		query := server.ParseQuery(r)
 		if vals, ok, err := findOrdersFilterParam.QueryValues(query); err != nil {
 			b.Param("query", "filter", err)
 		} else if ok {
