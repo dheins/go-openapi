@@ -112,6 +112,31 @@ paths:
           description: a problem
           content:
             application/problem+json: {}
+  /kinds:
+    get:
+      operationId: kinds
+      parameters:
+        - {name: case, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Count: {schema: {type: integer, minimum: 0}}
+            X-Tags: {schema: {type: array, items: {type: string, enum: [a, b]}}}
+            X-Where: {content: {application/json: {schema: {type: object, required: [near], properties: {near: {type: string}}}}}}
+          content:
+            application/xml: {schema: {$ref: "#/components/schemas/Pet"}}
+            application/x-www-form-urlencoded: {schema: {$ref: "#/components/schemas/PetForm"}}
+            text/plain: {schema: {type: string, maxLength: 3}}
+        "201":
+          description: a stream
+          content:
+            application/jsonl: {itemSchema: {$ref: "#/components/schemas/Reply"}}
+            text/event-stream:
+              itemSchema:
+                type: object
+                properties:
+                  data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
 components:
   securitySchemes:
     key: {type: apiKey, in: header, name: X-Key}

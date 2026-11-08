@@ -297,9 +297,9 @@ func (b *builder) operation(o *ir.Operation) (*operation, error) {
 		if def == nil {
 			continue
 		}
-		op.params = append(op.params, b.param(p, def))
+		op.params = append(op.params, b.param(p, def.Schema, def.Content))
 	}
-	op.responses = b.responses(oasOp)
+	op.responses = b.responses(o, oasOp)
 	if o.Body != nil && oasOp.RequestBody != nil {
 		rb := oasOp.RequestBody.Deref()
 		op.body = &body{required: o.Body.Required}
@@ -344,7 +344,8 @@ func (b *builder) find(o *ir.Operation) (*oas.PathItem, *oas.Operation) {
 	return item, nil
 }
 
-func (b *builder) param(p *ir.Param, def *oas.Parameter) *param {
+// param returns how to read and check p, of schema, or with content.
+func (b *builder) param(p *ir.Param, schema *oas.Schema, content *oas.OrderedMap[*oas.MediaType]) *param {
 	shape := server.Scalar
 	switch {
 	case p.Array:
@@ -352,10 +353,12 @@ func (b *builder) param(p *ir.Param, def *oas.Parameter) *param {
 	case p.Object:
 		shape = server.Object
 	}
-	schema := def.Schema
 	if p.Content != "" {
-		if m, ok := def.Content.Get(p.Content); ok {
-			schema = m.Deref().Schema
+		// The IR lowers the media type of content.
+		for mt, m := range content.All() {
+			if strings.EqualFold(mt, p.Content) {
+				schema = m.Deref().Schema
+			}
 		}
 	}
 	out := &param{ir: p, shape: shape}
