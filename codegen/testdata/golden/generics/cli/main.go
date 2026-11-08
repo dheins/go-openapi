@@ -46,6 +46,13 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.first.name", Path: "first.name", Type: "string"},
+				{Flag: "body.meta.total", Path: "meta.total", Type: "number"},
+				{Flag: "body.meta.sample.name", Path: "meta.sample.name", Type: "string"},
+				{Flag: "body.links.next", Path: "links.next", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutPets(ctx, req.(*api.PutPetsRequest))
 			},

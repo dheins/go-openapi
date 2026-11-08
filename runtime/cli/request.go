@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding"
 	"encoding/json"
 	"errors"
@@ -49,7 +50,8 @@ func request[C any](g *given, cmd *Command[C]) (any, error) {
 	if len(cmd.Media) == 0 {
 		return req, nil
 	}
-	if g.body == "" && len(g.files) == 0 && len(g.parts) == 0 {
+	fields := givenFields(g, cmd)
+	if g.body == "" && len(g.files) == 0 && len(g.parts) == 0 && len(fields) == 0 {
 		if cmd.BodyRequired {
 			return nil, errors.New("-body is required")
 		}
@@ -93,10 +95,99 @@ func request[C any](g *given, cmd *Command[C]) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("-body: %w", err)
 	}
+	if len(fields) > 0 {
+		if m.Field != cmd.FieldsOf {
+			return nil, fmt.Errorf("-%s is not a property of a %s body", fields[0].Flag, m.MediaType)
+		}
+		if data, err = setFields(data, fields, g); err != nil {
+			return nil, err
+		}
+	}
 	if err := setBody(field, m, data, g.files); err != nil {
 		return nil, fmt.Errorf("-body: %w", err)
 	}
 	return req, nil
+}
+
+// givenFields returns the body fields of cmd whose flags are given.
+func givenFields[C any](g *given, cmd *Command[C]) []BodyField {
+	var out []BodyField
+	for _, f := range cmd.BodyFields {
+		if len(*g.bodyFields[f.Flag]) > 0 {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// setFields returns data, the JSON object of -body ({} if empty), with
+// the properties of the body field flags given set.
+func setFields(data []byte, fields []BodyField, g *given) ([]byte, error) {
+	obj := map[string]any{}
+	if len(bytes.TrimSpace(data)) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber()
+		if err := dec.Decode(&obj); err != nil {
+			return nil, fmt.Errorf("-body: the -body.* flags need a JSON object: %w", err)
+		}
+	}
+	for _, f := range fields {
+		vals := *g.bodyFields[f.Flag]
+		var value any
+		if f.List {
+			items := []any{}
+			for _, v := range vals {
+				for _, item := range strings.Split(v, ",") {
+					x, err := jsonValue(item, f.Type)
+					if err != nil {
+						return nil, fmt.Errorf("-%s: %w", f.Flag, err)
+					}
+					items = append(items, x)
+				}
+			}
+			value = items
+		} else {
+			x, err := jsonValue(vals[len(vals)-1], f.Type)
+			if err != nil {
+				return nil, fmt.Errorf("-%s: %w", f.Flag, err)
+			}
+			value = x
+		}
+		names := strings.Split(f.Path, ".")
+		at := obj
+		for _, name := range names[:len(names)-1] {
+			next, ok := at[name].(map[string]any)
+			if !ok {
+				if at[name] != nil {
+					return nil, fmt.Errorf("-%s: the body's %s is not an object", f.Flag, name)
+				}
+				next = map[string]any{}
+				at[name] = next
+			}
+			at = next
+		}
+		at[names[len(names)-1]] = value
+	}
+	return json.Marshal(obj)
+}
+
+// jsonValue returns s as a JSON value of type typ: a string, a number or
+// a boolean.
+func jsonValue(s, typ string) (any, error) {
+	switch typ {
+	case "number":
+		if _, err := strconv.ParseFloat(s, 64); err != nil {
+			return nil, fmt.Errorf("%q is not a number", s)
+		}
+		return json.Number(s), nil
+	case "boolean":
+		b, err := strconv.ParseBool(s)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a boolean", s)
+		}
+		return b, nil
+	}
+	return s, nil
 }
 
 // setStream sets target, a streamed body, to the stream of -body, read

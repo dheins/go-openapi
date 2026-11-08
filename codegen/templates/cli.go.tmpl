@@ -62,7 +62,7 @@ func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{
 }
 {{- end}}
 
-{{/* "command" gets a command: Operation (*ir.Operation), Name, Summary, Tag, Params, Media, BodyRequired and ContentType. */}}
+{{/* "command" gets a command: Operation (*ir.Operation), Name, Summary, Tag, Params, Media, BodyRequired, ContentType, FieldsOf and BodyFields. */}}
 {{define "command"}}		{
 			Name: {{quote .Name}}, Summary: {{quote .Summary}}, Tag: {{quote .Tag}},
 			Request: func() any { return new({{opType .Operation.RequestType}}) },
@@ -85,6 +85,14 @@ func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{
 {{- end}}
 {{- if .ContentType}}
 			ContentType: {{quote .ContentType}},
+{{- end}}
+{{- if .BodyFields}}
+			FieldsOf: {{quote .FieldsOf}},
+			BodyFields: []cli.BodyField{
+{{- range .BodyFields}}
+				{Flag: {{quote .Flag}}, Path: {{quote .Path}}, Type: {{quote .Type}}{{if .List}}, List: true{{end}}{{with .Values}}, Values: []string{ {{- range $i, $v := .}}{{if $i}}, {{end}}{{quote $v}}{{end -}} }{{end}}{{if .Help}}, Help: {{quote .Help}}{{end}}},
+{{- end}}
+			},
 {{- end}}
 {{- end}}
 			Call: func(ctx context.Context, c *{{clientPackage}}.Client, req any) (any, error) {

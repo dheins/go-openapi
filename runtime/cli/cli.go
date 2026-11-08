@@ -67,6 +67,15 @@ type Media struct {
 	Stream func(r io.Reader) any
 }
 
+// BodyField is a flag of a property of a body given as JSON, -body.name:
+// its Path of property names separated by dots, its JSON Type (string,
+// number or boolean), whether it is a List of them, and its enum Values.
+type BodyField struct {
+	Flag, Path, Type, Help string
+	List                   bool
+	Values                 []string
+}
+
 // File is a file property of a multipart body: its flag, and the JSON
 // name and Go field of the property.
 type File struct {
@@ -87,6 +96,10 @@ type Command[C any] struct {
 	// ContentType, if set, is the request's field naming the media type
 	// the body is sent as, for operations with several.
 	ContentType string
+	// BodyFields are flags of properties of the body, set over -body's
+	// JSON, of the media types whose request field is FieldsOf.
+	BodyFields []BodyField
+	FieldsOf   string
 	// Call sends the request with c.
 	Call func(ctx context.Context, c C, req any) (any, error)
 }
@@ -249,6 +262,7 @@ type given struct {
 	body        string
 	contentType string
 	files       map[string]string
+	bodyFields  map[string]*multi
 	parts       []partArg
 	// closers are the sources of streamed bodies, closed when the
 	// command is done.
@@ -274,7 +288,7 @@ func (g *given) close(stderr io.Writer) {
 func (app App[C]) flags(cmd *Command[C], stderr io.Writer) (*flag.FlagSet, *given) {
 	fs := flag.NewFlagSet(app.Name+" "+cmd.Name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	g := &given{fs: fs, params: map[string]*multi{}, files: map[string]string{}, creds: map[string]*Credential{}}
+	g := &given{fs: fs, params: map[string]*multi{}, files: map[string]string{}, bodyFields: map[string]*multi{}, creds: map[string]*Credential{}}
 	for _, p := range cmd.Params {
 		m := &multi{}
 		g.params[p.Flag] = m
@@ -305,6 +319,21 @@ func (app App[C]) flags(cmd *Command[C], stderr io.Writer) (*flag.FlagSet, *give
 		fs.StringVar(&g.body, "body", "", help)
 		if len(cmd.Media) > 1 {
 			fs.StringVar(&g.contentType, "content-type", cmd.Media[0].MediaType, "the media type of the body: "+strings.Join(kinds, ", "))
+		}
+		for _, f := range cmd.BodyFields {
+			m := &multi{}
+			g.bodyFields[f.Flag] = m
+			help := fmt.Sprintf("the body's property %s, a %s", f.Path, f.Type)
+			if f.List {
+				help = fmt.Sprintf("the body's property %s, a list of %ss, repeated or comma-separated", f.Path, f.Type)
+			}
+			if len(f.Values) > 0 {
+				help += " (" + strings.Join(f.Values, ", ") + ")"
+			}
+			if f.Help != "" {
+				help += ": " + f.Help
+			}
+			fs.Var(m, f.Flag, help+"; set over -body")
 		}
 		if slices.ContainsFunc(cmd.Media, func(m Media) bool { return m.Kind == "parts" || m.Kind == "partstream" }) {
 			fs.Func("part", "a part of the body, in order: @file, - for stdin, or the text itself (repeatable); without it, -body is a multipart document", func(v string) error {

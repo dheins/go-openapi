@@ -52,6 +52,13 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+				{Flag: "body.kind", Path: "kind", Type: "string", Values: []string{"dog", "cat"}},
+				{Flag: "body.tag", Path: "tag", Type: "string"},
+				{Flag: "body.born", Path: "born", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.CreatePet(ctx, req.(*api.CreatePetRequest))
 			},
@@ -100,6 +107,10 @@ var app = cli.App[*client.Client]{
 				{MediaType: "multipart/form-data", Kind: "multipart", Field: "Body", Files: []cli.File{{Flag: "photo", Property: "photo", Field: "Photo"}}},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.caption", Path: "caption", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.UploadPhoto(ctx, req.(*api.UploadPhotoRequest))
 			},
@@ -111,6 +122,10 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.url", Path: "url", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.Subscribe(ctx, req.(*api.SubscribeRequest))
 			},

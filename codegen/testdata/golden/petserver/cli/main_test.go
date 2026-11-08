@@ -143,6 +143,11 @@ func (h *handler) StreamPhotos(_ context.Context, req *api.StreamPhotosRequest) 
 	return api.StreamPhotos200MixedResponse{Items: acks}, nil
 }
 
+func (h *handler) SubmitForm(_ context.Context, req *api.SubmitFormRequest) (api.SubmitFormResponse, error) {
+	h.seen["SubmitForm"] = req
+	return api.SubmitForm204Response{}, nil
+}
+
 func (h *handler) Secure(context.Context, *api.SecureRequest) (api.SecureResponse, error) {
 	return api.Secure204Response{}, nil
 }
@@ -274,6 +279,30 @@ func TestCommands(t *testing.T) {
 	}
 	if req := h.seen["UploadBundle"].(*api.UploadBundleRequest); len(req.Body) != 2 || string(req.Body[0].Data) != "PNG" || req.Body[1].Header.Get("X-Order") != "2" {
 		t.Errorf("upload-bundle request = %+v", req.Body)
+	}
+
+	// A flag per property of the body, set over -body's JSON.
+	if code, out, errOut := runCLI("create-pet", "-body", `{"name":"Kit","tag":"dog"}`, "-body.tag", "cat"); code != 0 || !strings.Contains(out, `"tag": "cat"`) || !strings.Contains(out, `"name": "Kit"`) {
+		t.Errorf("create-pet -body.tag: %d %q %q", code, out, errOut)
+	}
+	if code, out, errOut := runCLI("create-pet", "-body.name", "Bo"); code != 0 || !strings.Contains(out, `"name": "Bo"`) {
+		t.Errorf("create-pet -body.name: %d %q %q", code, out, errOut)
+	}
+	if code, _, errOut := runCLI("submit-form", "-body.role", "admin", "-body.age", "4", "-body.tags", "a,b", "-body.tags", "c", "-body.owner.name", "Ann"); code != 0 {
+		t.Errorf("submit-form: %d %q", code, errOut)
+	}
+	if req := h.seen["SubmitForm"].(*api.SubmitFormRequest); req.Body.Role != "admin" || req.Body.Age.Value != 4 || !slices.Equal(req.Body.Tags.Value, []string{"a", "b", "c"}) || req.Body.Owner.Value.Name.Value != "Ann" {
+		t.Errorf("submit-form request = %+v", req.Body)
+	}
+	if code, _, errOut := runCLI("submit-form", "-body.role", "admin", "-body.age", "four"); code != 2 || !strings.Contains(errOut, `-body.age: "four" is not a number`) {
+		t.Errorf("submit-form -body.age four: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("submit-form", "-body", "[1]", "-body.role", "admin"); code != 2 || !strings.Contains(errOut, "need a JSON object") {
+		t.Errorf("submit-form array body: %d %q", code, errOut)
+	}
+	// They are the properties of the default media type's body.
+	if code, _, errOut := runCLI("import-pet", "-content-type", "application/merge-patch+json", "-body.name", "Rex"); code != 2 || !strings.Contains(errOut, "not a property of a application/merge-patch+json body") {
+		t.Errorf("import-pet -body.name: %d %q", code, errOut)
 	}
 
 	// Streams are sent as -body is read: JSON Lines, events, typed events,
