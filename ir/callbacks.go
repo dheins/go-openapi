@@ -74,10 +74,12 @@ func (p URLPart) IsText() bool {
 }
 
 // opSite says where an operation is declared, which decides its kind and
-// its name when it has no operationId: fallback, then suffix.
+// its name when it has no operationId: fallback, then suffix. inbound
+// says the API receives it (Operation.Inbound).
 type opSite struct {
 	kind             OperationKind
 	fallback, suffix string
+	inbound          bool
 }
 
 // buildWebhooks adds the operations of the document's webhooks.
@@ -101,8 +103,19 @@ func (b *builder) buildWebhooks(methods namespace) {
 }
 
 // callbacks adds the operations of the callbacks of parent, declared by
-// op.
+// op, and of the callbacks they declare in turn. Whoever receives parent
+// sends its callbacks, so the API receives those of the webhooks and
+// callbacks it sends, and sends those of the ones it receives.
 func (b *builder) callbacks(parent *Operation, op *oas.Operation, methods namespace) {
+	if op.Callbacks.Len() == 0 {
+		return
+	}
+	if b.declaring == nil {
+		b.declaring = map[*oas.Operation]bool{}
+	}
+	b.declaring[op] = true
+	defer delete(b.declaring, op)
+	inbound := parent.Kind != PathOperation && !parent.Inbound
 	for name, cb := range op.Callbacks.All() {
 		c := cb.Deref()
 		if c == nil {
@@ -116,7 +129,11 @@ func (b *builder) callbacks(parent *Operation, op *oas.Operation, methods namesp
 			parts, why := callbackURL(key, parent)
 			many := operationCount(pi) > 1
 			for method, cop := range pi.Operations() {
-				site := opSite{kind: Callback, fallback: parent.Name + " " + name, suffix: "Callback"}
+				if b.declaring[cop] {
+					b.warnAt(op, []string{"callbacks", name}, fmt.Sprintf("the callback %q declares an operation declaring it; it is not generated again", name))
+					continue
+				}
+				site := opSite{kind: Callback, fallback: parent.Name + " " + name, suffix: "Callback", inbound: inbound}
 				if many {
 					site.fallback += " " + method
 				}

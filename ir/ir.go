@@ -56,6 +56,9 @@ type Model struct {
 	// the API sends credentials for, in document order. A scheme both
 	// use is in both.
 	SenderSchemes []*SecurityScheme
+	// InboundSchemes are the schemes the callbacks the API receives use
+	// (Operation.Inbound), which their senders send credentials for.
+	InboundSchemes []*SecurityScheme
 	// Warnings report schema features that are not represented in the
 	// generated types.
 	Warnings []Warning

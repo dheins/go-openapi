@@ -298,3 +298,115 @@ components:
 		t.Errorf("warnings:\n%s", all)
 	}
 }
+
+func TestNestedCallbacks(t *testing.T) {
+	const doc = `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /subscriptions:
+    post:
+      operationId: subscribe
+      tags: [subs]
+      requestBody:
+        content: {application/json: {schema: {type: object, properties: {url: {type: string}}}}}
+      responses: {"201": {description: ok}}
+      callbacks:
+        event:
+          "{$request.body#/url}":
+            post:
+              requestBody:
+                content: {application/json: {schema: {type: object, properties: {ackUrl: {type: string}}}}}
+              responses: {"204": {description: ok}}
+              callbacks:
+                ack:
+                  "{$request.body#/ackUrl}":
+                    post:
+                      security: [{key: []}]
+                      responses: {"204": {description: ok}}
+webhooks:
+  adopted:
+    post:
+      tags: [hooks]
+      security: [{hook: []}]
+      requestBody:
+        content: {application/json: {schema: {type: object, properties: {confirmUrl: {type: string}}}}}
+      responses: {"200": {description: ok}}
+      callbacks:
+        confirm:
+          "{$request.body#/confirmUrl}":
+            post:
+              security: [{key: []}]
+              requestBody:
+                content: {application/json: {schema: {type: object, properties: {receiptUrl: {type: string}}}}}
+              responses: {"204": {description: ok}}
+              callbacks:
+                receipt:
+                  "{$request.body#/receiptUrl}":
+                    post:
+                      security: [{hook: []}]
+                      responses: {"204": {description: ok}}
+                    put:
+                      operationId: loop
+                      responses: {"204": {description: ok}}
+                      callbacks:
+                        again: {$ref: "#/components/callbacks/Again"}
+components:
+  callbacks:
+    Again:
+      "{$request.body#/x}":
+        post:
+          responses: {"204": {description: ok}}
+          callbacks:
+            again: {$ref: "#/components/callbacks/Again"}
+  securitySchemes:
+    key: {type: apiKey, in: header, name: X-Key}
+    hook: {type: http, scheme: bearer}
+`
+	m := build(t, doc, Options{Operations: true})
+	var got []string
+	var walk func(depth int, ops []*Operation)
+	walk = func(depth int, ops []*Operation) {
+		for _, o := range ops {
+			got = append(got, fmt.Sprintf("%s%s inbound=%t", strings.Repeat("  ", depth), o.Name, o.Inbound))
+			walk(depth+1, o.Callbacks)
+		}
+	}
+	walk(0, m.Operations)
+	walk(0, m.Webhooks)
+	// The roles alternate: the API sends what it does not serve, and
+	// receives the callbacks of what it sends.
+	want := []string{
+		"Subscribe inbound=false",
+		"  SubscribeEventCallback inbound=false",
+		"    SubscribeEventCallbackAckCallback inbound=true",
+		"AdoptedWebhook inbound=false",
+		"  AdoptedWebhookConfirmCallback inbound=true",
+		"    LoopCallback inbound=false",
+		"      LoopCallbackAgainCallback inbound=true",
+		"    AdoptedWebhookConfirmCallbackReceiptPostCallback inbound=false",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("operations:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	names := func(schemes []*SecurityScheme) (out []string) {
+		for _, s := range schemes {
+			out = append(out, s.Name)
+		}
+		return out
+	}
+	if s, i := names(m.SenderSchemes), names(m.InboundSchemes); !slices.Equal(s, []string{"hook"}) || !slices.Equal(i, []string{"key"}) {
+		t.Errorf("sender schemes %v, inbound %v", s, i)
+	}
+	if !slices.ContainsFunc(m.Warnings, func(w Warning) bool {
+		return strings.Contains(w.Message, `the callback "again" declares an operation declaring it`)
+	}) {
+		t.Errorf("no warning about the callback cycle: %v", m.Warnings)
+	}
+
+	// Leaving a webhook out leaves out its callbacks and their schemes:
+	// key is still used by the callback of a subscription's callback.
+	m = build(t, doc, Options{Operations: true, Select: &Selection{ExcludeTags: []string{"hooks"}}})
+	if len(m.Webhooks) != 0 || len(m.SenderSchemes) != 0 || !slices.Equal(names(m.InboundSchemes), []string{"key"}) {
+		t.Errorf("without hooks: %d webhooks, sender schemes %v, inbound %v", len(m.Webhooks), names(m.SenderSchemes), names(m.InboundSchemes))
+	}
+}

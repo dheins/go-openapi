@@ -57,6 +57,10 @@ type Operation struct {
 	Kind     OperationKind
 	Webhook  string
 	Callback *CallbackURL
+	// Inbound says the API receives the callback rather than sending it:
+	// the receiver of the webhook or callback declaring it sends it back.
+	// The roles alternate with each level of callbacks.
+	Inbound bool
 	// Callbacks are the operations of the callbacks this one declares.
 	Callbacks []*Operation
 	// ServerURL is the first of the operation's own servers, else of its
@@ -421,7 +425,7 @@ func (b *builder) register(mux *http.ServeMux, o *Operation) {
 }
 
 func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Operation, methods namespace, site opSite) *Operation {
-	o := &Operation{Method: method, Path: path, ID: op.OperationID, Deprecated: op.Deprecated, Kind: site.kind, Tags: op.Tags}
+	o := &Operation{Method: method, Path: path, ID: op.OperationID, Deprecated: op.Deprecated, Kind: site.kind, Tags: op.Tags, Inbound: site.inbound}
 	o.Location, _ = b.spec.Location(op)
 	o.Doc = strings.TrimSpace(strings.Join(nonEmpty(op.Summary, op.Description), "\n\n"))
 
@@ -498,15 +502,14 @@ func (b *builder) operation(path, method string, pi *oas.PathItem, op *oas.Opera
 	switch {
 	case site.kind == PathOperation:
 		b.security(o, op)
-		b.callbacks(o, op, methods)
+	case len(op.Security) > 0 && site.inbound:
+		b.requirements(o, op, op.Security, op, &b.model.InboundSchemes)
 	case len(op.Security) > 0:
 		// Only their own: the document's security is for the operations the
 		// API serves.
 		b.requirements(o, op, op.Security, op, &b.model.SenderSchemes)
 	}
-	if site.kind != PathOperation && op.Callbacks.Len() > 0 {
-		b.warnAt(op, []string{"callbacks"}, "callbacks of webhooks and callbacks are not generated")
-	}
+	b.callbacks(o, op, methods)
 	return o
 }
 
@@ -1959,7 +1962,7 @@ func (b *builder) securityScheme(owner any, name string, schemes *[]*SecuritySch
 	if def == nil {
 		return nil, fmt.Sprintf("security scheme %q is not defined", name)
 	}
-	for _, s := range slices.Concat(b.model.SecuritySchemes, b.model.SenderSchemes) {
+	for _, s := range slices.Concat(b.model.SecuritySchemes, b.model.SenderSchemes, b.model.InboundSchemes) {
 		if s.def == def {
 			if !slices.Contains(*schemes, s) {
 				*schemes = append(*schemes, s)
