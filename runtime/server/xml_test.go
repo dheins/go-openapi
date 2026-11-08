@@ -164,3 +164,65 @@ func TestXMLShapes(t *testing.T) {
 		t.Errorf("map of objects: %s %v", got, err)
 	}
 }
+
+// labelsXML has a map of arrays, a union of a string, an integer and an
+// object, and typed additional properties of its own.
+var labelsXML = &XMLNode{Name: "labels", Type: "object", Properties: []XMLProperty{
+	{"name", &XMLNode{Name: "name", Type: "string"}},
+	{"tags", &XMLNode{Name: "tags", Type: "map", Values: &XMLNode{Type: "array", Items: &XMLNode{Type: "string"}}}},
+	{"value", &XMLNode{Name: "value", Type: "union", Scalars: []string{"integer", "string"}, Properties: []XMLProperty{
+		{"unit", &XMLNode{Name: "unit", Kind: "attribute", Type: "string"}},
+		{"amount", &XMLNode{Name: "amount", Type: "number"}},
+	}}},
+}, Additional: &XMLNode{Type: "integer"}}
+
+func TestXMLGaps(t *testing.T) {
+	for _, tt := range []struct{ doc, json string }{
+		// An element per item of a map's arrays, named by the key; an
+		// undeclared element is a typed additional property.
+		{`<labels><name>a</name><tags><color>red</color><size>L</size><color>blue</color></tags><count>3</count><more>4</more></labels>`,
+			`{"count":3,"more":4,"name":"a","tags":{"color":["red","blue"],"size":["L"]}}`},
+		// A union's text is its scalar, typed by the first type it is.
+		{`<labels><value>42</value></labels>`, `{"value":42}`},
+		{`<labels><value> 4x </value></labels>`, `{"value":" 4x "}`},
+		// Child elements or attributes make it an object, as does nothing.
+		{`<labels><value unit="kg"><amount>1.5</amount></value></labels>`, `{"value":{"amount":1.5,"unit":"kg"}}`},
+		{`<labels><value>  <amount>2</amount></value></labels>`, `{"value":{"amount":2}}`},
+		{`<labels><value/></labels>`, `{"value":{}}`},
+		// Attributes are not additional properties.
+		{`<labels other="x"><n>1</n></labels>`, `{"n":1}`},
+	} {
+		got, err := XMLToJSON([]byte(tt.doc), labelsXML)
+		if err != nil || string(got) != tt.json {
+			t.Errorf("%s:\n got %s %v\nwant %s", tt.doc, got, err, tt.json)
+			continue
+		}
+		doc, err := JSONToXML(got, labelsXML)
+		if err != nil {
+			t.Errorf("writing %s: %v", got, err)
+			continue
+		}
+		if back, err := XMLToJSON(doc, labelsXML); err != nil || string(back) != tt.json {
+			t.Errorf("%s written as %s reads %s %v", got, doc, back, err)
+		}
+	}
+	doc, err := JSONToXML([]byte(`{"name":"a","tags":{"color":["red","blue"]},"value":"x","count":3}`), labelsXML)
+	if want := `<labels><name>a</name><tags><color>red</color><color>blue</color></tags><value>x</value><count>3</count></labels>`; err != nil || !strings.HasSuffix(string(doc), want) {
+		t.Errorf("written %s %v\nwant %s", doc, err, want)
+	}
+	// An additional property of the wrong type is read for validation to
+	// report; text where a scalar-only union is, is an error at an element.
+	if got, err := XMLToJSON([]byte(`<labels><count>three</count></labels>`), labelsXML); err != nil || string(got) != `{"count":"three"}` {
+		t.Errorf("wrong type: %s %v", got, err)
+	}
+	scalars := &XMLNode{Name: "v", Type: "union", Scalars: []string{"boolean", "number"}}
+	if got, err := XMLToJSON([]byte(`<v>true</v>`), scalars); err != nil || string(got) != `true` {
+		t.Errorf("boolean: %s %v", got, err)
+	}
+	if _, err := XMLToJSON([]byte(`<v><x/></v>`), scalars); err == nil || !strings.Contains(err.Error(), "expected text") {
+		t.Errorf("element in a scalar union: %v", err)
+	}
+	if _, err := JSONToXML([]byte(`{"tags":{"a b":["x"]}}`), labelsXML); err == nil {
+		t.Error("invalid key of a map of arrays: no error")
+	}
+}
