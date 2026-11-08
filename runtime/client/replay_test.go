@@ -174,20 +174,56 @@ func TestReplayError(t *testing.T) {
 	}
 }
 
+// endless sets r's body to pets as JSON Lines without end, counting the
+// bytes produced, and closing ended when the ranging ends.
+func endless(c *Config, r *Request, produced *atomic.Int64, ended chan struct{}) {
+	JSONLinesBody(c, r, "application/jsonl", func(yield func(owner, error) bool) {
+		defer close(ended)
+		for {
+			produced.Add(int64(len(`{"name":"pet","age":0}`) + 1))
+			if !yield(owner{Name: "pet"}, nil) {
+				return
+			}
+		}
+	}, nil)
+}
+
 // TestReplayBackpressure checks that the stream is produced as it is
-// sent, and that its producer stops once the call is done.
+// read, not ahead of the reader by more than the window. It reads the
+// body itself: sockets' buffers, megabytes on some systems, would hide
+// how far the producer runs ahead.
 func TestReplayBackpressure(t *testing.T) {
+	c, err := NewConfig(WithBaseURL("http://example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var produced atomic.Int64
 	ended := make(chan struct{})
+	r := NewRequest("POST")
+	endless(c, r, &produced, ended)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := c.Build(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(req.Body, make([]byte, 10)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	// The window and the item being written when it filled.
+	if n := produced.Load(); n > replayWindow+64 {
+		t.Errorf("produced %d bytes while 10 were read", n)
+	}
+	cancel()
+	<-ended
+}
+
+// TestReplayStopsWithResponse checks that the producer of a stream the
+// server does not read stops once the response is closed.
+func TestReplayStopsWithResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Reads a little, then answers without reading on.
 		_, _ = io.ReadFull(r.Body, make([]byte, 10))
-		time.Sleep(100 * time.Millisecond)
-		// The window and the sockets' buffers hold some; a producer that
-		// did not wait would be far past.
-		if n := produced.Load(); n > 1<<20 {
-			t.Errorf("produced %d bytes while the server did not read", n)
-		}
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
@@ -195,16 +231,10 @@ func TestReplayBackpressure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var produced atomic.Int64
+	ended := make(chan struct{})
 	r := NewRequest("POST")
-	JSONLinesBody(c, r, "application/jsonl", func(yield func(owner, error) bool) {
-		defer close(ended)
-		for {
-			produced.Add(int64(len(`{"name":"pet"}`) + 1))
-			if !yield(owner{Name: "pet"}, nil) {
-				return
-			}
-		}
-	}, nil)
+	endless(c, r, &produced, ended)
 	req, err := c.Build(context.Background(), r)
 	if err != nil {
 		t.Fatal(err)
