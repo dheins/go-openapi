@@ -123,7 +123,7 @@ func JSONLinesBody[T any](c *Config, r *http.Request, validate func(T) error) it
 			}
 			i++
 		}
-		if err := c.streamErr(sc.Err()); err != nil {
+		if err := c.StreamError(sc.Err()); err != nil {
 			yield(zero, err)
 		}
 	}
@@ -144,7 +144,7 @@ func EventsBody(c *Config, r *http.Request) iter.Seq2[Event, error] {
 		sc := c.streamScanner(r.Body)
 		for ev, err := range ScanEvents(sc) {
 			if err != nil {
-				yield(Event{}, c.streamErr(err))
+				yield(Event{}, c.StreamError(err))
 				return
 			}
 			if !yield(ev, nil) {
@@ -295,8 +295,10 @@ func (c *Config) streamScanner(body io.Reader) *bufio.Scanner {
 	return sc
 }
 
-// streamErr is the *BindError of a stream that could not be read.
-func (c *Config) streamErr(err error) error {
+// StreamError returns the *BindError of a streamed request body that
+// could not be read: 413 for a line longer than MaxBodyBytes
+// (bufio.ErrTooLong), 400 otherwise, or nil for a nil err.
+func (c *Config) StreamError(err error) error {
 	var b Binder
 	switch {
 	case err == nil:

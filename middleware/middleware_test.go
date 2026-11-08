@@ -53,6 +53,29 @@ paths:
           application/xml: {schema: {$ref: "#/components/schemas/Pet"}}
       responses:
         "204": {description: ok}
+  /notes:
+    post:
+      operationId: postNotes
+      requestBody:
+        required: true
+        content:
+          text/plain: {schema: {type: string, minLength: 2, pattern: "^[a-z]+$"}}
+          application/jsonl: {itemSchema: {$ref: "#/components/schemas/Pet"}}
+          text/event-stream:
+            itemSchema:
+              oneOf:
+                - type: object
+                  required: [event, data]
+                  properties:
+                    event: {const: add}
+                    data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
+                - type: object
+                  required: [event, data]
+                  properties:
+                    event: {const: note}
+                    data: {type: string, maxLength: 3}
+      responses:
+        "204": {description: ok}
   /files/{name}.{ext}:
     get:
       operationId: getFile
@@ -137,8 +160,12 @@ func newHandler(t *testing.T, opts ...Option) (http.Handler, *handled) {
 	got := &handled{}
 	return mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.op, _ = OperationFrom(r.Context())
-		data, _ := io.ReadAll(r.Body)
+		data, err := io.ReadAll(r.Body)
 		got.body = string(data)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})), got
 }
