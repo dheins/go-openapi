@@ -62,21 +62,22 @@ func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{
 }
 {{- end}}
 
-{{/* "command" gets a command: Operation (*ir.Operation), Name, Summary, Tag, Params, Media, BodyRequired and ContentType. */}}
+{{/* "command" gets a command: Operation (*ir.Operation), Name, Summary, Tag, Params, Media, BodyRequired, ContentType, FieldsOf and BodyFields. */}}
 {{define "command"}}		{
 			Name: {{quote .Name}}, Summary: {{quote .Summary}}, Tag: {{quote .Tag}},
 			Request: func() any { return new({{opType .Operation.RequestType}}) },
 {{- if .Params}}
 			Params: []cli.Param{
 {{- range .Params}}
-				{Flag: {{quote .Flag}}, Field: {{quote .Field}}, In: {{quote .In}}, Name: {{quote .Name}}, Kind: {{.Kind}}{{if .Required}}, Required: true{{end}}{{if .Help}}, Help: {{quote .Help}}{{end}}},
+				{Flag: {{quote .Flag}}, Field: {{quote .Field}}, In: {{quote .In}}, Name: {{quote .Name}}, Kind: {{.Kind}}{{if .Required}}, Required: true{{end}}{{if .Help}}, Help: {{quote .Help}}{{end}}{{with .Values}}, Values: []string{ {{- range $i, $v := .}}{{if $i}}, {{end}}{{quote $v}}{{end -}} }{{end}}},
 {{- end}}
 			},
 {{- end}}
 {{- if .Media}}
 			Media: []cli.Media{
 {{- range .Media}}
-				{MediaType: {{quote .MediaType}}, Kind: {{quote .Kind}}, Field: {{quote .Field}}{{if .Files}}, Files: []cli.File{ {{- range .Files}}{Flag: {{quote .Flag}}, Property: {{quote .Property}}, Field: {{quote .Field}}}, {{end -}} }{{end}}},
+				{MediaType: {{quote .MediaType}}, Kind: {{quote .Kind}}, Field: {{quote .Field}}{{if .Files}}, Files: []cli.File{ {{- range .Files}}{Flag: {{quote .Flag}}, Property: {{quote .Property}}, Field: {{quote .Field}}}, {{end -}} }{{end}}{{with cliStream .IR}},
+					Stream: {{.}}{{end}}},
 {{- end}}
 			},
 {{- if .BodyRequired}}
@@ -84,6 +85,14 @@ func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{
 {{- end}}
 {{- if .ContentType}}
 			ContentType: {{quote .ContentType}},
+{{- end}}
+{{- if .BodyFields}}
+			FieldsOf: {{quote .FieldsOf}},
+			BodyFields: []cli.BodyField{
+{{- range .BodyFields}}
+				{Flag: {{quote .Flag}}, Path: {{quote .Path}}, Type: {{quote .Type}}{{if .List}}, List: true{{end}}{{with .Values}}, Values: []string{ {{- range $i, $v := .}}{{if $i}}, {{end}}{{quote $v}}{{end -}} }{{end}}{{if .Help}}, Help: {{quote .Help}}{{end}}},
+{{- end}}
+			},
 {{- end}}
 {{- end}}
 			Call: func(ctx context.Context, c *{{clientPackage}}.Client, req any) (any, error) {

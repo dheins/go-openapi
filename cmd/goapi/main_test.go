@@ -339,7 +339,7 @@ func TestGenerateCLI(t *testing.T) {
 	if code := run([]string{"generate", "cli", "-out", out, petserverDoc}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
 	}
-	if !strings.Contains(stderr.String(), "BatchPets: bodies of type multipart/mixed cannot be given on a command line yet") {
+	if strings.Contains(stderr.String(), "left out") {
 		t.Errorf("stderr = %s", &stderr)
 	}
 	main := readFile(t, filepath.Join(out, "main.go"))

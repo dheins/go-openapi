@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
+	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/client"
 	"github.com/dheins/go-openapi/runtime/server"
 )
@@ -24,6 +26,9 @@ import (
 type handler struct {
 	api.Handler
 	seen map[string]any
+	// arrived is told the name of each pet named live-... ImportLines
+	// reads; other requests' handlers may still be reading theirs.
+	arrived chan string
 }
 
 func (h *handler) ListPets(_ context.Context, req *api.ListPetsRequest) (api.ListPetsResponse, error) {
@@ -58,6 +63,92 @@ func (h *handler) CreateOrder(_ context.Context, req *api.CreateOrderRequest) (a
 	return api.CreateOrder201JSONResponse{Body: req.Body}, nil
 }
 
+func (h *handler) UploadReport(_ context.Context, req *api.UploadReportRequest) (api.UploadReportResponse, error) {
+	h.seen["UploadReport"] = req
+	return api.UploadReport200MixedResponse{Body: api.UploadReport200ResponseParts{Pet: req.Body.Pet, Summary: "stored"}}, nil
+}
+
+func (h *handler) BatchPets(_ context.Context, req *api.BatchPetsRequest) (api.BatchPetsResponse, error) {
+	h.seen["BatchPets"] = req
+	stored := make([]oapi.Part[model.Pet], len(req.Body))
+	for i, p := range req.Body {
+		stored[i] = oapi.Part[model.Pet]{Header: textproto.MIMEHeader{"X-Stored": {"true"}}, Value: p.Value}
+	}
+	return api.BatchPets200MixedResponse{Body: stored}, nil
+}
+
+func (h *handler) PutNotes(_ context.Context, req *api.PutNotesRequest) (api.PutNotesResponse, error) {
+	h.seen["PutNotes"] = req
+	return api.PutNotes204Response{}, nil
+}
+
+func (h *handler) UploadBundle(_ context.Context, req *api.UploadBundleRequest) (api.UploadBundleResponse, error) {
+	h.seen["UploadBundle"] = req
+	return api.UploadBundle200RelatedResponse{Body: req.Body}, nil
+}
+
+// ImportLines counts the pets as they arrive, telling arrived of each.
+func (h *handler) ImportLines(_ context.Context, req *api.ImportLinesRequest) (api.ImportLinesResponse, error) {
+	if req.JSONBody.Set {
+		return api.ImportLines200JSONResponse{Body: int64(len(req.JSONBody.Value))}, nil
+	}
+	var n int64
+	for p, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(p.Name, "live-") {
+			h.arrived <- p.Name
+		}
+		n++
+	}
+	return api.ImportLines200JSONResponse{Body: n}, nil
+}
+
+func (h *handler) PostEvents(_ context.Context, req *api.PostEventsRequest) (api.PostEventsResponse, error) {
+	var n int64
+	for ev, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		h.seen["PostEvents"] = ev
+		n++
+	}
+	return api.PostEvents200JSONResponse{Body: n}, nil
+}
+
+func (h *handler) PostTypedEvents(_ context.Context, req *api.PostTypedEventsRequest) (api.PostTypedEventsResponse, error) {
+	names := []string{}
+	for ev, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, ev.ID+":"+ev.Data.Name)
+	}
+	return api.PostTypedEvents200JSONResponse{Body: names}, nil
+}
+
+func (h *handler) StreamPhotos(_ context.Context, req *api.StreamPhotosRequest) (api.StreamPhotosResponse, error) {
+	acks := func(yield func(oapi.Part[string], error) bool) {
+		for photo, err := range req.Body {
+			if err != nil {
+				yield(oapi.Part[string]{}, err)
+				return
+			}
+			seq := photo.Header.Get("X-Seq")
+			if !yield(oapi.Part[string]{Header: textproto.MIMEHeader{"X-Seq": {seq}}, Value: "photo " + seq + ": " + string(photo.Data)}, nil) {
+				return
+			}
+		}
+	}
+	return api.StreamPhotos200MixedResponse{Items: acks}, nil
+}
+
+func (h *handler) SubmitForm(_ context.Context, req *api.SubmitFormRequest) (api.SubmitFormResponse, error) {
+	h.seen["SubmitForm"] = req
+	return api.SubmitForm204Response{}, nil
+}
+
 func (h *handler) Secure(context.Context, *api.SecureRequest) (api.SecureResponse, error) {
 	return api.Secure204Response{}, nil
 }
@@ -84,7 +175,7 @@ func init() {
 }
 
 func TestCommands(t *testing.T) {
-	h := &handler{seen: map[string]any{}}
+	h := &handler{seen: map[string]any{}, arrived: make(chan string, 2)}
 	srv := httptest.NewServer(petserver.NewServer(h, security{}, server.WithLogger(slog.New(slog.DiscardHandler)),
 		server.WithCodec("application/x-tc", codec{}), server.WithCodec("application/x-tc2", codec{})))
 	t.Cleanup(srv.Close)
@@ -147,6 +238,143 @@ func TestCommands(t *testing.T) {
 	if code, out, errOut := runCLI("export-pets", "-header", "Accept: application/jsonl"); code != 0 || out != "{\"id\":0,\"name\":\"Rex\"}\n{\"id\":0,\"name\":\"Tom\"}\n" {
 		t.Errorf("export-pets: %d %q %q", code, out, errOut)
 	}
+
+	// Positional parts, by -part flags in order, with headers.
+	code, out, errOut = runCLI("upload-report", "-pet-id", "1", "-part", "@"+pet, "-part", "@"+photo, "-part-header", "X-Seq: 2",
+		"-part", "short", "-part-header", "X-Lang: en", "-part", "a,b")
+	// A multipart response is printed as it is.
+	if code != 0 || !strings.Contains(out, "\r\n\r\nstored\r\n") {
+		t.Errorf("upload-report: %d %q %q", code, out, errOut)
+	}
+	if req := h.seen["UploadReport"].(*api.UploadReportRequest); req.Body.Pet.Name != "Kit" || string(req.Body.Part2.Data) != "PNG" ||
+		req.Body.Part2.Header.Get("X-Seq") != "2" || req.Body.Note.Value.Value != "short" || req.Body.Note.Value.Header.Get("X-Lang") != "en" ||
+		len(req.Body.Rest) != 1 || string(req.Body.Rest[0].Data) != "a,b" {
+		t.Errorf("upload-report request = %+v", req.Body)
+	}
+	// A part the document requires a header of is checked before sending.
+	if code, _, errOut := runCLI("upload-report", "-pet-id", "1", "-part", "@"+pet, "-part", "@"+photo); code != 2 || !strings.Contains(errOut, "X-Seq") {
+		t.Errorf("upload-report without X-Seq: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("upload-report", "-pet-id", "1", "-part-header", "X-Seq: 1"); code != 2 || !strings.Contains(errOut, "give -part first") {
+		t.Errorf("-part-header first: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("batch-pets", "-part", `{"name":"Rex"}`, "-part-header", "X-Seq: 1", "-part", `{"name":"Tom"}`, "-part-header", "X-Seq: 2"); code != 0 {
+		t.Errorf("batch-pets: %d %q", code, errOut)
+	}
+	if req := h.seen["BatchPets"].(*api.BatchPetsRequest); len(req.Body) != 2 || req.Body[1].Value.Name != "Tom" {
+		t.Errorf("batch-pets request = %+v", req.Body)
+	}
+	// Or the body is a multipart document, its boundary on its first line.
+	doc := "--b\r\nContent-Type: text/plain\r\n\r\none\r\n--b\r\nContent-Type: text/plain\r\n\r\ntwo\r\n--b--\r\n"
+	if code, _, errOut := runCLI("put-notes", "-body", doc); code != 0 {
+		t.Errorf("put-notes: %d %q", code, errOut)
+	}
+	if req := h.seen["PutNotes"].(*api.PutNotesRequest); !slices.Equal(req.Body, []string{"one", "two"}) {
+		t.Errorf("put-notes request = %+v", req.Body)
+	}
+	if code, _, errOut := runCLI("put-notes", "-body", "not multipart"); code != 2 || !strings.Contains(errOut, "boundary") {
+		t.Errorf("put-notes not multipart: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("upload-bundle", "-part", "@"+photo, "-part", "@"+photo, "-part-header", "X-Order: 2"); code != 0 {
+		t.Errorf("upload-bundle: %d %q", code, errOut)
+	}
+	if req := h.seen["UploadBundle"].(*api.UploadBundleRequest); len(req.Body) != 2 || string(req.Body[0].Data) != "PNG" || req.Body[1].Header.Get("X-Order") != "2" {
+		t.Errorf("upload-bundle request = %+v", req.Body)
+	}
+
+	// A flag per property of the body, set over -body's JSON.
+	if code, out, errOut := runCLI("create-pet", "-body", `{"name":"Kit","tag":"dog"}`, "-body.tag", "cat"); code != 0 || !strings.Contains(out, `"tag": "cat"`) || !strings.Contains(out, `"name": "Kit"`) {
+		t.Errorf("create-pet -body.tag: %d %q %q", code, out, errOut)
+	}
+	if code, out, errOut := runCLI("create-pet", "-body.name", "Bo"); code != 0 || !strings.Contains(out, `"name": "Bo"`) {
+		t.Errorf("create-pet -body.name: %d %q %q", code, out, errOut)
+	}
+	if code, _, errOut := runCLI("submit-form", "-body.role", "admin", "-body.age", "4", "-body.tags", "a,b", "-body.tags", "c", "-body.owner.name", "Ann"); code != 0 {
+		t.Errorf("submit-form: %d %q", code, errOut)
+	}
+	if req := h.seen["SubmitForm"].(*api.SubmitFormRequest); req.Body.Role != "admin" || req.Body.Age.Value != 4 || !slices.Equal(req.Body.Tags.Value, []string{"a", "b", "c"}) || req.Body.Owner.Value.Name.Value != "Ann" {
+		t.Errorf("submit-form request = %+v", req.Body)
+	}
+	if code, _, errOut := runCLI("submit-form", "-body.role", "admin", "-body.age", "four"); code != 2 || !strings.Contains(errOut, `-body.age: "four" is not a number`) {
+		t.Errorf("submit-form -body.age four: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("submit-form", "-body", "[1]", "-body.role", "admin"); code != 2 || !strings.Contains(errOut, "need a JSON object") {
+		t.Errorf("submit-form array body: %d %q", code, errOut)
+	}
+	// They are the properties of the default media type's body.
+	if code, _, errOut := runCLI("import-pet", "-content-type", "application/merge-patch+json", "-body.name", "Rex"); code != 2 || !strings.Contains(errOut, "not a property of a application/merge-patch+json body") {
+		t.Errorf("import-pet -body.name: %d %q", code, errOut)
+	}
+
+	// Streams are sent as -body is read: JSON Lines, events, typed events,
+	// and parts.
+	lines := filepath.Join(dir, "pets.jsonl")
+	if err := os.WriteFile(lines, []byte("{\"name\":\"Rex\"}\n\n{\"name\":\"Tom\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errOut := runCLI("import-lines", "-body", "@"+lines); code != 0 || out != "2\n" {
+		t.Errorf("import-lines: %d %q %q", code, out, errOut)
+	}
+	if code, out, errOut := runCLI("import-lines", "-body", "[{\"name\":\"Rex\"}]", "-content-type", "application/json"); code != 0 || out != "1\n" {
+		t.Errorf("import-lines as JSON: %d %q %q", code, out, errOut)
+	}
+	if code, _, errOut := runCLI("import-lines", "-body", "{\"name\":\"Rex\"}\n{\"name\":\n"); code != 2 || !strings.Contains(errOut, "item 1") {
+		t.Errorf("import-lines invalid: %d %q", code, errOut)
+	}
+	if code, out, errOut := runCLI("post-events", "-body", "id: 1\ndata: a\n\n: comment\n\nid: 2\ndata: b\ndata: c\n\n"); code != 0 || out != "2\n" {
+		t.Errorf("post-events: %d %q %q", code, out, errOut)
+	}
+	if ev := h.seen["PostEvents"].(server.Event); ev.ID != "2" || ev.Data != "b\nc" {
+		t.Errorf("post-events event = %+v", ev)
+	}
+	code, out, errOut = runCLI("post-typed-events", "-body", "id: a\ndata: {\"name\":\"Rex\"}\n\nid: b\ndata: {\"name\":\"Tom\"}\n\n")
+	if code != 0 || !strings.Contains(out, `"a:Rex"`) || !strings.Contains(out, `"b:Tom"`) {
+		t.Errorf("post-typed-events: %d %q %q", code, out, errOut)
+	}
+	// The client checks each event before sending it.
+	if code, _, errOut := runCLI("post-typed-events", "-body", "data: {\"name\":\"\"}\n\n"); code != 2 || !strings.Contains(errOut, "/0/data/name") {
+		t.Errorf("post-typed-events invalid: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("post-typed-events", "-body", "data: {\n\n"); code != 2 || !strings.Contains(errOut, "event 0") {
+		t.Errorf("post-typed-events not JSON: %d %q", code, errOut)
+	}
+	code, out, errOut = runCLI("stream-photos", "-pet-id", "1", "-part", "@"+photo, "-part-header", "X-Seq: 1", "-part", "@"+photo, "-part-header", "X-Seq: 2")
+	if code != 0 || !strings.Contains(out, "photo 1: PNG") || !strings.Contains(out, "photo 2: PNG") {
+		t.Errorf("stream-photos: %d %q %q", code, out, errOut)
+	}
+	doc = "--p\r\nContent-Type: image/png\r\nX-Seq: 7\r\n\r\nGIF\r\n--p--\r\n"
+	if code, out, errOut := runCLI("stream-photos", "-pet-id", "1", "-body", doc); code != 0 || !strings.Contains(out, "photo 7: GIF") {
+		t.Errorf("stream-photos document: %d %q %q", code, out, errOut)
+	}
+
+	// From stdin, each line is sent as it is read: the server has the first
+	// pet before the second is written.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = stdin })
+	done := make(chan int)
+	go func() {
+		code, _, _ := runCLI("import-lines", "-body", "-")
+		done <- code
+	}()
+	if _, err := w.Write([]byte("{\"name\":\"live-Rex\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if name := <-h.arrived; name != "live-Rex" {
+		t.Errorf("first pet %q", name)
+	}
+	if _, err := w.Write([]byte("{\"name\":\"live-Tom\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if code, name := <-done, <-h.arrived; code != 0 || name != "live-Tom" {
+		t.Errorf("import-lines from stdin: %d, second pet %q", code, name)
+	}
+	os.Stdin = stdin
 
 	// Credentials by flag, or by environment variable.
 	if code, _, _ := runCLI("secure"); code != 2 {

@@ -59,6 +59,11 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+				{Flag: "body.tag", Path: "tag", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.CreatePet(ctx, req.(*api.CreatePetRequest))
 			},
@@ -83,6 +88,10 @@ var app = cli.App[*client.Client]{
 				{MediaType: "multipart/form-data", Kind: "multipart", Field: "Body", Files: []cli.File{{Flag: "photo", Property: "photo", Field: "Photo"}}},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.caption", Path: "caption", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.UploadPhoto(ctx, req.(*api.UploadPhotoRequest))
 			},
@@ -94,6 +103,11 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/x-www-form-urlencoded", Kind: "form", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.user", Path: "user", Type: "string"},
+				{Flag: "body.remember", Path: "remember", Type: "boolean"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.Login(ctx, req.(*api.LoginRequest))
 			},

@@ -918,6 +918,27 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M56 – CLI bodies and completion ✅
+- [x] Positional parts: `-part` and `-part-header` in order, or `-body` as
+  a multipart document, filling the request's parts type by reflection
+- [x] Streams: JSON Lines, events and typed events read from `-body` as
+  they are sent (`cli.JSONLines`, `cli.Events`, `cli.TypedEvents`), and a
+  multipart document of a stream of parts; no petserver command is left
+  out any more
+- [x] `-body.<path>` flags per property, set over `-body`'s JSON
+- [x] `completion bash|powershell`, calling the program back for
+  commands, flags and known values
+
+**How it went**
+- *Parts by reflection*: the request types already say where each part
+  goes (`part:"N"` tags, slices, streams), so the CLI needs no
+  description of the parts from the generator; streams of events need
+  the client's decoder, which the template passes.
+- *PowerShell*: it splits `-body.name` at the dot and drops empty native
+  arguments, so the script joins touching elements and prefixes words;
+  the tests complete with `TabExpansion2` and bash's `COMP_WORDS`.
+- *Not done*: see [features.md](../features.md).
+
 ### M55 – TypeScript receivers on Node ✅
 - [x] Defaults of absent parameters in receivers: parameter specs carry
   them, and the doc comments of request fields say receivers set them

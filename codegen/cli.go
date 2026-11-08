@@ -2,6 +2,8 @@ package codegen
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/dheins/go-openapi/ir"
@@ -110,14 +112,27 @@ type cliCommand struct {
 	// ContentType is the request's field naming the body's media type, if
 	// the operation has several.
 	ContentType string
+	// BodyFields are the flags of the properties of the body, of the
+	// request's field FieldsOf.
+	BodyFields []cliBodyField
+	FieldsOf   string
+}
+
+// cliBodyField is a flag of a property of the body, at Path.
+type cliBodyField struct {
+	Flag, Path, Type, Help string
+	List                   bool
+	Values                 []string
 }
 
 type cliParam struct {
 	Flag, Field, In, Name, Help, Kind string
 	Required                          bool
+	Values                            []string
 }
 
 type cliMedia struct {
+	IR                     *ir.BodyMedia
 	MediaType, Kind, Field string
 	Files                  []cliFile
 }
@@ -156,8 +171,15 @@ func cliCommandOf(o *ir.Operation) (*cliCommand, string) {
 			flag = p.In + "-" + flag
 		}
 		flags[flag] = true
+		var values []string
+		if p.Content == "" && !p.Object {
+			var typ string
+			if typ, values = scalarJSON(unwrapRef(p.Elem)); typ == "boolean" {
+				values = []string{"true", "false"}
+			}
+		}
 		cmd.Params = append(cmd.Params, cliParam{Flag: flag, Field: p.Field, In: p.In, Name: p.Name, Help: firstLine(p.Doc), Kind: kind,
-			Required: p.Required && p.Default == ""})
+			Required: p.Required && p.Default == "", Values: values})
 	}
 	if o.Body == nil {
 		return cmd, ""
@@ -166,12 +188,12 @@ func cliCommandOf(o *ir.Operation) (*cliCommand, string) {
 	fields := map[string]bool{}
 	for _, m := range o.Body.Media {
 		switch m.Kind {
-		case "json", "xml", "form", "codec", "multipart", "text", "binary":
+		case "json", "xml", "form", "codec", "multipart", "text", "binary", "parts", "partstream", "jsonl", "sse":
 		default:
 			unsupported = append(unsupported, m.MediaType)
 			continue
 		}
-		md := cliMedia{MediaType: m.MediaType, Kind: m.Kind, Field: m.Field.Name}
+		md := cliMedia{IR: m, MediaType: m.MediaType, Kind: m.Kind, Field: m.Field.Name}
 		if m.Kind == "multipart" {
 			for _, prop := range m.Properties {
 				if prop.Type != "file" {
@@ -197,7 +219,118 @@ func cliCommandOf(o *ir.Operation) (*cliCommand, string) {
 	if len(o.Body.Media) > 1 {
 		cmd.ContentType = "ContentType"
 	}
+	if m := o.Body.Media[0]; structured(m.Kind) {
+		cmd.BodyFields = bodyFields(m.Field.Value, nil, map[*ir.Type]bool{})
+		if len(cmd.BodyFields) > 0 {
+			cmd.FieldsOf = m.Field.Name
+		}
+	}
 	return cmd, ""
+}
+
+// structured reports whether a body kind is given as the JSON of its
+// value.
+func structured(kind string) bool {
+	switch kind {
+	case "json", "xml", "form", "codec", "multipart":
+		return true
+	}
+	return false
+}
+
+// maxBodyFieldDepth is how deep in nested objects body flags go.
+const maxBodyFieldDepth = 3
+
+// bodyFields returns the flags of the properties of r, a struct, below
+// path: one per scalar or array of scalars, nested objects to a depth,
+// leaving out read-only properties, files, maps, and the types on the way
+// there (recursive types).
+func bodyFields(r *ir.Ref, path []string, seen map[*ir.Type]bool) []cliBodyField {
+	r = unwrapRef(r)
+	if r.Kind != ir.Named || r.Type.Kind != ir.Struct || seen[r.Type] || len(path) >= maxBodyFieldDepth {
+		return nil
+	}
+	seen[r.Type] = true
+	defer delete(seen, r.Type)
+	var out []cliBodyField
+	for _, f := range r.Type.Fields {
+		if f.ReadOnly || !flagName.MatchString(f.JSONName) {
+			continue
+		}
+		at := append(append([]string{}, path...), f.JSONName)
+		t := unwrapRef(f.Type)
+		list := false
+		if t.Kind == ir.Slice {
+			list, t = true, unwrapRef(t.Elem)
+		}
+		if typ, values := scalarJSON(t); typ != "" {
+			out = append(out, cliBodyField{Flag: "body." + strings.Join(at, "."), Path: strings.Join(at, "."), Type: typ, List: list,
+				Values: values, Help: firstLine(f.Doc)})
+			continue
+		}
+		if !list {
+			out = append(out, bodyFields(t, at, seen)...)
+		}
+	}
+	return out
+}
+
+// flagName matches property names a flag can have.
+var flagName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// unwrapRef returns r without Optional, Nullable and Pointer.
+func unwrapRef(r *ir.Ref) *ir.Ref {
+	for r.Kind == ir.Optional || r.Kind == ir.Nullable || r.Kind == ir.Pointer {
+		r = r.Elem
+	}
+	return r
+}
+
+// scalarJSON returns the JSON type of r, string, number or boolean, and
+// its values if it is an enum; "" if r is not a scalar a flag gives.
+func scalarJSON(r *ir.Ref) (string, []string) {
+	switch r.Kind {
+	case ir.Builtin:
+		switch {
+		case r.MappedJSON == "string" || r.Name == "string" || r.Name == "time.Time" || r.Name == "oapi.Date":
+			return "string", nil
+		case r.MappedJSON == "integer" || r.MappedJSON == "number" || (r.MappedJSON == "" && isNumber(r.Name)):
+			return "number", nil
+		case r.MappedJSON == "boolean" || r.Name == "bool":
+			return "boolean", nil
+		}
+	case ir.Named:
+		switch r.Type.Kind {
+		case ir.Enum:
+			typ, _ := scalarJSON(r.Type.Base)
+			var values []string
+			for _, v := range r.Type.Values {
+				if s, err := strconv.Unquote(v.Literal); err == nil {
+					values = append(values, s)
+				} else {
+					values = append(values, v.Literal)
+				}
+			}
+			return typ, values
+		case ir.Defined, ir.Alias:
+			return scalarJSON(r.Type.Underlying)
+		}
+	}
+	return "", nil
+}
+
+// cliStream returns the function reading a JSON Lines or event stream
+// body of m from a command line's -body, or "" for other bodies.
+func (f *fileGen) cliStream(m *ir.BodyMedia) string {
+	switch {
+	case m.Kind == "jsonl":
+		return fmt.Sprintf("func(r io.Reader) any { return cli.JSONLines[%s](r) }", f.goType(m.Field.Value.Elem))
+	case m.Kind == "sse" && m.Events == nil:
+		return "func(r io.Reader) any { return cli.Events(r) }"
+	case m.Kind == "sse":
+		return fmt.Sprintf("func(r io.Reader) any { return cli.TypedEvents(r, %s) }", f.eventDecoder(m.Events, "Request"))
+	}
+	return ""
 }
 
 // structField returns the Go field of the property of JSON name prop of

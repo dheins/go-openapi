@@ -10,7 +10,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/textproto"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,18 +48,35 @@ type Param struct {
 	Flag, Field, In, Name, Help string
 	Kind                        Kind
 	Required                    bool
+	// Values are the values the parameter may have, for completion: those
+	// of an enum, or true and false.
+	Values []string
 }
 
 // Media is a media type a command's body may be sent as.
 type Media struct {
 	MediaType string
 	// Kind is json, xml, form, codec or multipart (the body is its JSON),
-	// text or binary.
+	// text, binary, parts or partstream (positional parts, given with
+	// -part or as a multipart document), jsonl or sse.
 	Kind string
 	// Field is the request's field holding the body.
 	Field string
 	// Files are the file properties of a multipart body.
 	Files []File
+	// Stream, for a JSON Lines or event stream body, returns the stream
+	// of the field's type reading the body from r as it is sent: one of
+	// JSONLines, Events or TypedEvents.
+	Stream func(r io.Reader) any
+}
+
+// BodyField is a flag of a property of a body given as JSON, -body.name:
+// its Path of property names separated by dots, its JSON Type (string,
+// number or boolean), whether it is a List of them, and its enum Values.
+type BodyField struct {
+	Flag, Path, Type, Help string
+	List                   bool
+	Values                 []string
 }
 
 // File is a file property of a multipart body: its flag, and the JSON
@@ -80,6 +99,10 @@ type Command[C any] struct {
 	// ContentType, if set, is the request's field naming the media type
 	// the body is sent as, for operations with several.
 	ContentType string
+	// BodyFields are flags of properties of the body, set over -body's
+	// JSON, of the media types whose request field is FieldsOf.
+	BodyFields []BodyField
+	FieldsOf   string
 	// Call sends the request with c.
 	Call func(ctx context.Context, c C, req any) (any, error)
 }
@@ -113,6 +136,20 @@ type App[C any] struct {
 // Run runs the command of args, writing the response to stdout and
 // problems to stderr, and returns the exit code.
 func Run[C any](app App[C], args []string, stdout, stderr io.Writer) int {
+	switch {
+	case len(args) > 0 && args[0] == "__complete":
+		app.complete(args[1:], stdout)
+		return ExitOK
+	case len(args) > 0 && args[0] == "__complete-prefixed":
+		app.complete(unprefixed(args[1:]), stdout)
+		return ExitOK
+	case len(args) > 0 && args[0] == "completion":
+		if len(args) != 2 || !app.completion(args[1], stdout) {
+			fmt.Fprintf(stderr, "Usage: %s completion bash|powershell\n", app.Name)
+			return ExitFailure
+		}
+		return ExitOK
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		if len(args) > 1 {
 			if cmd := app.find(args[1]); cmd != nil {
@@ -148,6 +185,7 @@ func Run[C any](app App[C], args []string, stdout, stderr io.Writer) int {
 		return ExitFailure
 	}
 	req, err := request(g, cmd)
+	defer g.close(stderr)
 	if err != nil {
 		return fail(err)
 	}
@@ -232,6 +270,7 @@ func (app App[C]) usage(w io.Writer) {
 		}
 	}
 	fmt.Fprintf(w, "\nRun %s help <command> for its flags. The server is -server, %s, or %s by default.\n", app.Name, app.env("SERVER"), app.Server)
+	fmt.Fprintf(w, "Run %s completion bash|powershell for a script completing commands and flags.\n", app.Name)
 }
 
 // given are the flags of a command, as parsed.
@@ -241,11 +280,25 @@ type given struct {
 	body        string
 	contentType string
 	files       map[string]string
-	server      string
-	headers     multi
-	timeout     time.Duration
-	verbose     bool
-	creds       map[string]*Credential
+	bodyFields  map[string]*multi
+	parts       []partArg
+	// closers are the sources of streamed bodies, closed when the
+	// command is done.
+	closers []io.Closer
+	server  string
+	headers multi
+	timeout time.Duration
+	verbose bool
+	creds   map[string]*Credential
+}
+
+// close closes the sources of streamed bodies.
+func (g *given) close(stderr io.Writer) {
+	for _, c := range g.closers {
+		if err := c.Close(); err != nil {
+			fmt.Fprintf(stderr, "closing the body: %v\n", err)
+		}
+	}
 }
 
 // flags returns the flag set of cmd: its parameters and body, then the
@@ -253,7 +306,7 @@ type given struct {
 func (app App[C]) flags(cmd *Command[C], stderr io.Writer) (*flag.FlagSet, *given) {
 	fs := flag.NewFlagSet(app.Name+" "+cmd.Name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	g := &given{fs: fs, params: map[string]*multi{}, files: map[string]string{}, creds: map[string]*Credential{}}
+	g := &given{fs: fs, params: map[string]*multi{}, files: map[string]string{}, bodyFields: map[string]*multi{}, creds: map[string]*Credential{}}
 	for _, p := range cmd.Params {
 		m := &multi{}
 		g.params[p.Flag] = m
@@ -277,13 +330,45 @@ func (app App[C]) flags(cmd *Command[C], stderr io.Writer) (*flag.FlagSet, *give
 		for _, m := range cmd.Media {
 			kinds = append(kinds, m.MediaType)
 		}
-		help := "the request body: JSON (or text) as it is, @file, or - for stdin"
+		help := "the request body: JSON (or text) as it is, @file, or - for stdin; a stream is sent as it is read"
 		if cmd.BodyRequired {
 			help += " (required)"
 		}
 		fs.StringVar(&g.body, "body", "", help)
 		if len(cmd.Media) > 1 {
 			fs.StringVar(&g.contentType, "content-type", cmd.Media[0].MediaType, "the media type of the body: "+strings.Join(kinds, ", "))
+		}
+		for _, f := range cmd.BodyFields {
+			m := &multi{}
+			g.bodyFields[f.Flag] = m
+			help := fmt.Sprintf("the body's property %s, a %s", f.Path, f.Type)
+			if f.List {
+				help = fmt.Sprintf("the body's property %s, a list of %ss, repeated or comma-separated", f.Path, f.Type)
+			}
+			if len(f.Values) > 0 {
+				help += " (" + strings.Join(f.Values, ", ") + ")"
+			}
+			if f.Help != "" {
+				help += ": " + f.Help
+			}
+			fs.Var(m, f.Flag, help+"; set over -body")
+		}
+		if slices.ContainsFunc(cmd.Media, func(m Media) bool { return m.Kind == "parts" || m.Kind == "partstream" }) {
+			fs.Func("part", "a part of the body, in order: @file, - for stdin, or the text itself (repeatable); without it, -body is a multipart document", func(v string) error {
+				g.parts = append(g.parts, partArg{source: v, header: textproto.MIMEHeader{}})
+				return nil
+			})
+			fs.Func("part-header", "a header of the -part before it, name:value (repeatable)", func(v string) error {
+				if len(g.parts) == 0 {
+					return errors.New("give -part first")
+				}
+				name, value, ok := strings.Cut(v, ":")
+				if !ok {
+					return fmt.Errorf("%q is not name:value", v)
+				}
+				g.parts[len(g.parts)-1].header.Add(strings.TrimSpace(name), strings.TrimSpace(value))
+				return nil
+			})
 		}
 		seen := map[string]bool{}
 		for _, m := range cmd.Media {

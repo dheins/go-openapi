@@ -476,6 +476,7 @@ func (f *fileGen) funcs() template.FuncMap {
 		// clientPackage names the generated client's package, for
 		// command-line clients.
 		"clientPackage": func() string { return f.gen.opts.ClientPackage },
+		"cliStream":     f.cliStream,
 		// modelType names a schema type, qualified for the package being
 		// written, as goType names references to it.
 		"modelType": func(t *ir.Type) string {

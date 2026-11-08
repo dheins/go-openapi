@@ -1,7 +1,0 @@
-UploadReport: bodies of type multipart/related cannot be given on a command line yet; the command is left out
-StreamPhotos: bodies of type multipart/mixed cannot be given on a command line yet; the command is left out
-BatchPets: bodies of type multipart/mixed cannot be given on a command line yet; the command is left out
-UploadBundle: bodies of type multipart/related cannot be given on a command line yet; the command is left out
-PutNotes: bodies of type multipart/alternative cannot be given on a command line yet; the command is left out
-PostEvents: bodies of type text/event-stream cannot be given on a command line yet; the command is left out
-PostTypedEvents: bodies of type text/event-stream cannot be given on a command line yet; the command is left out

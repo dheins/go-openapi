@@ -10,8 +10,11 @@ import (
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/client"
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
+	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/cli"
 	goapiclient "github.com/dheins/go-openapi/runtime/client"
+	"github.com/dheins/go-openapi/runtime/server"
 )
 
 // petserverctl is a command-line client of Pet server: a command per
@@ -43,7 +46,7 @@ var app = cli.App[*client.Client]{
 				{Flag: "limit", Field: "Limit", In: "query", Name: "limit", Kind: cli.Text, Help: "How many pets to return."},
 				{Flag: "tags", Field: "Tags", In: "query", Name: "tags", Kind: cli.List},
 				{Flag: "x-request-id", Field: "XRequestID", In: "header", Name: "X-Request-ID", Kind: cli.Text},
-				{Flag: "sort", Field: "Sort", In: "query", Name: "sort", Kind: cli.Text},
+				{Flag: "sort", Field: "Sort", In: "query", Name: "sort", Kind: cli.Text, Values: []string{"name", "id"}},
 			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.ListPets(ctx, req.(*api.ListPetsRequest))
@@ -58,6 +61,12 @@ var app = cli.App[*client.Client]{
 			},
 			BodyRequired: true,
 			ContentType:  "ContentType",
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+				{Flag: "body.tag", Path: "tag", Type: "string"},
+				{Flag: "body.secret", Path: "secret", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.CreatePet(ctx, req.(*api.CreatePetRequest))
 			},
@@ -99,7 +108,7 @@ var app = cli.App[*client.Client]{
 			Request: func() any { return new(api.GetFileRequest) },
 			Params: []cli.Param{
 				{Flag: "name", Field: "Name", In: "path", Name: "name", Kind: cli.Text, Required: true},
-				{Flag: "ext", Field: "Ext", In: "path", Name: "ext", Kind: cli.Text, Required: true},
+				{Flag: "ext", Field: "Ext", In: "path", Name: "ext", Kind: cli.Text, Required: true, Values: []string{"txt", "md"}},
 			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.GetFile(ctx, req.(*api.GetFileRequest))
@@ -110,6 +119,10 @@ var app = cli.App[*client.Client]{
 			Request: func() any { return new(api.SearchPetsRequest) },
 			Media: []cli.Media{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
+			},
+			FieldsOf: "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
 			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.SearchPets(ctx, req.(*api.SearchPetsRequest))
@@ -172,6 +185,11 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/x-tc", Kind: "codec", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.w", Path: "w", Type: "number"},
+				{Flag: "body.h", Path: "h", Type: "number"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutSize(ctx, req.(*api.PutSizeRequest))
 			},
@@ -187,6 +205,15 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.code", Path: "code", Type: "string"},
+				{Flag: "body.color", Path: "color", Type: "string"},
+				{Flag: "body.slug", Path: "slug", Type: "string"},
+				{Flag: "body.note", Path: "note", Type: "string"},
+				{Flag: "body.labels", Path: "labels", Type: "string", List: true},
+				{Flag: "body.alias", Path: "alias", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutTag(ctx, req.(*api.PutTagRequest))
 			},
@@ -212,6 +239,12 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.theme", Path: "theme", Type: "string", Values: []string{"light", "dark"}},
+				{Flag: "body.notify", Path: "notify", Type: "boolean"},
+				{Flag: "body.pin", Path: "pin", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutSettings(ctx, req.(*api.PutSettingsRequest))
 			},
@@ -224,9 +257,14 @@ var app = cli.App[*client.Client]{
 			},
 			Media: []cli.Media{
 				{MediaType: "multipart/form-data", Kind: "multipart", Field: "Body"},
+				{MediaType: "multipart/mixed", Kind: "parts", Field: "MixedBody"},
 			},
 			BodyRequired: true,
 			ContentType:  "ContentType",
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.Attach(ctx, req.(*api.AttachRequest))
 			},
@@ -251,6 +289,10 @@ var app = cli.App[*client.Client]{
 				{MediaType: "multipart/form-data", Kind: "multipart", Field: "Body", Files: []cli.File{{Flag: "photo", Property: "photo", Field: "Photo"}}},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.caption", Path: "caption", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.UploadPhoto(ctx, req.(*api.UploadPhotoRequest))
 			},
@@ -282,6 +324,34 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "upload-report", Summary: "Parts by position, then attachments.", Tag: "",
+			Request: func() any { return new(api.UploadReportRequest) },
+			Params: []cli.Param{
+				{Flag: "pet-id", Field: "PetID", In: "path", Name: "petId", Kind: cli.Text, Required: true},
+			},
+			Media: []cli.Media{
+				{MediaType: "multipart/related", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.UploadReport(ctx, req.(*api.UploadReportRequest))
+			},
+		},
+		{
+			Name: "stream-photos", Summary: "Photos sent one by one, each acknowledged as it arrives.", Tag: "",
+			Request: func() any { return new(api.StreamPhotosRequest) },
+			Params: []cli.Param{
+				{Flag: "pet-id", Field: "PetID", In: "path", Name: "petId", Kind: cli.Text, Required: true},
+			},
+			Media: []cli.Media{
+				{MediaType: "multipart/mixed", Kind: "partstream", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.StreamPhotos(ctx, req.(*api.StreamPhotosRequest))
+			},
+		},
+		{
 			Name: "import-pet", Summary: "Media types with different schemas.", Tag: "",
 			Request: func() any { return new(api.ImportPetRequest) },
 			Media: []cli.Media{
@@ -292,6 +362,12 @@ var app = cli.App[*client.Client]{
 				{MediaType: "text/csv", Kind: "text", Field: "TextBody"},
 			},
 			ContentType: "ContentType",
+			FieldsOf:    "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+				{Flag: "body.tag", Path: "tag", Type: "string"},
+				{Flag: "body.secret", Path: "secret", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.ImportPet(ctx, req.(*api.ImportPetRequest))
 			},
@@ -316,6 +392,15 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/xml", Kind: "xml", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.id", Path: "id", Type: "number"},
+				{Flag: "body.name", Path: "name", Type: "string"},
+				{Flag: "body.nicknames", Path: "nicknames", Type: "string", List: true},
+				{Flag: "body.note.lang", Path: "note.lang", Type: "string"},
+				{Flag: "body.note.text", Path: "note.text", Type: "string"},
+				{Flag: "body.secret", Path: "secret", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutCard(ctx, req.(*api.PutCardRequest))
 			},
@@ -330,8 +415,47 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/xml", Kind: "xml", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+				{Flag: "body.home.city", Path: "home.city", Type: "string"},
+				{Flag: "body.home.street", Path: "home.street", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutFamily(ctx, req.(*api.PutFamilyRequest))
+			},
+		},
+		{
+			Name: "batch-pets", Summary: "Pets as positional JSON parts.", Tag: "",
+			Request: func() any { return new(api.BatchPetsRequest) },
+			Media: []cli.Media{
+				{MediaType: "multipart/mixed", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.BatchPets(ctx, req.(*api.BatchPetsRequest))
+			},
+		},
+		{
+			Name: "upload-bundle", Summary: "", Tag: "",
+			Request: func() any { return new(api.UploadBundleRequest) },
+			Media: []cli.Media{
+				{MediaType: "multipart/related", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.UploadBundle(ctx, req.(*api.UploadBundleRequest))
+			},
+		},
+		{
+			Name: "put-notes", Summary: "", Tag: "",
+			Request: func() any { return new(api.PutNotesRequest) },
+			Media: []cli.Media{
+				{MediaType: "multipart/alternative", Kind: "parts", Field: "Body"},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PutNotes(ctx, req.(*api.PutNotesRequest))
 			},
 		},
 		{
@@ -344,6 +468,14 @@ var app = cli.App[*client.Client]{
 			},
 			BodyRequired: true,
 			ContentType:  "ContentType",
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.count", Path: "count", Type: "number"},
+				{Flag: "body.ratio", Path: "ratio", Type: "number"},
+				{Flag: "body.enabled", Path: "enabled", Type: "boolean"},
+				{Flag: "body.limit", Path: "limit", Type: "number"},
+				{Flag: "body.label", Path: "label", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PutCounter(ctx, req.(*api.PutCounterRequest))
 			},
@@ -357,6 +489,14 @@ var app = cli.App[*client.Client]{
 			},
 			BodyRequired: true,
 			ContentType:  "ContentType",
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.role", Path: "role", Type: "string"},
+				{Flag: "body.age", Path: "age", Type: "number"},
+				{Flag: "body.tags", Path: "tags", Type: "string", List: true},
+				{Flag: "body.owner.name", Path: "owner.name", Type: "string"},
+				{Flag: "body.owner.age", Path: "owner.age", Type: "number"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.SubmitForm(ctx, req.(*api.SubmitFormRequest))
 			},
@@ -386,6 +526,18 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "post-events", Summary: "Events read as they arrive.", Tag: "",
+			Request: func() any { return new(api.PostEventsRequest) },
+			Media: []cli.Media{
+				{MediaType: "text/event-stream", Kind: "sse", Field: "Body",
+					Stream: func(r io.Reader) any { return cli.Events(r) }},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PostEvents(ctx, req.(*api.PostEventsRequest))
+			},
+		},
+		{
 			Name: "feed", Summary: "Changes to the pets, as they happen.", Tag: "",
 			Request: func() any { return new(api.FeedRequest) },
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
@@ -393,9 +545,34 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "post-typed-events", Summary: "Pets sent as events, one kind of event.", Tag: "",
+			Request: func() any { return new(api.PostTypedEventsRequest) },
+			Media: []cli.Media{
+				{MediaType: "text/event-stream", Kind: "sse", Field: "Body",
+					Stream: func(r io.Reader) any {
+						return cli.TypedEvents(r, func(ev server.Event, validate bool) (server.TypedEvent[model.Pet], error) {
+							out := server.TypedEvent[model.Pet]{ID: ev.ID, Event: ev.Event, Retry: ev.Retry}
+							data, err := server.EventData(ev, oapi.Request, validate, func(item model.Pet) error {
+								var errs oapi.ValidationErrors
+								errs.Nested("", item.Validate())
+								return errs.Err()
+							})
+							out.Data = data
+							return out, err
+						})
+					}},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PostTypedEvents(ctx, req.(*api.PostTypedEventsRequest))
+			},
+		},
+		{
 			Name: "import-lines", Summary: "Pets added one by one as they arrive, or all at once.", Tag: "",
 			Request: func() any { return new(api.ImportLinesRequest) },
 			Media: []cli.Media{
+				{MediaType: "application/jsonl", Kind: "jsonl", Field: "Body",
+					Stream: func(r io.Reader) any { return cli.JSONLines[model.Pet](r) }},
 				{MediaType: "application/json", Kind: "json", Field: "JSONBody"},
 			},
 			BodyRequired: true,
@@ -407,6 +584,10 @@ var app = cli.App[*client.Client]{
 		{
 			Name: "echo", Summary: "Each pet sent back as it arrives.", Tag: "",
 			Request: func() any { return new(api.EchoRequest) },
+			Media: []cli.Media{
+				{MediaType: "application/x-ndjson", Kind: "jsonl", Field: "Body",
+					Stream: func(r io.Reader) any { return cli.JSONLines[model.Pet](r) }},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.Echo(ctx, req.(*api.EchoRequest))
 			},
@@ -452,6 +633,10 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/x-www-form-urlencoded", Kind: "form", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.id", Path: "id", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.CreateOrder(ctx, req.(*api.CreateOrderRequest))
 			},
@@ -477,6 +662,10 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/x-www-form-urlencoded", Kind: "form", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PlantTree(ctx, req.(*api.PlantTreeRequest))
 			},
@@ -498,6 +687,10 @@ var app = cli.App[*client.Client]{
 				{MediaType: "application/json", Kind: "json", Field: "Body"},
 			},
 			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.url", Path: "url", Type: "string"},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.Subscribe(ctx, req.(*api.SubscribeRequest))
 			},
