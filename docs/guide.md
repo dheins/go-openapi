@@ -1657,6 +1657,7 @@ flags are those of `generate client`.
 | `runtime.ts` | the same in every client: requests, responses, validation, errors |
 | `models.ts` | a type per schema, and its descriptor (`PetSchema`) for validation |
 | `client.ts` | `Client`, with a method per operation, and their request and response types |
+| `receiver.ts` | the handlers of the webhooks and callbacks a consumer receives, if there are some (see [Receiving them in TypeScript](#receiving-them-in-typescript)) |
 | `index.ts` | re-exports them |
 
 The code uses only syntax that type stripping erases, so Node 23.6+,
@@ -1893,6 +1894,69 @@ verify := func(op server.Operation, next http.Handler) http.Handler {
 cfg := server.NewConfig(server.WithMiddleware(verify))
 ```
 
+### Receiving them in TypeScript
+
+`ts-client` writes `receiver.ts` when the document has webhooks or
+callbacks a consumer receives. It has a fetch handler per operation,
+`(request: Request, params?) => Promise<Response>`, which runs anywhere
+fetch does (Node 18+, Deno, Bun, Workers) and mounts on any router that
+speaks fetch, at the URL the consumer registered or gave:
+
+```ts
+import { handlePetAdoptedWebhook, type CallbackHandler, type SecurityHandler } from "./api/index.ts";
+
+const hooks: Pick<CallbackHandler, "petAdoptedWebhook"> = {
+  async petAdoptedWebhook(req, received) {
+    await adopt(req.body.pet, req.body.by);
+    return { status: 200, body: { ok: true } };
+  },
+};
+const security: SecurityHandler = {
+  hookKey: (key) => key === myIssuedKey,
+  basicAuth: (user, pass) => user === "api" && pass === myPassword,
+};
+const adopted = handlePetAdoptedWebhook(hooks, security);
+
+Deno.serve((request) => adopted(request)); // or app.post("/hooks/adopted", (c) => adopted(c.req.raw))
+```
+
+As the Go handlers do, a handler checks the credentials first (a 401
+unless one of the operation's security requirements passes), reads the
+parameters and body and validates them (a 400 problem with where each
+problem is, 413 for a body over `maxBodyBytes`, 10 MiB by default, 415
+for another media type), calls the method, and writes the response
+variant it returns. The request types are as a receiver reads them: a
+binary body is a `Blob`, a multipart file a `File`, and a JSON Lines,
+server-sent events or streamed parts body an `AsyncIterable`, read as the
+method iterates it; an invalid item throws an `InvalidRequestError`,
+which the handler answers 400 if the method lets it go. The responses
+are as a client sends a request: a stream is an `Iterable` or an
+`AsyncIterable`, written as it yields.
+
+A `SecurityHandler` has a check per scheme the operations received
+declare: `(credential, scopes, received)` for API keys and tokens,
+`(username, password, received)` for basic, and `(received)` for
+`mutualTLS`, whose certificate the server in front checked; false
+refuses the request. `ReceiverOptions` turn validation off
+(`validateRequests`), on for responses (`validateResponses`), give
+`codecs`, `maxBodyBytes`, and `onError`, told of what a method throws
+(answered 500), `console.error` by default. Path parameters, which only
+the router knows, are passed as `params`.
+
+Each callback the consumer sends back has a URL function taking the
+request it received, and the response its handler returns or the URL the
+request came to when the URL uses them, as the Go ones do:
+
+```ts
+async petAdoptedWebhook(req) {
+  const target = confirmAdoptionCallbackUrl(req); // {$request.body#/confirmUrl}
+  await sender.confirmAdoptionCallback(target, { body: { receiptUrl: myReceiptUrl } });
+  return { status: 200, body: { ok: true } };
+}
+```
+
+A value the URL needs that is not there throws a `MissingValueError`.
+
 ### Callbacks of webhooks and callbacks
 
 A webhook or callback can declare callbacks too, and those can declare
@@ -1951,9 +2015,10 @@ cfg.Handle(api.ConfirmAdoptionCallbackOperation, "/confirm/{id}", api.HandleConf
 
 The server's `Sender` sends only what the API sends. A TypeScript client
 has a `Sender` class too, `new Sender({ credentials })` with
-`sender.confirmAdoptionCallback(target, req)`; it has no URL functions,
-so the target is the caller's. A callback that declares an operation
-declaring it (through `$ref`s) is generated once, with a warning.
+`sender.confirmAdoptionCallback(target, req)`, and the URL functions of
+[`receiver.ts`](#receiving-them-in-typescript) compute the target. A
+callback that declares an operation declaring it (through `$ref`s) is
+generated once, with a warning.
 
 ## Generate a document from Go code
 
@@ -2244,6 +2309,7 @@ func (e {{.Name}}) String() string { return {{imp "fmt" "fmt"}}.Sprint({{goType 
 | `sender.go.tmpl`, `receiver.go.tmpl` | `sender` (webhooks and callbacks a server sends), `receivers` (their handlers) |
 | `models.ts.tmpl` | `models`, `model`, `declaration`, `interface`, `object`, `enum`, `union` |
 | `client.ts.tmpl` | `client` (the `Client` class), `credentials`, `operation` (request and response types and descriptor), `method`, `linkMethod` |
+| `receiver.ts.tmpl` | `receiver` (`CallbackHandler`), `securityHandler`, `handleFunction` (an operation's handler), `callbackUrl` |
 | `index.ts.tmpl` | `index` |
 
 Blocks are given what the built-in ones are, mostly the types of the
