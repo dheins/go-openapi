@@ -75,15 +75,7 @@ func (g *tsGen) client() (string, error) {
 
 	var schemes []tsScheme
 	for _, s := range g.m.SecuritySchemes {
-		typ := "Credential"
-		switch {
-		case s.Type == "http" && s.Scheme == "basic":
-			typ = "BasicCredential"
-		case s.Type == "mutualTLS":
-			// The certificate is the fetch's: true says it has one.
-			typ = "boolean"
-		}
-		schemes = append(schemes, tsScheme{Scheme: s, Key: tsCamel(s.Method), Type: typ})
+		schemes = append(schemes, tsScheme{Scheme: s, Key: tsCamel(s.Method), Type: tsCredentialType(s)})
 	}
 
 	// The operations the client sends, first: a link to another is not
@@ -122,17 +114,47 @@ func (g *tsGen) client() (string, error) {
 	for _, mt := range codecMediaTypes(generated) {
 		codecTypes = append(codecTypes, jsString(mt))
 	}
+
+	// The callbacks a consumer sends back, which the API receives.
+	var sent []*tsOperation
+	var sentOps []*ir.Operation
+	for _, o := range sentOperations(g.m) {
+		if !o.Inbound {
+			continue
+		}
+		spec, ok := g.operationSpec(o)
+		if !ok {
+			continue
+		}
+		req, optional := g.requestType(o)
+		sent = append(sent, &tsOperation{Operation: o, Method: tsMethodName(o), Request: req, Optional: optional, Responses: g.responseType(o), Spec: spec})
+		sentOps = append(sentOps, o)
+	}
+	var senderSchemes []tsScheme
+	for _, s := range g.m.InboundSchemes {
+		senderSchemes = append(senderSchemes, tsScheme{Scheme: s, Key: tsCamel(s.Method), Type: tsCredentialType(s)})
+	}
+	var senderCodecs []string
+	for _, mt := range codecMediaTypes(sentOps) {
+		senderCodecs = append(senderCodecs, jsString(mt))
+	}
 	body, err := g.render("client", struct {
-		ServerURL string
-		Schemes   []tsScheme
-		Ops       []*tsOperation
-		Codecs    string
-	}{g.m.ServerURL, schemes, ops, strings.Join(codecTypes, ", ")})
+		ServerURL     string
+		Schemes       []tsScheme
+		Ops           []*tsOperation
+		Codecs        string
+		Sent          []*tsOperation
+		SenderSchemes []tsScheme
+		SenderCodecs  string
+	}{g.m.ServerURL, schemes, ops, strings.Join(codecTypes, ", "), sent, senderSchemes, strings.Join(senderCodecs, ", ")})
 	if err != nil {
 		return "", err
 	}
 
 	imports := []string{"config", "send", "type CallOptions", "type ClientOptions", "type Config", "type OperationSpec"}
+	if len(sent) > 0 {
+		imports = append(imports, "senderConfig", "sendTo", "type SenderOptions")
+	}
 	if strings.Contains(body, ": LinkSpec = ") {
 		imports = append(imports, "link", "type LinkSpec")
 		if strings.Contains(body, "requestUrl(") {
@@ -545,7 +567,12 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 		}
 		params = append(params, s+", schema: "+g.schema(p.Type)+" }")
 	}
-	spec := fmt.Sprintf("{\n  method: %s,\n  path: %s,\n  params: [%s],\n", jsString(o.Method), jsString(o.Path), strings.Join(params, ", "))
+	path := o.Path
+	if o.Kind != ir.PathOperation {
+		// Sent to a target URL, which has the path.
+		path = ""
+	}
+	spec := fmt.Sprintf("{\n  method: %s,\n  path: %s,\n  params: [%s],\n", jsString(o.Method), jsString(path), strings.Join(params, ", "))
 	if o.ServerURL != "" {
 		spec += fmt.Sprintf("  server: %s,\n", jsString(o.ServerURL))
 	}
@@ -759,6 +786,18 @@ func camelName(name string) string {
 		key = "_" + key
 	}
 	return key
+}
+
+// tsCredentialType returns the type of the credential of scheme s.
+func tsCredentialType(s *ir.SecurityScheme) string {
+	switch {
+	case s.Type == "http" && s.Scheme == "basic":
+		return "BasicCredential"
+	case s.Type == "mutualTLS":
+		// The certificate is the fetch's: true says it has one.
+		return "boolean"
+	}
+	return "Credential"
 }
 
 // tsMethodName names the Client method of o.
