@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
 	"strings"
 
@@ -35,6 +36,9 @@ type Config struct {
 	ErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 	// Logger receives errors that are not sent to the client.
 	Logger *slog.Logger
+	// TrustedProxies are the addresses whose forwarding headers
+	// RequestURL reads; see WithTrustedProxies.
+	TrustedProxies []netip.Prefix
 	// BasePath prefixes every route, such as "/v1". Generated servers
 	// default it to the path of the document's first server URL.
 	BasePath string
@@ -149,6 +153,9 @@ func (c *Config) Handle(op Operation, route string, h http.Handler) {
 	h = c.recoverPanics(op, h)
 	if len(c.Observers) > 0 {
 		h = c.observe(op, h)
+	}
+	if len(c.TrustedProxies) > 0 {
+		h = c.withProxies(h)
 	}
 	c.Mux.Handle(op.Method+" "+c.BasePath+route, withOperation(op, h))
 }
@@ -349,13 +356,19 @@ func HTTPRequest(ctx context.Context) (*http.Request, bool) {
 
 // RequestURL returns the full URL of the request a handler is serving:
 // the $url of runtime expressions. The scheme is https for a request over
-// TLS, else http, and the host is the request's Host; headers a proxy
-// adds, such as X-Forwarded-Proto, are not trusted, so behind one a
-// handler should build the URL itself.
+// TLS, else http, and the host is the request's Host. A request from a
+// proxy WithTrustedProxies trusts has the scheme, host and path prefix the
+// client sent to the first trusted proxy, as the forwarding headers say;
+// the headers of other clients are not read.
 func RequestURL(ctx context.Context) (string, bool) {
 	r, ok := HTTPRequest(ctx)
 	if !ok {
 		return "", false
+	}
+	if p, ok := ctx.Value(proxiesKey{}).(*proxies); ok {
+		if u := p.forwardedURL(r); u != "" {
+			return u, true
+		}
 	}
 	scheme := "http"
 	if r.TLS != nil {
