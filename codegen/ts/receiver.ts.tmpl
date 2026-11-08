@@ -1,0 +1,52 @@
+{{- /*
+Templates of receiver.ts: the request and response types of the webhooks
+and callbacks a consumer receives, their descriptors, the CallbackHandler
+and SecurityHandler they are handled with, a function returning the
+handler of each, and the URL functions of the callbacks the consumer
+sends back.
+*/ -}}
+
+{{/* "receiver" gets Ops (as "operation" gets each, with Doc, Handle, HandleDoc, Codecs and Secured), Schemes (as "securityHandler" gets them) and URLs (as "callbackUrl" gets each). */}}
+{{define "receiver"}}
+{{- with .Schemes}}{{template "securityHandler" .}}{{end}}{{range .Ops}}{{template "operation" .}}{{end}}
+/** Handles the webhooks and callbacks a consumer of the API receives,
+ * with a method per operation. A method that throws has its request
+ * answered 500. */
+export interface CallbackHandler {
+{{range .Ops}}{{tsDoc "  " .Doc .Operation.Deprecated}}  {{.Method}}(req: {{.Operation.RequestType}}, received: Received): {{.Operation.ResponseType}} | Promise<{{.Operation.ResponseType}}>;
+{{end}}}
+{{range .Ops}}{{template "handleFunction" .}}{{end}}{{range .URLs}}{{template "callbackUrl" .}}{{end}}{{end}}
+
+{{/* "securityHandler" gets the security schemes of the operations received: Scheme (*ir.SecurityScheme), Key and Type of each check. */}}
+{{define "securityHandler"}}
+/** The checks of the credentials of the webhooks and callbacks a
+ * consumer receives, by security scheme. A request is handled once the
+ * checks of all the schemes of one of its security requirements pass;
+ * otherwise it is answered 401. */
+export interface SecurityHandler {
+{{range .}}{{tsDoc "  " (schemeDoc .Scheme) false}}  {{.Key}}?: {{.Type}};
+{{end}}}
+{{end}}
+
+{{/* "handleFunction" gets an operation received, as "receiver" gets each. */}}
+{{define "handleFunction"}}
+{{tsDoc "" .HandleDoc false}}export function {{.Handle}}(
+  handler: Pick<CallbackHandler, {{jsString .Method}}>,
+{{- if .Secured}}
+  security: SecurityHandler,
+{{- end}}
+  options: ReceiverOptions = {},
+): (request: Request, params?: Readonly<Record<string, string>>) => Promise<Response> {
+  const cfg = receiverConfig(options, {{if .Secured}}security{{else}}undefined{{end}}{{with .Codecs}}, [{{.}}]{{end}});
+  return (request, params) => receive(cfg, {{.Method}}Spec, async (req: {{.Operation.RequestType}}, received) => handler.{{.Method}}(req, received), request, params);
+}
+{{end}}
+
+{{/* "callbackUrl" gets a callback a consumer sends back: Operation and Parent (*ir.Operation), Method, Doc, Spec, NeedsResponse and NeedsURL. */}}
+{{define "callbackUrl"}}
+const {{.Method}}Spec: CallbackUrlSpec = {{.Spec}};
+
+{{tsDoc "" .Doc false}}export function {{.Method}}(req: {{.Parent.RequestType}}{{if .NeedsResponse}}, resp: {{.Parent.ResponseType}}{{end}}{{if .NeedsURL}}, url: string{{end}}): string {
+  return callbackUrl({{.Method}}Spec, req{{if .NeedsResponse}}, resp{{else if .NeedsURL}}, undefined{{end}}{{if .NeedsURL}}, url{{end}});
+}
+{{end}}

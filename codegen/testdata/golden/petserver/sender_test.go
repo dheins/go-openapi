@@ -63,6 +63,16 @@ func (r *receiver) PetAdoptedWebhook(ctx context.Context, req *api.PetAdoptedWeb
 	return api.PetAdoptedWebhook200JSONResponse{Body: model.PetAdoptedWebhook200ResponseBody{Ok: oapi.Some(req.Body.By != "nobody")}}, nil
 }
 
+func (r *receiver) PetPhotoWebhook(ctx context.Context, req *api.PetPhotoWebhookRequest) (api.PetPhotoWebhookResponse, error) {
+	r.record(ctx, req)
+	return api.PetPhotoWebhook200JSONResponse{XStored: 1}, nil
+}
+
+func (r *receiver) PetFeedWebhook(ctx context.Context, req *api.PetFeedWebhookRequest) (api.PetFeedWebhookResponse, error) {
+	r.record(ctx, req)
+	return api.PetFeedWebhook200EventsResponse{Events: func(func(server.Event, error) bool) {}}, nil
+}
+
 func (r *receiver) SubscribePetEventCallback(ctx context.Context, req *api.SubscribePetEventCallbackRequest) (api.SubscribePetEventCallbackResponse, error) {
 	r.record(ctx, req)
 	switch {

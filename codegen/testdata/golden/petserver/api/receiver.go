@@ -19,6 +19,14 @@ import (
 type WebhookHandler interface {
 	// PetAdoptedWebhook handles the webhook "petAdopted" (POST).
 	PetAdoptedWebhook(ctx context.Context, req *PetAdoptedWebhookRequest) (PetAdoptedWebhookResponse, error)
+	// PetPhotoWebhook handles the webhook "petPhoto" (POST).
+	//
+	// The API sends a pet's new photo, as a form or as the image itself.
+	PetPhotoWebhook(ctx context.Context, req *PetPhotoWebhookRequest) (PetPhotoWebhookResponse, error)
+	// PetFeedWebhook handles the webhook "petFeed" (POST).
+	//
+	// The API streams the pets it adds; the consumer answers with an event per pet as it reads them.
+	PetFeedWebhook(ctx context.Context, req *PetFeedWebhookRequest) (PetFeedWebhookResponse, error)
 }
 
 // CallbackHandler is implemented by a receiver of the document's

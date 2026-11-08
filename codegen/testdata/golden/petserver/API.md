@@ -59,6 +59,8 @@ Version `1.0`
   - [`POST` `/subscriptions`](#post-subscriptions)
 - [Webhooks](#webhooks)
   - [`POST` webhook `petAdopted`](#post-webhook-petadopted)
+  - [`POST` webhook `petPhoto`](#post-webhook-petphoto)
+  - [`POST` webhook `petFeed`](#post-webhook-petfeed)
 - [Schemas](#schemas)
   - [Order](#order)
   - [OrderLine](#orderline)
@@ -1404,6 +1406,67 @@ The API sends the consumer a receipt.
 | Status | Description |
 | --- | --- |
 | `204` | Received. |
+
+### `POST` webhook `petPhoto`
+
+The API sends a pet's new photo, as a form or as the image itself.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `petId` | query | integer | yes |  |
+| `X-Tags` | header | array of string | no |  |
+
+**Request body** (required)
+
+- `multipart/form-data`: object
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `photo` | string (binary) | yes |  |
+| `meta` | object | no |  |
+| `meta.width` | integer | no |  |
+
+- `image/png`: string (binary)
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `200` | Stored. |
+
+`200`:
+
+- `application/json`: object
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `size` | integer | no |  |
+
+Headers:
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `X-Stored` | integer | yes |  |
+
+### `POST` webhook `petFeed`
+
+The API streams the pets it adds; the consumer answers with an event per pet as it reads them.
+
+**Request body** (required)
+
+- `application/jsonl`: a stream of [Pet](#pet)
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `200` | An event per pet. |
+
+`200`:
+
+- `text/event-stream`
 
 ## Schemas
 

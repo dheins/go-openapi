@@ -57,9 +57,10 @@ shipped in.
 - Forwarding headers for anything but `$url`: routing, the base path,
   the document page and logs use the request as the server received it.
   — later
-- TypeScript URL functions of the callbacks a consumer sends back (TypeScript
-  clients have no types of the webhooks they receive), and a TypeScript
-  receiver of webhooks and callbacks. — later
+- TypeScript receivers: a Node `http` adapter (handlers take a fetch
+  `Request`), defaults of absent parameters (a Go server applies them),
+  and URL functions of the callbacks the API sends back from inside the
+  callbacks a consumer sends (the API's to compute). — later
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
@@ -141,6 +142,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] TypeScript receivers of webhooks and callbacks: `receiver.ts` with
+  a fetch handler per operation (`handlePetAdoptedWebhook`), a
+  `CallbackHandler` and a `SecurityHandler`, reading every body kind the
+  client writes, and URL functions of the callbacks a consumer sends back
+  (`confirmAdoptionCallbackUrl`). (73d4200, 54bc676, 508054e)
 - [x] Webhooks and callbacks declared inside webhooks and callbacks, at
   any depth: the consumer sends the callbacks of what it receives back
   (the client package's `Sender`, and a TypeScript `Sender`), and the API

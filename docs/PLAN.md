@@ -918,6 +918,27 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M52 – TypeScript receivers ✅
+- [x] Runtime: `receive` reads a fetch `Request` (credentials, parameters
+  in every style, every body kind, streams as they are iterated),
+  validates it, and writes the handler's response; the response readers
+  read requests too, through a `Reader`
+- [x] Codegen: `receiver.ts`, with request and response types as a
+  receiver reads and writes them, `CallbackHandler`, `SecurityHandler`, a
+  `handleX` per operation, and `xUrl` functions of the callbacks a
+  consumer sends back
+- [x] petserver webhooks with multipart, binary and streamed bodies, and
+  an end-to-end test of the three-level callback round in TypeScript
+
+**How it went**
+- *One runtime, two directions*: reading a request is reading a response
+  with request semantics (read-only properties, request errors), and
+  writing a response is writing a request body; a direction parameter
+  and a `Reader` let the client's code do both.
+- *Found on the way*: the client validated a binary body against its
+  `format: binary` string schema, so it refused to send a `Blob`.
+- *Not done*: see [features.md](../features.md).
+
 ### M51 – Callbacks of webhooks and callbacks ✅
 - [x] ir: callbacks of webhooks and callbacks at any depth,
   `Operation.Inbound`, `Model.InboundSchemes`, selection, and a guard

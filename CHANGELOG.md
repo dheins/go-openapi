@@ -4,6 +4,13 @@
 
 ### Added
 
+- TypeScript receivers of webhooks and callbacks: `ts-client` writes
+  `receiver.ts`, with a fetch handler per webhook and callback a consumer
+  receives (`handlePetAdoptedWebhook(handler, security, options)`), a
+  `CallbackHandler`, a `SecurityHandler` of credential checks, and URL
+  functions of the callbacks it sends back (`confirmAdoptionCallbackUrl`).
+  The handlers check credentials, read and validate every parameter style
+  and body kind the client writes, and answer as Go receivers do.
 - Webhooks and callbacks declared inside webhooks and callbacks, at any
   depth: consumers send the callbacks of what they receive back with a
   `Sender` in the client package (and a TypeScript `Sender` class), and
@@ -517,6 +524,9 @@
 
 ### Fixed
 
+- TypeScript clients validated a binary body against its `format: binary`
+  string schema, so they refused to send a `Blob`, `ArrayBuffer` or
+  `Uint8Array`.
 - `$dynamicRef` was resolved statically, so generic schemas were typed as
   their template.
 - The `Validate` of an array whose items accept nothing (`not: true`) did

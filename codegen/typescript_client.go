@@ -195,9 +195,16 @@ func tsResponses(o *ir.Operation) []*ir.Response {
 	return slices.DeleteFunc(slices.Clone(o.Responses), func(r *ir.Response) bool { return !slices.Contains(tsResponseKinds, r.Kind) })
 }
 
-// requestType renders the properties of the request of o, and reports
-// whether all are optional.
+// requestType renders the properties of the request of o, as a client
+// sends it, and reports whether all are optional.
 func (g *tsGen) requestType(o *ir.Operation) (string, bool) {
+	return g.requestTypeOf(o, false)
+}
+
+// requestTypeOf is requestType, or with received the request as a
+// receiver reads it: its bodies as they are read, and the media type its
+// body was sent as.
+func (g *tsGen) requestTypeOf(o *ir.Operation, received bool) (string, bool) {
 	var b strings.Builder
 	b.WriteString("{\n")
 	optional := true
@@ -218,7 +225,7 @@ func (g *tsGen) requestType(o *ir.Operation) (string, bool) {
 			key := tsCamel(m.Field.Name)
 			if !slices.Contains(keys, key) {
 				keys = append(keys, key)
-				types = append(types, g.bodyType(m))
+				types = append(types, g.bodyTypeOf(m, received))
 			}
 		}
 		for i, key := range keys {
@@ -236,7 +243,11 @@ func (g *tsGen) requestType(o *ir.Operation) (string, bool) {
 			for _, m := range media {
 				mts = append(mts, jsString(m.MediaType))
 			}
-			b.WriteString("  /** The media type to send the body as; by default the first of the\n   * property that is set. */\n")
+			if received {
+				b.WriteString("  /** The media type the body was sent as. */\n")
+			} else {
+				b.WriteString("  /** The media type to send the body as; by default the first of the\n   * property that is set. */\n")
+			}
 			fmt.Fprintf(&b, "  contentType?: %s;\n", strings.Join(mts, " | "))
 		}
 	}
@@ -251,8 +262,25 @@ func paramText(p *ir.Param) string {
 	return p.Doc
 }
 
-// bodyType renders the type of a request body of media type m.
-func (g *tsGen) bodyType(m *ir.BodyMedia) string {
+// bodyTypeOf renders the type of a request body of media type m, as a
+// client sends it or, with received, as a receiver reads it.
+func (g *tsGen) bodyTypeOf(m *ir.BodyMedia, received bool) string {
+	if received {
+		switch m.Kind {
+		case "binary":
+			return "Blob"
+		case "jsonl":
+			return "AsyncIterable<" + g.tsType(m.Field.Value.Elem) + ">"
+		case "partstream":
+			return "AsyncIterable<" + g.partItemType(m.Field.Value.Elem, m.Parts.HasHeaders()) + ">"
+		case "sse":
+			ev := g.eventType(m.Events)
+			if m.Events != nil && len(m.Events.Kinds) > 0 {
+				ev = "(" + ev + ")"
+			}
+			return "AsyncIterable<" + ev + ">"
+		}
+	}
 	switch m.Kind {
 	case "text":
 		return "string"
@@ -450,12 +478,26 @@ func (g *tsGen) eventsSpec(es *ir.EventStream) string {
 	return "{ kinds: { " + strings.Join(kinds, ", ") + " } }"
 }
 
-// responseType renders the union of the response variants of o.
+// responseType renders the union of the response variants of o, as a
+// client reads them.
 func (g *tsGen) responseType(o *ir.Operation) string {
+	return g.responseTypeOf(o, false)
+}
+
+// responseTypeOf is responseType, or with written the variants as a
+// receiver's handler returns them, to be written: bodies and streams of
+// what a request can send.
+func (g *tsGen) responseTypeOf(o *ir.Operation, written bool) string {
 	responses := tsResponses(o)
 	perStatus := map[string]int{}
 	for _, r := range responses {
 		perStatus[r.Status]++
+	}
+	stream := func(t string) string {
+		if written {
+			return "Iterable<" + t + "> | AsyncIterable<" + t + ">"
+		}
+		return "AsyncIterable<" + t + ">"
 	}
 	var variants []string
 	for _, r := range responses {
@@ -478,21 +520,25 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 		case "text":
 			fields = append(fields, "body: string")
 		case "binary":
-			fields = append(fields, "body: Blob")
+			if written {
+				fields = append(fields, "body: Blob | ArrayBuffer | Uint8Array<ArrayBuffer> | string")
+			} else {
+				fields = append(fields, "body: Blob")
+			}
 		case "byteranges":
 			fields = append(fields, "body: ByteRange[]")
 		case "jsonl":
-			fields = append(fields, "items: AsyncIterable<"+g.tsType(r.Item)+">")
+			fields = append(fields, "items: "+stream(g.tsType(r.Item)))
 		case "parts":
 			fields = append(fields, "body: "+g.partsType(r.Body, r.Parts))
 		case "partstream":
-			fields = append(fields, "items: AsyncIterable<"+g.partItemType(r.Item, r.Parts.HasHeaders())+">")
+			fields = append(fields, "items: "+stream(g.partItemType(r.Item, r.Parts.HasHeaders())))
 		case "sse":
 			ev := g.eventType(r.Events)
 			if r.Events != nil && len(r.Events.Kinds) > 0 {
 				ev = "(" + ev + ")"
 			}
-			fields = append(fields, "events: AsyncIterable<"+ev+">")
+			fields = append(fields, "events: "+stream(ev))
 		}
 		if headers := r.Headers; len(headers) > 0 {
 			var hs []string
@@ -516,6 +562,12 @@ func (g *tsGen) responseType(o *ir.Operation) string {
 // operationSpec renders the descriptor of o, or reports that the runtime
 // cannot send it.
 func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
+	return g.operationSpecOf(o, false)
+}
+
+// operationSpecOf is operationSpec, with the scopes of the security
+// requirements if scopes is set, which receivers check.
+func (g *tsGen) operationSpecOf(o *ir.Operation, scopes bool) (string, bool) {
 	media := tsMedia(o)
 	if o.Body != nil && len(media) < len(o.Body.Media) {
 		var left []string
@@ -676,6 +728,13 @@ func (g *tsGen) operationSpec(o *ir.Operation) (string, bool) {
 				}
 				if sc.Scheme != "" {
 					s += ", scheme: " + jsString(sc.Scheme)
+				}
+				if scopes && len(u.Scopes) > 0 {
+					var ss []string
+					for _, x := range u.Scopes {
+						ss = append(ss, jsString(x))
+					}
+					s += ", scopes: [" + strings.Join(ss, ", ") + "]"
 				}
 				schemes = append(schemes, s+" }")
 			}

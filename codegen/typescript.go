@@ -21,7 +21,8 @@ import (
 //go:embed ts/runtime.ts
 var tsRuntime []byte
 
-// tsTemplateFiles are the templates of models.ts, client.ts and index.ts.
+// tsTemplateFiles are the templates of models.ts, client.ts, receiver.ts
+// and index.ts.
 //
 //go:embed ts/*.tmpl
 var tsTemplateFiles embed.FS
@@ -31,7 +32,8 @@ type TSOptions struct {
 	// Source names the input document in the generated file header.
 	Source string
 	// Templates, if set, holds *.tmpl files whose {{define}} blocks
-	// replace the built-in blocks of models.ts, client.ts and index.ts, as
+	// replace the built-in blocks of models.ts, client.ts, receiver.ts and
+	// index.ts, as
 	// Options.Templates does for Go, and a goapi.yaml whose targets add
 	// files of your own, written as their blocks render. This is
 	// experimental.
@@ -42,7 +44,9 @@ type TSOptions struct {
 // runtime every client shares; models.ts, with a type and a schema
 // descriptor per type of the model, which the runtime validates and
 // encodes values with; client.ts, with a Client class and the request and
-// response types of the operations, if the model has some; and index.ts.
+// response types of the operations, if the model has some; receiver.ts,
+// with the handlers of the webhooks and callbacks a consumer receives, if
+// there are some; and index.ts.
 // It uses only syntax that type stripping erases. It returns what it
 // leaves out, such as media types the TypeScript runtime cannot send.
 func TypeScript(m *ir.Model, opts TSOptions) ([]File, []string, error) {
@@ -66,7 +70,14 @@ func TypeScript(m *ir.Model, opts TSOptions) ([]File, []string, error) {
 		}
 		files = append(files, File{Name: "client.ts", Content: []byte(client)})
 	}
-	index, err := g.index(hasClient)
+	receiver, hasReceiver, err := g.receiver()
+	if err != nil {
+		return nil, nil, err
+	}
+	if hasReceiver {
+		files = append(files, File{Name: "receiver.ts", Content: []byte(receiver)})
+	}
+	index, err := g.index(hasClient, hasReceiver)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,25 +155,30 @@ func (g *tsGen) funcs() template.FuncMap {
 
 // tsRuntimeExports are the names of runtime.ts that users of a client
 // need, which index.ts re-exports unless a model has the name; the whole
-// runtime is exported as runtime too.
+// runtime is exported as runtime too. Those of receivers are exported
+// with receiver.ts.
 var tsRuntimeExports = []struct {
-	name string
-	typ  bool
+	name     string
+	typ      bool
+	receiver bool
 }{
-	{"ClientOptions", true}, {"SenderOptions", true}, {"CallOptions", true}, {"Credential", true}, {"BasicCredential", true},
-	{"ServerEvent", true}, {"NamedEvent", true}, {"Part", true}, {"ByteRange", true}, {"Problem", true}, {"Issue", true}, {"Schema", true}, {"FormatCheck", true}, {"Codec", true},
-	{"InvalidRequestError", false}, {"UnexpectedResponseError", false}, {"InvalidResponseError", false},
-	{"NoCredentialsError", false}, {"validate", false}, {"encode", false}, {"registerFormat", false},
+	{"ClientOptions", true, false}, {"SenderOptions", true, false}, {"CallOptions", true, false}, {"Credential", true, false}, {"BasicCredential", true, false},
+	{"ServerEvent", true, false}, {"NamedEvent", true, false}, {"Part", true, false}, {"ByteRange", true, false}, {"Problem", true, false}, {"Issue", true, false}, {"Schema", true, false}, {"FormatCheck", true, false}, {"Codec", true, false},
+	{"InvalidRequestError", false, false}, {"UnexpectedResponseError", false, false}, {"InvalidResponseError", false, false},
+	{"NoCredentialsError", false, false}, {"validate", false, false}, {"encode", false, false}, {"registerFormat", false, false},
+	{"ReceiverOptions", true, true}, {"Received", true, true}, {"CredentialCheck", true, true}, {"BasicCheck", true, true},
+	{"CertificateCheck", true, true}, {"MissingValueError", false, true},
 }
 
-func (g *tsGen) index(hasClient bool) (string, error) {
-	taken := map[string]bool{"Client": hasClient, "Credentials": hasClient, "defaultServerUrl": hasClient}
+func (g *tsGen) index(hasClient, hasReceiver bool) (string, error) {
+	taken := map[string]bool{"Client": hasClient, "Credentials": hasClient, "defaultServerUrl": hasClient,
+		"CallbackHandler": hasReceiver, "SecurityHandler": hasReceiver}
 	for _, t := range g.m.Types {
 		taken[g.names[t]], taken[g.schemas[t]] = true, true
 	}
 	var names []string
 	for _, e := range tsRuntimeExports {
-		if taken[e.name] {
+		if taken[e.name] || e.receiver && !hasReceiver {
 			continue
 		}
 		if e.typ {
@@ -172,9 +188,9 @@ func (g *tsGen) index(hasClient bool) (string, error) {
 		}
 	}
 	body, err := g.render("index", struct {
-		Names  []string
-		Client bool
-	}{names, hasClient})
+		Names            []string
+		Client, Receiver bool
+	}{names, hasClient, hasReceiver})
 	if err != nil {
 		return "", err
 	}
