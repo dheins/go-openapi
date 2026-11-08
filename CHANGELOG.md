@@ -4,6 +4,14 @@
 
 ### Added
 
+- Generated CLIs send bodies of positional parts, from `-part` and
+  `-part-header` flags in order or a multipart document in `-body`, and
+  JSON Lines, event stream and part stream bodies read from `-body` as
+  they are sent (`cli.JSONLines`, `cli.Events`, `cli.TypedEvents`); no
+  command is left out for its body any more. A command whose body is an
+  object has a `-body.<path>` flag per property, set over `-body`'s JSON.
+  `completion bash|powershell` prints a completion script for commands,
+  flags and the values of enums, booleans and media types.
 - `nodeHandler(handle, options)` serves a TypeScript receiver's fetch
   handlers, or any other, with Node's `http` module or Express: bodies
   stream both ways with backpressure, the request aborts when the client

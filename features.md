@@ -113,9 +113,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 - Template targets: scopes beyond document, model and operation (each
   type, each webhook or callback, each tag), and targets of other
   generators than the one reading the directory. — later
-- `goapi generate cli`: bodies of positional parts and event streams,
-  webhooks and callbacks (which a server sends), shell completion, and a
-  flag per property of a JSON body. — later
+- `goapi generate cli`: webhooks and callbacks (which a server sends),
+  completion in shells other than bash and PowerShell (zsh, fish), and
+  body flags for properties of maps, of arrays of objects and below the
+  third level. — later
 - `goapi generate markdown`: a file per tag, examples made up from
   schemas when the document gives none, `externalValue` examples fetched
   (they are linked), only the schemas the selected operations use, and
@@ -144,6 +145,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `goapi generate cli`: bodies of positional parts (`-part`, or a
+  multipart document), JSON Lines and event streams read from `-body` as
+  they are sent, a `-body.<path>` flag per property of a body, and bash
+  and PowerShell completion. (55023ab, 98a3dba, 70c291b, ce12dc6)
 - [x] TypeScript receivers on Node's `http` module and Express
   (`nodeHandler`, with `trustProxy`), and defaults of absent parameters,
   as a Go server gives them. (3856692, 3695874)

@@ -1635,6 +1635,9 @@ go run ./cmd/petctl help
 go run ./cmd/petctl list-pets -limit 10 -tags cat,dog -v
 go run ./cmd/petctl create-pet -body @pet.json
 go run ./cmd/petctl upload-photo -pet-id 7 -body '{"caption":"me"}' -photo @rex.png
+go run ./cmd/petctl submit-form -body.role admin -body.owner.name Ann -body.tags a,b
+go run ./cmd/petctl upload-report -pet-id 7 -part @pet.json -part @rex.png -part-header 'X-Seq: 1'
+tail -f pets.jsonl | go run ./cmd/petctl import-lines -body -
 ```
 
 `goapi generate cli` writes a `main` package with a command per
@@ -1655,8 +1658,27 @@ of `-out` by default).
   given as they are, as `@file` or `-` for stdin. The file properties of a
   multipart body are flags of their own (`-photo @rex.png`, the content
   type from the extension). With several media types, `-content-type`
-  picks one. Bodies of positional parts and event streams cannot be
-  given yet; those commands are left out, with a warning.
+  picks one.
+- **Properties of the body** have flags of their own when the default
+  media type's body is an object: `-body.<path>` per scalar or array of
+  scalars, through nested objects to a depth of 3 (`-body.owner.name`),
+  but not read-only properties, maps or recursive types. They are set
+  over `-body`'s JSON (or `{}`) as the property's JSON type, lists
+  repeated or comma-separated; with `-content-type` picking a body of
+  another type, they are an error.
+- **Positional parts** (`multipart/mixed`, `related`, ...) are `-part`
+  flags in order: `@file` (its name and, from the extension, its media
+  type), `-` for stdin, or the text itself, each read as the part at its
+  position is (a file, text, or JSON), with `-part-header name:value`
+  adding a header to the part before it. Without `-part`, `-body` is a
+  multipart document, whose boundary is its first line's or that of
+  `-content-type 'multipart/mixed; boundary=...'`.
+- **Streams** (JSON Lines, `text/event-stream`, and streams of parts as
+  a multipart document) are read from `-body` as they are sent, so
+  `-body -` sends each line of stdin as it comes. Events are in the
+  `text/event-stream` format (`data:`, `event:`, `id:` lines and a blank
+  line), typed ones decoded and checked as the client sends them; an
+  item that cannot be read ends the call with its index.
 - **Output:** the body on stdout, JSON indented, text and bytes as they
   are, and the items of JSON Lines and event streams one a line as they
   come; `-v` adds the status and headers on stderr. A declared 2XX
@@ -1671,6 +1693,12 @@ of `-out` by default).
   `PETCTL_BASIC_AUTH_USER` and `..._PASSWORD`), so secrets can stay out
   of the shell's history. `-header name:value` and `-timeout` apply to
   any command.
+- **Completion:** `petctl completion bash` (for `eval "$(petctl
+  completion bash)"` in `.bashrc`) and `petctl completion powershell`
+  (piped to `Out-String | Invoke-Expression` in the profile) print a
+  script completing the commands, their flags, and the values of flags
+  with known values (enums, booleans, `-content-type`); other values fall
+  back to file names, as `@file` needs.
 
 The generated `main.go` declares `clientOptions`, which a file of yours
 in the package adds to, for what the client needs besides, such as the
