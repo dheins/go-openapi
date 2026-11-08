@@ -103,5 +103,6 @@ jobs:
           runtime/client FuzzParamRoundTrip
           runtime/client FuzzContentRoundTrip
           runtime/client FuzzFieldsRoundTrip
+          runtime/client FuzzReplay
           codegen/testdata/golden/petstore FuzzModels
           TARGETS
