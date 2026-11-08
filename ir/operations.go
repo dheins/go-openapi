@@ -149,9 +149,12 @@ type Param struct {
 // array of that type. An object (type "object") has Properties, and
 // Additional gives the type of any others.
 type ParamProperty struct {
-	Name       string
-	Type       string
-	Array      bool
+	Name  string
+	Type  string
+	Array bool
+	// Depth is how many more levels of arrays the value has, below Array:
+	// 1 for an array of arrays.
+	Depth      int
 	Properties []ParamProperty
 	Additional *ParamProperty
 	// ContentTypes are the media types (or ranges) a multipart part may
@@ -705,8 +708,8 @@ func (b *builder) objectParam(p *Param, ref *Ref) bool {
 // values, objects of them in turn, or arrays of either: its properties,
 // and the type of its additional properties if it allows typed ones. A
 // recursive type refers to its own shape (ParamProperty.Ref). With files,
-// oapi.File values (type "file") are allowed at the top level too.
-// Arrays of arrays cannot be written as fields.
+// oapi.File values (type "file") are allowed at the top level too, but not
+// in arrays of arrays.
 func objectProperties(ref *Ref, files bool) (ParamProperty, bool) {
 	return objectShape(ref, files, map[*Type]*bool{})
 }
@@ -759,14 +762,14 @@ func objectShape(ref *Ref, files bool, seen map[*Type]*bool) (ParamProperty, boo
 }
 
 // hasNested reports whether an object with props and additional ones
-// holds arrays of objects or a recursive type, which only bracketed
-// fields can write.
+// holds arrays of objects or of arrays, or a recursive type, which only
+// bracketed fields can write.
 func hasNested(props []ParamProperty, additional *ParamProperty) bool {
 	if additional != nil {
 		props = append(slices.Clone(props), *additional)
 	}
 	for _, p := range props {
-		if p.Ref != "" || p.Shape != "" || (p.Array && p.Type == "object") || hasNested(p.Properties, p.Additional) {
+		if p.Ref != "" || p.Shape != "" || (p.Array && (p.Type == "object" || p.Depth > 0)) || hasNested(p.Properties, p.Additional) {
 			return true
 		}
 	}
@@ -783,8 +786,15 @@ func valueShape(r *Ref, files bool, seen map[*Type]*bool) (ParamProperty, bool) 
 	if r.Kind == Slice {
 		prop.Array = true
 		r = stripNullable(r.Elem)
+		for r.Kind == Slice {
+			prop.Depth++
+			r = stripNullable(r.Elem)
+		}
 	}
 	switch {
+	case prop.Depth > 0 && files && (isFile(r) || isBytes(r)):
+		// A part is a file, or a list of them; not a list of lists.
+		return prop, false
 	case files && isFile(r):
 		prop.Type = "file"
 	case files && isBytes(r):
@@ -798,7 +808,7 @@ func valueShape(r *Ref, files bool, seen map[*Type]*bool) (ParamProperty, bool) 
 		if !ok {
 			return prop, false
 		}
-		obj.Array = prop.Array
+		obj.Array, obj.Depth = prop.Array, prop.Depth
 		prop = obj
 	}
 	return prop, true
@@ -1054,7 +1064,7 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 			obj, ok := objectProperties(field.Value, kind == "multipart")
 			props, additional := obj.Properties, obj.Additional
 			if !ok {
-				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects whose values are primitive values, objects or arrays of them, not arrays of arrays; %s is answered with 415", kind, mt))
+				b.warnAt(m, nil, fmt.Sprintf("%s bodies must be objects whose values are primitive values, objects or arrays of them, with no files in arrays of arrays; %s is answered with 415", kind, mt))
 				rejected = append(rejected, mt)
 				continue
 			}

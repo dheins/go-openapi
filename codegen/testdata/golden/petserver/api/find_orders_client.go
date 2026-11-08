@@ -11,7 +11,7 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var findOrdersFilterParam = server.Param{Name: "filter", Style: "deepObject", Explode: true, Shape: server.Object, Properties: []string{"id", "lines", "notes"}}
+var findOrdersFilterParam = server.Param{Name: "filter", Style: "deepObject", Explode: true, Shape: server.Object, Properties: []string{"id", "lines", "notes", "boxes"}}
 
 // NewFindOrdersRequest builds the HTTP request of FindOrders, GET /orders,
 // to send with c.

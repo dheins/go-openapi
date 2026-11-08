@@ -1,7 +1,7 @@
 package petserver
 
-// End-to-end tests of arrays of objects and recursive types in forms,
-// deepObject parameters and multipart bodies. They are not generated;
+// End-to-end tests of arrays of objects, arrays of arrays and recursive
+// types in forms, deepObject parameters and multipart bodies. They are not generated;
 // codegen's TestGeneratedCode runs them.
 
 import (
@@ -65,8 +65,33 @@ func TestNestedFormsRaw(t *testing.T) {
 		t.Errorf("mixed lines: %d %q", r.status, got)
 	}
 
+	// As Rails and Rack write it: a property the last line has starts the
+	// next, and the boxes are arrays of arrays.
+	boxed := sampleOrder()
+	boxed.Boxes = oapi.Some([][]int64{{0, 1}, {1}})
+	rails := "id=o-1&lines[][sku]=apple&lines[][qty]=3&lines[][tags][]=red&lines[][tags][]=sweet&lines[][sku]=pear&lines[][qty]=1" +
+		"&notes[gift]=yes&boxes[0][]=0&boxes[0][]=1&boxes[1][]=1"
+	if r := do(t, h, "POST", "/orders", "application/x-www-form-urlencoded", rails); r.status != 201 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	if got := s.seen["CreateOrder"].(*api.CreateOrderRequest).Body; !reflect.DeepEqual(got, boxed) {
+		t.Errorf("Rails order:\n got %+v\nwant %+v", got, boxed)
+	}
+	r = do(t, h, "POST", "/orders", "application/x-www-form-urlencoded", "id=o&lines[][sku]=a&lines[][qty]=1&lines[1][sku]=b")
+	if got := problemErrors(t, r); len(got) != 1 || !strings.Contains(got[0], `both items written "[]" and other values or indices`) {
+		t.Errorf("mixed Rails lines: %d %q", r.status, got)
+	}
+	q := "filter[id]=o-1&filter[lines][][sku]=apple&filter[lines][][qty]=3&filter[lines][][tags][]=red&filter[lines][][tags][]=sweet" +
+		"&filter[lines][][sku]=pear&filter[lines][][qty]=1&filter[notes][gift]=yes&filter[boxes][0][0]=0&filter[boxes][0][1]=1&filter[boxes][1][0]=1"
+	if r := do(t, h, "GET", "/orders?"+q, "", ""); r.status != 200 {
+		t.Fatalf("%d %s", r.status, r.body)
+	}
+	if got := s.seen["FindOrders"].(*api.FindOrdersRequest).Filter; !got.Set || !reflect.DeepEqual(got.Value, boxed) {
+		t.Errorf("Rails filter:\n got %+v\nwant %+v", got.Value, boxed)
+	}
+
 	// The same as a deepObject parameter.
-	q := "filter[id]=o-1&filter[lines][0][sku]=apple&filter[lines][0][qty]=3&filter[lines][0][tags][0]=red" +
+	q = "filter[id]=o-1&filter[lines][0][sku]=apple&filter[lines][0][qty]=3&filter[lines][0][tags][0]=red" +
 		"&filter[lines][0][tags][1]=sweet&filter[lines][1][sku]=pear&filter[lines][1][qty]=1&filter[notes][gift]=yes"
 	if r := do(t, h, "GET", "/orders?"+q, "", ""); r.status != 200 {
 		t.Fatalf("%d %s", r.status, r.body)
@@ -113,6 +138,7 @@ func TestNestedFormsClient(t *testing.T) {
 	ctx := context.Background()
 	s, c := newTestClient(t, petclient.Credentials{})
 	order := sampleOrder()
+	order.Boxes = oapi.Some([][]int64{{0, 1}, {1}})
 
 	r := as[api.CreateOrder201JSONResponse](t)(c.CreateOrder(ctx, &api.CreateOrderRequest{Body: order}))
 	if !reflect.DeepEqual(r.Body, order) {
@@ -144,7 +170,7 @@ func TestNestedFormsClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	q, _ := url.QueryUnescape(hreq.URL.RawQuery)
-	if !strings.Contains(q, "filter[lines][1][sku]=pear") || !strings.Contains(q, "filter[lines][0][tags]=red") {
+	if !strings.Contains(q, "filter[lines][1][sku]=pear") || !strings.Contains(q, "filter[lines][0][tags]=red") || !strings.Contains(q, "filter[boxes][0][1]=1") {
 		t.Errorf("query = %s", q)
 	}
 }

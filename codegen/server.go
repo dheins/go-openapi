@@ -1046,7 +1046,7 @@ func (r *shapes) fields(prop ir.ParamProperty) string {
 			r.names = append(r.names, name)
 			r.defs[name] = ""
 			shape := prop
-			shape.Shape, shape.Array, shape.ContentTypes, shape.Headers = "", false, nil, nil
+			shape.Shape, shape.Array, shape.Depth, shape.ContentTypes, shape.Headers = "", false, 0, nil, nil
 			r.defs[name] = r.fields(shape)
 		}
 	}
@@ -1058,6 +1058,9 @@ func (r *shapes) fields(prop ir.ParamProperty) string {
 	}
 	if prop.Array {
 		b.WriteString(", Array: true")
+	}
+	if prop.Depth > 0 {
+		fmt.Fprintf(&b, ", Depth: %d", prop.Depth)
 	}
 	if name == "" && prop.Type == "object" && len(prop.Properties) > 0 {
 		b.WriteString(", Properties: map[string]server.Property{")

@@ -41,7 +41,7 @@ paths:
         required: true
         content:
           application/json: {schema: {$ref: "#/components/schemas/Pet"}}
-          application/x-www-form-urlencoded: {schema: {$ref: "#/components/schemas/Pet"}}
+          application/x-www-form-urlencoded: {schema: {$ref: "#/components/schemas/PetForm"}}
           multipart/form-data:
             schema:
               type: object
@@ -102,6 +102,14 @@ components:
         id: {type: integer, readOnly: true}
         name: {type: string, minLength: 1}
         age: {type: integer, minimum: 0}
+    PetForm:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1}
+        age: {type: integer, minimum: 0}
+        toys: {type: array, items: {type: object, required: [name], properties: {name: {type: string}, size: {type: integer}}}}
+        grid: {type: array, items: {type: array, items: {type: integer, minimum: 0}}}
     Reply:
       type: object
       required: [id, secret]
@@ -247,6 +255,10 @@ func TestBodies(t *testing.T) {
 		{"application/json", `{"name":`, 400, nil},
 		{"application/x-www-form-urlencoded", "name=Rex&age=x", 400, []string{"body /age: got string, want integer"}},
 		{"application/x-www-form-urlencoded", "name=Rex&age=3", 204, nil},
+		// Arrays of objects as Rails writes them, and arrays of arrays.
+		{"application/x-www-form-urlencoded", "name=Rex&toys[][name]=ball&toys[][size]=1&toys[][name]=bone&grid[0][]=1&grid[1][]=2", 204, nil},
+		{"application/x-www-form-urlencoded", "name=Rex&toys[][size]=1&toys[][name]=bone&toys[][size]=2&grid[1][0]=-1", 400,
+			[]string{"body /grid/0/0: minimum: got -1, want 0", "body /toys/1/name: required property is missing"}},
 		{"application/xml", "<pet><name>Rex</name><age>3</age></pet>", 204, nil},
 		{"application/xml", "<pet><age>3</age></pet>", 400, []string{"body /name: required property is missing"}},
 		{"text/plain", "x", 415, nil},

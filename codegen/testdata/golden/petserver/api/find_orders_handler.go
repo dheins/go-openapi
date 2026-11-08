@@ -12,7 +12,7 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
-var findOrdersFilterProperties = server.Property{Type: "object", Properties: map[string]server.Property{"id": {Type: "string"}, "lines": {Type: "object", Array: true, Properties: map[string]server.Property{"sku": {Type: "string"}, "qty": {Type: "integer"}, "tags": {Type: "string", Array: true}}}, "notes": {Type: "object", Additional: &server.Property{Type: "string"}}}}
+var findOrdersFilterProperties = server.Property{Type: "object", Properties: map[string]server.Property{"id": {Type: "string"}, "lines": {Type: "object", Array: true, Properties: map[string]server.Property{"sku": {Type: "string"}, "qty": {Type: "integer"}, "tags": {Type: "string", Array: true}}}, "notes": {Type: "object", Additional: &server.Property{Type: "string"}}, "boxes": {Type: "integer", Array: true, Depth: 1}}}
 
 // HandleFindOrders returns the HTTP handler of FindOrders.
 //

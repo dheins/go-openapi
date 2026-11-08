@@ -14,6 +14,8 @@ type Order struct {
 	ID    string                           `json:"id"`
 	Lines oapi.Optional[[]OrderLine]       `json:"lines,omitzero"`
 	Notes oapi.Optional[map[string]string] `json:"notes,omitzero"`
+	// The lines packed in each box, by index.
+	Boxes oapi.Optional[[][]int64] `json:"boxes,omitzero"`
 }
 
 // UnmarshalJSON decodes a JSON object, reporting missing required
@@ -43,8 +45,8 @@ func (m *Order) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 func (m *Order) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error {
 	obj := oapi.BeginObject(dec)
 	var v Order
-	var seen [3]bool
-	var problems [3]error
+	var seen [4]bool
+	var problems [4]error
 	for obj.Next() {
 		switch obj.Name() {
 		case "id":
@@ -56,6 +58,9 @@ func (m *Order) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error 
 		case "notes":
 			seen[2] = true
 			problems[2] = obj.Decode(&v.Notes, false, dir)
+		case "boxes":
+			seen[3] = true
+			problems[3] = obj.Decode(&v.Boxes, false, dir)
 		default:
 			obj.Skip()
 		}
@@ -74,6 +79,9 @@ func (m *Order) DecodeJSONFrom(dec *jsontext.Decoder, dir oapi.Direction) error 
 	}
 	if seen[2] {
 		errs.Nested("/notes", problems[2])
+	}
+	if seen[3] {
+		errs.Nested("/boxes", problems[3])
 	}
 	if err := errs.Err(); err != nil {
 		return err
@@ -112,6 +120,13 @@ func (m Order) AppendJSON(dst []byte, dir oapi.Direction) ([]byte, error) {
 		dst = append(dst, "\"notes\":"...)
 		if dst, err = oapi.AppendValue(dst, m.Notes.Value, dir); err != nil {
 			return nil, fmt.Errorf("notes: %w", err)
+		}
+		dst = append(dst, ',')
+	}
+	if m.Boxes.Set {
+		dst = append(dst, "\"boxes\":"...)
+		if dst, err = oapi.AppendValue(dst, m.Boxes.Value, dir); err != nil {
+			return nil, fmt.Errorf("boxes: %w", err)
 		}
 		dst = append(dst, ',')
 	}

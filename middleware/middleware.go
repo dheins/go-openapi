@@ -403,13 +403,13 @@ func property(p ir.ParamProperty, shapes map[string]*server.Property) server.Pro
 			def := &server.Property{}
 			shapes[name] = def
 			inner := p
-			inner.Shape, inner.Array, inner.ContentTypes, inner.Headers = "", false, nil, nil
+			inner.Shape, inner.Array, inner.Depth, inner.ContentTypes, inner.Headers = "", false, 0, nil, nil
 			*def = property(inner, shapes)
 		}
 	}
-	out := server.Property{Type: p.Type, Array: p.Array, ContentTypes: p.ContentTypes}
+	out := server.Property{Type: p.Type, Array: p.Array, Depth: p.Depth, ContentTypes: p.ContentTypes}
 	if name != "" {
-		out = server.Property{Ref: shapes[name], Array: p.Array, ContentTypes: p.ContentTypes}
+		out = server.Property{Ref: shapes[name], Array: p.Array, Depth: p.Depth, ContentTypes: p.ContentTypes}
 		return out
 	}
 	if p.Type == "object" && len(p.Properties) > 0 {

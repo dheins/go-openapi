@@ -1536,6 +1536,13 @@ components:
           type: object
           additionalProperties:
             type: string
+        boxes:
+          description: The lines packed in each box, by index.
+          type: array
+          items:
+            type: array
+            items:
+              type: integer
     OrderLine:
       type: object
       required: [sku, qty]

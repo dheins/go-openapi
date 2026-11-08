@@ -53,6 +53,11 @@ func (h *handler) ExportPets(_ context.Context, req *api.ExportPetsRequest) (api
 	}}, nil
 }
 
+func (h *handler) CreateOrder(_ context.Context, req *api.CreateOrderRequest) (api.CreateOrderResponse, error) {
+	h.seen["CreateOrder"] = req
+	return api.CreateOrder201JSONResponse{Body: req.Body}, nil
+}
+
 func (h *handler) Secure(context.Context, *api.SecureRequest) (api.SecureResponse, error) {
 	return api.Secure204Response{}, nil
 }
@@ -125,6 +130,17 @@ func TestCommands(t *testing.T) {
 	}
 	if code, _, errOut := runCLI("upload-photo", "-photo", "@"+photo); code != 2 || !strings.Contains(errOut, "-pet-id is required") {
 		t.Errorf("upload-photo without -pet-id: %d %q", code, errOut)
+	}
+
+	// A form body of arrays of objects and of arrays, given as JSON, is
+	// sent with brackets.
+	order := `{"id":"o-1","lines":[{"sku":"a","qty":1},{"sku":"b","qty":2}],"boxes":[[0],[0,1]]}`
+	if code, _, errOut := runCLI("create-order", "-body", order); code != 0 {
+		t.Errorf("create-order: %d %q", code, errOut)
+	}
+	if req := h.seen["CreateOrder"].(*api.CreateOrderRequest); len(req.Body.Lines.Value) != 2 || req.Body.Lines.Value[1].Sku != "b" ||
+		len(req.Body.Boxes.Value) != 2 || !slices.Equal(req.Body.Boxes.Value[1], []int64{0, 1}) {
+		t.Errorf("create-order request = %+v", req.Body)
 	}
 
 	// A stream is printed item by item.

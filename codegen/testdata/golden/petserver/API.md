@@ -1477,6 +1477,7 @@ The API streams the pets it adds; the consumer answers with an event per pet as 
 | `id` | string | yes |  |
 | `lines` | array of [OrderLine](#orderline) | no |  |
 | `notes` | map of string | no |  |
+| `boxes` | array of array of integer | no | The lines packed in each box, by index. |
 
 ### OrderLine
 

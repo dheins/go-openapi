@@ -721,7 +721,15 @@ func (n *fieldNode) json(path string, prop Property) (json.RawMessage, error) {
 	}
 	vals := n.values
 	if prop.Array && prop.Depth > 0 {
-		return nil, &oapi.ValidationError{Path: path, Message: "expected the items of an array of arrays, with indices (a[0]=x)"}
+		// Items given as values are JSON arrays, as multipart parts are.
+		items := make([]json.RawMessage, len(vals))
+		for i, v := range vals {
+			if !strings.HasPrefix(strings.TrimSpace(v), "[") || !json.Valid([]byte(v)) {
+				return nil, &oapi.ValidationError{Path: path, Message: "expected the items of an array of arrays, with indices (a[0]=x) or as JSON arrays"}
+			}
+			items[i] = json.RawMessage(v)
+		}
+		return json.Marshal(items)
 	}
 	if prop.Array {
 		items := make([]json.RawMessage, len(vals))
