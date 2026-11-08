@@ -918,6 +918,27 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M53 – Arrays of arrays and Rails-style fields ✅
+- [x] Go runtime: fields kept in order (`server.FieldValues`,
+  `server.ParseQuery`, ordered multipart fields), `a[][b]` grouped as Rack
+  groups it, and arrays of arrays (`Property.Depth`) with indices, `[]`
+  or JSON items
+- [x] ir and Go clients: arrays of arrays in form and multipart bodies and
+  object parameters, written with indices; `middleware.Validate` and the
+  CLI
+- [x] TypeScript runtime: indices written, fields read in order, Rails
+  style and arrays of arrays, multipart fields with brackets in receivers
+
+**How it went**
+- *Order is the hard part*: `a[][b]=1&a[][c]=2&a[][b]=3` means two items
+  only because of where the second `b` is, and `url.Values` keeps the
+  order of a name's values but not of different names. Fields are now an
+  ordered list everywhere a server reads them.
+- *Rack's rule*: a property the last item has starts a new item, and a
+  path with another `[]` in it never does, so `a[][tags][]=x` adds to the
+  last item; the Go and TypeScript readers follow it.
+- *Not done*: see [features.md](../features.md).
+
 ### M52 – TypeScript receivers ✅
 - [x] Runtime: `receive` reads a fetch `Request` (credentials, parameters
   in every style, every body kind, streams as they are iterated),

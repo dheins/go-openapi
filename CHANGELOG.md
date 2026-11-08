@@ -4,6 +4,13 @@
 
 ### Added
 
+- Arrays of arrays in form and multipart bodies and object parameters,
+  written with indices (`boxes[0][1]=2`), and arrays of objects read as
+  Rails and Rack write them (`lines[][sku]=a&lines[][qty]=1`), by Go and
+  TypeScript servers, clients and receivers, `middleware.Validate` and
+  generated CLIs. `server.Property.Depth` describes the nested arrays,
+  and `server.ParseQuery`, `server.ParseFields` and `server.FieldsOf`
+  keep or make fields in order.
 - TypeScript receivers of webhooks and callbacks: `ts-client` writes
   `receiver.ts`, with a fetch handler per webhook and callback a consumer
   receives (`handlePetAdoptedWebhook(handler, security, options)`), a
@@ -524,6 +531,8 @@
 
 ### Fixed
 
+- TypeScript clients wrote an array of arrays in a form or `deepObject`
+  parameter as a JSON string per item, which servers did not read.
 - TypeScript clients validated a binary body against its `format: binary`
   string schema, so they refused to send a `Blob`, `ArrayBuffer` or
   `Uint8Array`.
@@ -575,6 +584,12 @@
 
 ### Changed
 
+- `server.Values.Fields`, `server.FormFields`, `server.ObjectJSON` and
+  `server.DecodeFields` use `server.FieldValues`, fields in the order they
+  were sent, rather than maps; `Param.QueryValues`, `server.QueryFields`
+  and `server.ContentValue` take a `server.Query` (`server.ParseQuery(r)`),
+  which generated handlers now parse. Form and multipart bodies with
+  arrays of arrays are accepted rather than answered 415.
 - Callbacks of webhooks and callbacks are generated rather than left out
   with a warning, so `generate client` writes `sender.go` for a document
   that has them, and the Markdown reference stops at a callback that

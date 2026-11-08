@@ -39,9 +39,9 @@ shipped in.
 - Headers (response and part headers) whose objects hold arrays or other
   objects, which the simple style cannot write; only their presence is
   checked. — later
-- Arrays of arrays in form and multipart bodies and object parameters
-  (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects
-  (indices are read and written). — later
+- Files in arrays of arrays in multipart bodies (such bodies are answered
+  415), and the empty items of an array of arrays in forms, which have no
+  fields and are not sent. — later
 - Parameters and response headers with `content` other than JSON, text,
   forms and XML, and `querystring` parameters with text or XML content.
   — later
@@ -142,6 +142,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Arrays of arrays in form and multipart bodies and object parameters
+  (`a[0][0]=x`), and the Rails-style `a[][b]=x` for arrays of objects,
+  read in the order fields are sent, in Go and TypeScript servers,
+  clients, receivers and `middleware.Validate`. (172a67e, b0837cd,
+  5ad4986)
 - [x] TypeScript receivers of webhooks and callbacks: `receiver.ts` with
   a fetch handler per operation (`handlePetAdoptedWebhook`), a
   `CallbackHandler` and a `SecurityHandler`, reading every body kind the
