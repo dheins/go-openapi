@@ -113,6 +113,8 @@ type mdGen struct {
 	opAnchors     map[*oas.Operation]string
 	opsByID       map[string]*oas.Operation
 	schemeAnchors map[string]string
+	// declaring are the operations whose callbacks are being described.
+	declaring map[*oas.Operation]bool
 	// slugs counts the anchors given so far, to number repeated ones as
 	// GitHub does.
 	slugs map[string]int
@@ -186,6 +188,12 @@ type MDOperation struct {
 	Responses   []*MDResponse
 	Callbacks   []*MDCallback
 	OtherGroups []string
+	// Inbound says the API receives the callback: the receiver of the
+	// webhook or callback declaring it sends it back.
+	Inbound bool
+	// sent says the operation is a webhook or callback, sent to its
+	// receiver.
+	sent bool
 }
 
 // MDParameter is a parameter, or a header of a response or part.
@@ -503,7 +511,7 @@ func (g *mdGen) headOperation(po pathOp, webhook bool) *MDOperation {
 		plain += " — " + po.op.Summary
 		heading += " — " + oneLine(po.op.Summary)
 	}
-	mo := &MDOperation{Method: po.method, Path: po.path, Heading: heading, Anchor: g.anchor(plain), Op: po.op}
+	mo := &MDOperation{Method: po.method, Path: po.path, Heading: heading, Anchor: g.anchor(plain), Op: po.op, sent: webhook}
 	g.opAnchors[po.op] = mo.Anchor
 	return mo
 }
@@ -555,14 +563,25 @@ func (g *mdGen) fillOperation(mo *MDOperation, po pathOp) {
 			mo.Responses = append(mo.Responses, mr)
 		}
 	}
+	// Whoever receives an operation sends its callbacks; a callback
+	// declaring an operation that declares it is described once.
+	if g.declaring == nil {
+		g.declaring = map[*oas.Operation]bool{}
+	}
+	g.declaring[op] = true
+	defer delete(g.declaring, op)
 	for name, cb := range op.Callbacks.All() {
 		cb = cb.Deref()
 		mc := &MDCallback{Name: name}
 		for expr, item := range cb.Items.All() {
 			item = item.Deref()
 			for m, cop := range item.Operations() {
+				if g.declaring[cop] {
+					continue
+				}
 				cpo := pathOp{method: strings.ToUpper(m), path: expr, item: item, op: cop}
-				cmo := &MDOperation{Method: cpo.method, Path: expr, Callback: name, Heading: code(cpo.method) + " " + code(expr), Op: cop}
+				cmo := &MDOperation{Method: cpo.method, Path: expr, Callback: name, Heading: code(cpo.method) + " " + code(expr), Op: cop,
+					Inbound: mo.sent && !mo.Inbound, sent: true}
 				g.fillOperation(cmo, cpo)
 				mc.Operations = append(mc.Operations, cmo)
 			}

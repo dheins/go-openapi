@@ -57,7 +57,9 @@ shipped in.
 - Forwarding headers for anything but `$url`: routing, the base path,
   the document page and logs use the request as the server received it.
   — later
-- Webhooks and callbacks declared inside webhooks and callbacks. — later
+- TypeScript URL functions of the callbacks a consumer sends back (TypeScript
+  clients have no types of the webhooks they receive), and a TypeScript
+  receiver of webhooks and callbacks. — later
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
@@ -139,6 +141,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Webhooks and callbacks declared inside webhooks and callbacks, at
+  any depth: the consumer sends the callbacks of what it receives back
+  (the client package's `Sender`, and a TypeScript `Sender`), and the API
+  receives them (`InboundCallbackHandler`, `InboundSecurityHandler`).
+  (9bf1231, 286ada8, 196afe3)
 - [x] `$url` as a client sent it to a trusted proxy
   (`server.WithTrustedProxies`), from `Forwarded` or `X-Forwarded-*`
   headers read back through the trusted hops. (5c83008, 02e6377)

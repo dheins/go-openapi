@@ -1893,6 +1893,68 @@ verify := func(op server.Operation, next http.Handler) http.Handler {
 cfg := server.NewConfig(server.WithMiddleware(verify))
 ```
 
+### Callbacks of webhooks and callbacks
+
+A webhook or callback can declare callbacks too, and those can declare
+their own, at any depth. Whoever receives an operation sends its
+callbacks, so the roles alternate: the receiver of the webhook
+`petAdopted` sends its callback `confirm` back to the API, and the API
+sends `confirm`'s callback `receipt` to the consumer again.
+
+| Declared by | Sent by | Received by |
+|---|---|---|
+| an operation of the paths | the API (`Sender`) | the consumer (`CallbackHandler`) |
+| a webhook, or a callback the API sends | the consumer (the client package's `Sender`) | the API (`InboundCallbackHandler`) |
+| a callback the API receives | the API (`Sender`) | the consumer (`CallbackHandler`) |
+
+Their names start with the webhook's or callback's
+(`PetAdoptedWebhookConfirmCallback`), unless they have an operationId.
+Each has the same types, client functions and URL function as other
+callbacks. Its URL function takes the request of the webhook or callback
+declaring it, as its receiver got it, and the response the receiver
+returns when the URL uses it:
+
+```go
+// webhooks: {petAdopted: {post: {callbacks: {confirm: {"{$request.body#/confirmUrl}": ...}}}}}
+func (h *hooks) PetAdoptedWebhook(ctx context.Context, req *api.PetAdoptedWebhookRequest) (api.PetAdoptedWebhookResponse, error) {
+	target, err := api.ConfirmAdoptionCallbackURL(req)
+	if err != nil {
+		return nil, err
+	}
+	h.confirmations <- target // confirmed later, with the client's Sender
+	return api.PetAdoptedWebhook200JSONResponse{}, nil
+}
+```
+
+`generate client` writes a `Sender` to the client package for the
+callbacks a consumer sends back, configured as the server's is, with
+`SenderCredentials` of the schemes they declare (the credentials the API
+issued its consumers):
+
+```go
+s, err := sdk.NewSender(sdk.SenderCredentials{
+	APIKey: func(ctx context.Context, target string) (string, error) { return apiKey, nil },
+})
+resp, err := s.ConfirmAdoptionCallback(ctx, target, &api.ConfirmAdoptionCallbackRequest{Body: confirmation})
+```
+
+The API receives them with handlers in the operations package, as
+consumers receive webhooks: it implements `api.InboundCallbackHandler`,
+and `api.InboundSecurityHandler` for the schemes they declare, and routes
+each handler at the path of the URL it gave in the webhook or callback.
+The generated server does not route them, since their URLs are the API's
+choice:
+
+```go
+cfg.Handle(api.ConfirmAdoptionCallbackOperation, "/confirm/{id}", api.HandleConfirmAdoptionCallback(cfg, confirms, keys))
+```
+
+The server's `Sender` sends only what the API sends. A TypeScript client
+has a `Sender` class too, `new Sender({ credentials })` with
+`sender.confirmAdoptionCallback(target, req)`; it has no URL functions,
+so the target is the caller's. A callback that declares an operation
+declaring it (through `$ref`s) is generated once, with a warning.
+
 ## Generate a document from Go code
 
 `goapi scan` works the other way around: it reads Go packages and writes

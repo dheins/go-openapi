@@ -4,6 +4,12 @@
 
 ### Added
 
+- Webhooks and callbacks declared inside webhooks and callbacks, at any
+  depth: consumers send the callbacks of what they receive back with a
+  `Sender` in the client package (and a TypeScript `Sender` class), and
+  the API receives them with `api.InboundCallbackHandler` and
+  `api.InboundSecurityHandler`. The Markdown reference says who sends each
+  callback.
 - `server.WithTrustedProxies(prefixes...)`: for requests from these
   addresses, `$url` (`server.RequestURL`) is the URL the client sent to
   the first trusted proxy, from the `Forwarded` or `X-Forwarded-Proto`,
@@ -559,6 +565,10 @@
 
 ### Changed
 
+- Callbacks of webhooks and callbacks are generated rather than left out
+  with a warning, so `generate client` writes `sender.go` for a document
+  that has them, and the Markdown reference stops at a callback that
+  declares the operation declaring it instead of not ending.
 - A link's object or array constant with members that are expressions,
   such as `{"id": "$response.body#/id"}`, is sent with them filled in
   rather than as written, and text with expressions embedded given to an

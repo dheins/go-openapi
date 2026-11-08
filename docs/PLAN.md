@@ -918,6 +918,25 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M51 – Callbacks of webhooks and callbacks ✅
+- [x] ir: callbacks of webhooks and callbacks at any depth,
+  `Operation.Inbound`, `Model.InboundSchemes`, selection, and a guard
+  against callbacks declaring their declarer
+- [x] Go: `InboundCallbackHandler` and `InboundSecurityHandler`, the
+  server's `Sender` for what the API sends, and a client package `Sender`
+  for what consumers send back
+- [x] TypeScript `Sender` class; the Markdown reference says who sends
+  each callback
+
+**How it went**
+- *Roles, not new code*: every nested operation already had its types,
+  client functions, handlers and URL function; what changed is which side
+  sends and which receives, alternating with each level.
+- *Cycles*: `$ref`s let a callback declare the operation declaring it;
+  the Markdown reference already recursed into callbacks, so it could
+  not end on such a document, and now stops as the generators do.
+- *Not done*: see [features.md](../features.md).
+
 ### M50 – `$url` behind proxies ✅
 - [x] `server.WithTrustedProxies` and `Config.TrustedProxies`, read by
   `server.RequestURL` through the request's context

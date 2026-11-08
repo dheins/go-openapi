@@ -239,6 +239,7 @@ Subscribe registers a URL for pet events.
 
 NotifyPet sends a subscriber a pet event, with a key or none.
 
+- Sent by the API
 - Operation ID: `notifyPet`
 - Security: [apiKey](#apikey) or none
 
