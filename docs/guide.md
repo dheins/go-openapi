@@ -1498,6 +1498,7 @@ path.
 | `client.WithoutRequestValidation()` | send requests without checking them first |
 | `client.WithResponseValidation()` | check response bodies and required headers against the document |
 | `client.WithMaxResponseBytes(n)` | response body limit (default 32 MiB) |
+| `client.WithReplayLimit(n)` | how much of a streamed request body is kept to send it again (default 1 MiB; 0 keeps none) |
 
 `Credentials` has a field per security scheme, named like the
 `SecurityHandler` methods:
@@ -1539,8 +1540,38 @@ being sent. Each item is checked as it is written (unless request
 validation is off), parts against their encodings too: an invalid one
 ends the request with a `*client.InvalidRequest` pointing into it from
 its index, and an error
-the iterator yields ends it with that error. A stream cannot be sent
-twice, so retry middleware must not retry these requests.
+the iterator yields ends it with that error.
+
+The iterator is ranged over once, but up to `client.WithReplayLimit`
+(1 MiB by default) of what it produced is kept, so the request can be
+sent again: its `GetBody` reads the stream from the start, then the rest
+as it is produced. Retrying middleware sends it again as any other
+request (and the transport resends it on another connection when a
+reused one fails):
+
+```go
+retry := client.WithMiddleware(func(next client.Doer) client.Doer {
+	return client.DoerFunc(func(r *http.Request) (*http.Response, error) {
+		resp, err := next.Do(r)
+		if err == nil || r.GetBody == nil {
+			return resp, err
+		}
+		body, gerr := r.GetBody() // client.ErrNotReplayable past the limit
+		if gerr != nil {
+			return nil, errors.Join(err, gerr)
+		}
+		again := r.Clone(r.Context())
+		again.Body = body
+		return next.Do(again)
+	})
+})
+```
+
+Once a stream has produced more than the limit, it frees what was sent
+and `GetBody` returns `client.ErrNotReplayable`, so a long-lived stream
+costs no more memory than before. The stream's producer stops when the
+call is done: on an error, once the response body is closed, or with the
+call's context.
 
 ### Links
 
@@ -1766,7 +1797,19 @@ if (resp.status === 200) {
 - **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. `$url` is the URL the request was sent to, built again (`requestUrl`), and embedded text and expressions inside constants are read and filled in as Go clients do. A value that is not there is left out, for the request's validation to report if it is required.
 - **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
-- **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, and per call `signal`, `headers` and `server` (as `client.WithServer`; following a link that names a server sets it). A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
+- **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, `replayLimit`, and per call `signal`, `headers` and `server` (as `client.WithServer`; following a link that names a server sets it). A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
+- **Retrying streams:** a streamed request body is iterated once, and up to `replayLimit` bytes (1 MiB by default, 0 for none) of it are kept: each read of `init.body` is a new stream from the start, so a `fetch` wrapper retries by calling `fetch(url, init)` again. Past the limit the call rejects with `NotReplayableError`.
+
+  ```ts
+  const retrying: typeof fetch = async (url, init) => {
+    try {
+      return await fetch(url, init);
+    } catch {
+      return fetch(url, init); // a new stream of the same body
+    }
+  };
+  const api = new Client({ fetch: retrying });
+  ```
 
 Not supported by the TypeScript client yet; `generate ts-client` warns
 about each one it leaves out:

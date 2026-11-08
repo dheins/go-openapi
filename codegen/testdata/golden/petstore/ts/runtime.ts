@@ -1239,6 +1239,13 @@ export interface ClientOptions {
    * (such as "application/msgpack"); the client needs one for each it
    * declares. */
   codecs?: Readonly<Record<string, Codec>>;
+  /** How many bytes of a streamed request body (JSON Lines, server-sent
+   * events, streamed parts) are kept so that a fetch wrapper can send it
+   * again: 1 MiB by default, 0 for none. Each read of init.body is a new
+   * stream reading what was produced from the start, then the rest as it
+   * is produced; the items are still iterated once. Once more was
+   * produced than this, a new stream fails with NotReplayableError. */
+  replayLimit?: number;
 }
 
 /** The options of a Sender: those of a client but for where requests go,
@@ -1677,6 +1684,15 @@ export class NoCredentialsError extends Error {
   constructor() {
     super("no credentials for any of the operation's security requirements");
     this.name = "NoCredentialsError";
+  }
+}
+
+/** A streamed request body sent again after more of it was produced than
+ * the client's replayLimit keeps. */
+export class NotReplayableError extends Error {
+  constructor() {
+    super("the streamed request body is longer than the replay limit and cannot be sent again");
+    this.name = "NotReplayableError";
   }
 }
 
@@ -2492,6 +2508,7 @@ export interface Config {
   readonly validateResponses: boolean;
   readonly credentials: Values;
   readonly codecs: ReadonlyMap<string, Codec>;
+  readonly replayLimit: number;
 }
 
 /** Makes the configuration of a client from its options. */
@@ -2509,6 +2526,7 @@ export function config(options: ClientOptions, defaultBaseUrl: string, credentia
     validateRequests: options.validateRequests ?? true,
     validateResponses: options.validateResponses ?? false,
     credentials: (credentials ?? {}) as Values,
+    replayLimit: options.replayLimit ?? 1 << 20,
   };
 }
 
@@ -2569,9 +2587,16 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
   if (b.body !== undefined) {
     init.body = b.body;
   }
+  let rec: Recording | undefined;
   if (b.streamed === true) {
     // Required to send a stream; not yet in every RequestInit type.
     Object.assign(init, { duplex: "half" });
+    if (cfg.replayLimit > 0) {
+      const recording = new Recording(b.body as ReadableStream<Uint8Array>, cfg.replayLimit);
+      rec = recording;
+      // Each sending gets a stream of its own.
+      Object.defineProperty(init, "body", { get: () => recording.stream(), enumerable: true, configurable: true });
+    }
   }
   if (call.signal !== undefined) {
     init.signal = call.signal;
@@ -2580,9 +2605,112 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
   try {
     resp = await cfg.fetch(url, init);
   } catch (e) {
-    throw b.failure ?? e;
+    throw b.failure ?? (rec?.refused === true ? new NotReplayableError() : e);
+  } finally {
+    rec?.release();
   }
   return readResponse(cfg, op, resp);
+}
+
+/** A streamed request body read from source once and kept up to limit
+ * bytes, so that each of its streams reads it from the start. */
+class Recording {
+  private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
+  private readonly limit: number;
+  // chunks are those from index base on: all while replayable, else from
+  // what the latest stream has not read yet.
+  private chunks: Uint8Array[] = [];
+  private base = 0;
+  private size = 0;
+  private replayable: boolean;
+  private done = false;
+  private failed = false;
+  private error: unknown;
+  private next: Promise<void> | undefined;
+  private streams = 0;
+  /** A stream asked for past the limit. */
+  refused = false;
+
+  constructor(source: ReadableStream<Uint8Array>, limit: number) {
+    this.reader = source.getReader();
+    this.limit = limit;
+    this.replayable = limit > 0;
+  }
+
+  /** Returns a new stream of the body from its start, or one failing
+   * with NotReplayableError past the limit. */
+  stream(): ReadableStream<Uint8Array> {
+    if (this.streams > 0 && !this.replayable) {
+      this.refused = true;
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new NotReplayableError());
+        },
+      });
+    }
+    const id = ++this.streams;
+    let i = 0;
+    return new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        for (;;) {
+          if (id !== this.streams && !this.replayable) {
+            controller.error(new NotReplayableError());
+            return;
+          }
+          if (i < this.base + this.chunks.length) {
+            controller.enqueue(this.chunks[i - this.base]!);
+            i++;
+            if (!this.replayable && id === this.streams) {
+              // Read by the only stream there can be now.
+              this.chunks = this.chunks.slice(i - this.base);
+              this.base = i;
+            }
+            return;
+          }
+          if (this.done) {
+            if (this.failed) {
+              controller.error(this.error);
+            } else {
+              controller.close();
+            }
+            return;
+          }
+          await this.read();
+        }
+      },
+    });
+  }
+
+  // read reads the next chunk of the source, once for every stream
+  // waiting for it.
+  private read(): Promise<void> {
+    this.next ??= this.reader.read().then(
+      ({ value, done }) => {
+        this.next = undefined;
+        if (done) {
+          this.done = true;
+          return;
+        }
+        this.chunks.push(value);
+        this.size += value.length;
+        if (this.size > this.limit) {
+          this.replayable = false;
+        }
+      },
+      (e: unknown) => {
+        this.next = undefined;
+        this.done = this.failed = true;
+        this.error = e;
+      },
+    );
+    return this.next;
+  }
+
+  /** Keeps no more once the response has come: the stream sending the
+   * request may still be reading, and frees the chunks it has read. */
+  release(): void {
+    this.replayable = false;
+  }
 }
 
 // mediaType returns the media type of a response, lower case, without
