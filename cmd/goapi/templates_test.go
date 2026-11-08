@@ -27,7 +27,7 @@ func TestTemplatesCommand(t *testing.T) {
 	if code, _, stderr := run("-out", goDir); code != exitFailure || !strings.Contains(stderr, "exists") {
 		t.Errorf("again: exit %d, stderr %q", code, stderr)
 	}
-	if code, out, _ := run("-out", filepath.Join(dir, "ts"), "-target", "ts"); code != exitOK || !strings.Contains(out, "client.ts.tmpl") || strings.Count(out, ".tmpl") != 3 {
+	if code, out, _ := run("-out", filepath.Join(dir, "ts"), "-target", "ts"); code != exitOK || !strings.Contains(out, "client.ts.tmpl") || strings.Count(out, ".tmpl") != 4 {
 		t.Errorf("ts: exit %d, %q", code, out)
 	}
 	if code, out, _ := run("-out", filepath.Join(dir, "md"), "-target", "markdown"); code != exitOK || out != filepath.Join(dir, "md", "reference.md.tmpl")+"\n" {

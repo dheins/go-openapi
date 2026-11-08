@@ -1,11 +1,12 @@
 {{- /*
 Templates of index.ts, which re-exports the runtime's names users need
-(.Names), the models and the client.
+(.Names), the models, the client and the receiver.
 */ -}}
 
-{{/* "index" gets Names (the runtime's names to export) and Client (whether there is a client.ts). */}}
+{{/* "index" gets Names (the runtime's names to export), Client (whether there is a client.ts) and Receiver (whether there is a receiver.ts). */}}
 {{define "index"}}export { {{join .Names ", "}} } from "./runtime.ts";
 export * as runtime from "./runtime.ts";
 export * from "./models.ts";
 {{if .Client}}export * from "./client.ts";
+{{end}}{{if .Receiver}}export * from "./receiver.ts";
 {{end}}{{end}}
