@@ -54,9 +54,9 @@ shipped in.
 - Signed webhooks (an HMAC of the body in a header): OpenAPI has no
   security scheme for them, so they are left to client and server
   middleware, as the guide shows. — not planned
-- `$url` in callback URLs as a proxy saw the request
-  (`X-Forwarded-Proto` and `-Host`): `server.RequestURL` uses the
-  request's own scheme and `Host`. — later
+- Forwarding headers for anything but `$url`: routing, the base path,
+  the document page and logs use the request as the server received it.
+  — later
 - Webhooks and callbacks declared inside webhooks and callbacks. — later
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
@@ -139,6 +139,9 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] `$url` as a client sent it to a trusted proxy
+  (`server.WithTrustedProxies`), from `Forwarded` or `X-Forwarded-*`
+  headers read back through the trusted hops. (5c83008, 02e6377)
 - [x] Link text with expressions embedded is given to arrays, objects and
   bodies, read as JSON or the parameter's style, and expressions inside a
   link's object and array constants are filled in, with a
