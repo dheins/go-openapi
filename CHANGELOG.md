@@ -4,6 +4,11 @@
 
 ### Added
 
+- `server.WithTrustedProxies(prefixes...)`: for requests from these
+  addresses, `$url` (`server.RequestURL`) is the URL the client sent to
+  the first trusted proxy, from the `Forwarded` or `X-Forwarded-Proto`,
+  `-Host`, `-Port` and `-Prefix` headers, read back through the trusted
+  hops so that a client's own values are not used.
 - Links give text with expressions embedded to array and object
   parameters (as JSON, or as the parameter's style writes one value) and
   to request bodies, and fill in expressions inside their object and

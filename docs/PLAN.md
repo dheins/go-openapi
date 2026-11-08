@@ -918,6 +918,20 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M50 – `$url` behind proxies ✅
+- [x] `server.WithTrustedProxies` and `Config.TrustedProxies`, read by
+  `server.RequestURL` through the request's context
+- [x] `Forwarded` (quoted strings, IPv6) and `X-Forwarded-For`, `-Proto`,
+  `-Host`, `-Port` and `-Prefix`, walked back through the trusted hops
+- [x] `FuzzForwarded`, in CI; a petserver callback behind a stand-in proxy
+
+**How it went**
+- *No generated code*: `Config.Handle` already wraps every route, so the
+  trusted proxies reach `RequestURL` in the context, as the operation does.
+- *Fuzzing paid*: it found a path prefix with a bad escape, and a bad port
+  that cleared the host it should have kept.
+- *Not done*: see [features.md](../features.md).
+
 ### M49 – Link text and constants ✅
 - [x] link text given to arrays and objects (JSON, or the style's text of
   one value), bodies and `content` parameters (JSON, or a text body's

@@ -1218,6 +1218,7 @@ credentials that are present and wrong are still rejected.
 | `server.WithMaxBodyBytes(n)` | request body limit (default 10 MiB) |
 | `server.WithErrorHandler(f)` | write errors yourself |
 | `server.WithLogger(l)` | where unexpected errors are logged (default `slog.Default()`) |
+| `server.WithTrustedProxies(prefixes...)` | read the forwarding headers of requests from these addresses for `$url` (`server.RequestURL`) |
 | `server.WithAccessLog(level)` | log every request: operation, route, status, duration, error |
 | `server.WithObserver(o...)` | be told when each request starts and ends, with its status, error and panic |
 | `server.WithMux(m)` | route with something other than a new `http.ServeMux` |
@@ -1763,8 +1764,17 @@ target, err := api.SubscribeStatusCallbackURL(ctx, req, resp)
 ```
 
 `server.RequestURL` uses https for a request over TLS and the request's
-`Host`; it does not trust `X-Forwarded-*` headers, so behind a proxy build
-such URLs yourself.
+`Host`. Behind a reverse proxy, trust it with
+`server.WithTrustedProxies(netip.MustParsePrefix("10.0.0.0/8"))`: for a
+request from a trusted address, `$url` is the URL the client sent to the
+first trusted proxy, with the scheme, host, port and path prefix of the
+RFC 7239 `Forwarded` header or, without it, of `X-Forwarded-Proto`,
+`-Host`, `-Port` and `-Prefix`. Each proxy appends to these headers, so
+the entries are read from the right while the address they came from
+(`for`, `X-Forwarded-For`) is trusted: a client's own values are never
+used, and obfuscated (`_hidden`) or `unknown` addresses are not trusted.
+A value that is not a scheme, host, port or path is ignored, and logged
+at debug level. The headers of other clients are not read at all.
 
 The sender is configured like a client, except that it has no base URL.
 It checks requests before sending them (`client.WithoutRequestValidation`
