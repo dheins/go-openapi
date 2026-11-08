@@ -886,6 +886,13 @@ func xmlNodeLiteral(n *ir.XMLNode) string {
 		add("Kind", strconv.Quote(n.Kind))
 	}
 	add("Type", strconv.Quote(n.Type))
+	if len(n.Scalars) > 0 {
+		scalars := make([]string, len(n.Scalars))
+		for i, s := range n.Scalars {
+			scalars[i] = strconv.Quote(s)
+		}
+		add("Scalars", "[]string{"+strings.Join(scalars, ", ")+"}")
+	}
 	if n.Wrapped {
 		add("Wrapped", "true")
 	}
@@ -901,6 +908,9 @@ func xmlNodeLiteral(n *ir.XMLNode) string {
 	}
 	if n.Values != nil {
 		add("Values", xmlNodeLiteral(n.Values))
+	}
+	if n.Additional != nil {
+		add("Additional", xmlNodeLiteral(n.Additional))
 	}
 	if n.Inline {
 		add("Inline", "true")

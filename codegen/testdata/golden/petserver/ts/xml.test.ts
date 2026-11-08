@@ -163,3 +163,18 @@ test("maps of arrays, unions of scalars and objects, additional properties", () 
   assert.throws(() => fromXML("<v><x/></v>", { name: "v", type: "union", scalars: ["boolean", "number"] }), /expected text/);
   assert.throws(() => toXML({ tags: { "a b": ["x"] } }, labels), /cannot be written/);
 });
+
+// What the Go server writes for these labels, in TestXMLGaps (labelsDoc).
+const labelsXML =
+  `<?xml version="1.0" encoding="UTF-8"?>\n` +
+  `<labels><name>a</name><tags><color>red</color><color>blue</color><size>L</size></tags><value>42</value><count>3</count></labels>`;
+
+test("the client writes and reads labels as the Go server does", async () => {
+  const { client, sent } = answering(labelsXML, true);
+  const body = { name: "a", tags: { color: ["red", "blue"], size: ["L"] }, value: 42, count: 3 };
+  const got = await client.putLabels({ body });
+  assert.deepEqual(got, { status: 200, body });
+  assert.equal(await sent[0]!.text(), labelsXML);
+  // An additional property of the wrong type fails validation.
+  await assert.rejects(client.putLabels({ body: { name: "a", count: -1 } }), /count/);
+});

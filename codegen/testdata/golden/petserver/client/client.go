@@ -1070,6 +1070,24 @@ func (c *Client) PutLines(ctx context.Context, req *api.PutLinesRequest) (api.Pu
 	return api.ReadPutLinesResponse(c.cfg, resp)
 }
 
+// PutLabels calls PUT /labels. A nil req sends no parameters or body.
+//
+// Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.
+func (c *Client) PutLabels(ctx context.Context, req *api.PutLabelsRequest) (api.PutLabelsResponse, error) {
+	if req == nil {
+		req = &api.PutLabelsRequest{}
+	}
+	hreq, err := api.NewPutLabelsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutLabelsResponse(c.cfg, resp)
+}
+
 // PlantTree calls POST /trees. A nil req sends no parameters or body.
 //
 // A recursive type as a form.

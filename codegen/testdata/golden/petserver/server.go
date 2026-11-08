@@ -66,6 +66,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "findOrders", Name: "FindOrders", Method: "GET", Path: "/orders"}, "/orders", api.HandleFindOrders(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "createOrder", Name: "CreateOrder", Method: "POST", Path: "/orders"}, "/orders", api.HandleCreateOrder(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putLines", Name: "PutLines", Method: "PUT", Path: "/orders/{id}/lines"}, "/orders/{p0}/lines", api.HandlePutLines(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "putLabels", Name: "PutLabels", Method: "PUT", Path: "/labels"}, "/labels", api.HandlePutLabels(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "plantTree", Name: "PlantTree", Method: "POST", Path: "/trees"}, "/trees", api.HandlePlantTree(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "public", Name: "Public", Method: "GET", Path: "/public"}, "/public", api.HandlePublic(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "subscribe", Name: "Subscribe", Method: "POST", Path: "/subscriptions"}, "/subscriptions", api.HandleSubscribe(cfg, h, sec))

@@ -148,6 +148,10 @@ type Handler interface {
 	CreateOrder(ctx context.Context, req *CreateOrderRequest) (CreateOrderResponse, error)
 	// PutLines handles PUT /orders/{id}/lines.
 	PutLines(ctx context.Context, req *PutLinesRequest) (PutLinesResponse, error)
+	// PutLabels handles PUT /labels.
+	//
+	// Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.
+	PutLabels(ctx context.Context, req *PutLabelsRequest) (PutLabelsResponse, error)
 	// PlantTree handles POST /trees.
 	//
 	// A recursive type as a form.
