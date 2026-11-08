@@ -1297,6 +1297,9 @@ export interface ParamSpec {
   /** How the value is written as XML, for XML content. */
   readonly xml?: XMLNode;
   readonly required?: boolean;
+  /** The value of the parameter when it is absent, which receivers give
+   * their handlers, as Go servers do. */
+  readonly default?: unknown;
   readonly schema: Schema;
 }
 
@@ -3879,6 +3882,9 @@ async function readRequest(cfg: ReceiverConfig, op: OperationSpec, request: Requ
       const v = paramOf(p, request, url, cookies, params, claimed);
       if (v !== undefined) {
         out[p.key] = v;
+      } else if (p.default !== undefined) {
+        // A copy, so that requests do not share it.
+        out[p.key] = structuredClone(p.default);
       }
     } catch (e) {
       issues.push({ in: p.in, parameter: p.name, pointer: "", message: e instanceof Error ? e.message : String(e) });
@@ -4458,4 +4464,438 @@ export function callbackUrl(spec: CallbackUrlSpec, req: object, resp?: object, u
     out += Array.isArray(v) && p.from === "request" ? v.map(text).join(",") : text(v);
   }
   return out;
+}
+
+// ---- Node http -------------------------------------------------------------
+
+/** What nodeHandler reads of a request of Node's http module (an
+ * IncomingMessage) or of Express, which fit it: its body is read as it
+ * arrives. */
+export interface NodeRequest extends AsyncIterable<Uint8Array> {
+  readonly method?: string | undefined;
+  readonly url?: string | undefined;
+  /** The URL before an Express router mounted below a path took it off. */
+  readonly originalUrl?: string | undefined;
+  /** The headers by lower-case name, as Node gives them. */
+  readonly headers: Readonly<Record<string, string | readonly string[] | undefined>>;
+  readonly socket: { readonly encrypted?: boolean | undefined; readonly remoteAddress?: string | undefined };
+  /** The path parameters an Express route matched. */
+  readonly params?: Readonly<Record<string, string>> | undefined;
+}
+
+/** What nodeHandler writes a response with: a ServerResponse of Node's
+ * http module, or of Express. */
+export interface NodeResponse {
+  writeHead(status: number, headers: Record<string, string | string[]>): unknown;
+  write(chunk: Uint8Array): boolean;
+  end(): unknown;
+  once(event: "drain" | "close", listener: () => void): unknown;
+  destroy(error?: Error): unknown;
+  readonly writableEnded: boolean;
+}
+
+/** How nodeHandler turns Node requests into fetch ones. */
+export interface NodeHandlerOptions {
+  /** The path parameters of a request by name, as they are in the URL;
+   * those of an Express route (req.params) by default. */
+  params?: (req: NodeRequest) => Readonly<Record<string, string>> | undefined;
+  /** Which proxies in front of the server to believe about the URL the
+   * client sent the request to (its $url): all (true), those of these
+   * addresses or prefixes ("10.0.0.0/8", "::1"; nodeHandler throws for
+   * others), or those an address is accepted by. For a request from a trusted proxy, the URL is read from
+   * Forwarded or X-Forwarded-Proto, -Host, -Port and -Prefix, walking back
+   * through the trusted hops, as a Go server's WithTrustedProxies does.
+   * None by default: the URL is the Host the request was sent with, over
+   * https if the connection is TLS. */
+  trustProxy?: boolean | readonly string[] | ((address: string) => boolean);
+  /** Told of a handler that rejects, which is answered 500, or of a
+   * response that cannot be written, whose connection is then closed;
+   * console.error by default. */
+  onError?: (error: unknown) => void;
+}
+
+/** Serves a fetch handler, such as a receiver's handlers, with Node's
+ * http module or Express: http.createServer(nodeHandler(handle)), or
+ * app.post("/hooks/:id", nodeHandler(handle)). The request's body
+ * streams to the handler, and the response's to the client as the
+ * handler writes it, waiting while the client is slow to read. The
+ * request's signal aborts when the client goes away. Put no body parser
+ * (such as express.json()) in front: it would read the body first. */
+export function nodeHandler(
+  handle: (request: Request, params?: Readonly<Record<string, string>>) => Promise<Response>,
+  options: NodeHandlerOptions = {},
+): (req: NodeRequest, res: NodeResponse) => void {
+  const onError = options.onError ?? ((e: unknown) => console.error(e));
+  const params = options.params ?? ((req: NodeRequest) => req.params);
+  const trusts = proxyTrust(options.trustProxy);
+  return (req, res) => {
+    void serveNode(handle, trusts, params, onError, req, res);
+  };
+}
+
+async function serveNode(
+  handle: (request: Request, params?: Readonly<Record<string, string>>) => Promise<Response>,
+  trusts: ((address: string) => boolean) | undefined,
+  params: (req: NodeRequest) => Readonly<Record<string, string>> | undefined,
+  onError: (error: unknown) => void,
+  req: NodeRequest,
+  res: NodeResponse,
+): Promise<void> {
+  const abort = new AbortController();
+  const conn = { closed: false, wake: undefined as (() => void) | undefined };
+  res.once("close", () => {
+    conn.closed = true;
+    if (!res.writableEnded) {
+      abort.abort(new Error("the client closed the connection"));
+    }
+    conn.wake?.();
+  });
+  let request: Request | undefined;
+  try {
+    request = nodeRequest(req, trusts, abort.signal);
+  } catch {
+    // A URL or header that fetch does not take: answered 400 below.
+  }
+  let response: Response;
+  if (request === undefined) {
+    response = problemResponse(400, "the request could not be read");
+  } else {
+    try {
+      response = await handle(request, params(req));
+    } catch (e) {
+      onError(e);
+      response = problemResponse(500, "the request could not be handled");
+    }
+  }
+  try {
+    await writeNode(response, req.method, res, conn);
+  } catch (e) {
+    onError(e);
+    res.destroy(e instanceof Error ? e : new Error(String(e)));
+  }
+}
+
+// nodeRequest returns the fetch request of req, its body read from req as
+// the handler reads it.
+function nodeRequest(req: NodeRequest, trusts: ((address: string) => boolean) | undefined, signal: AbortSignal): Request {
+  const method = (req.method ?? "GET").toUpperCase();
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    for (const x of v === undefined ? [] : typeof v === "string" ? [v] : v) {
+      headers.append(k, x);
+    }
+  }
+  const init: RequestInit = { method, headers, signal };
+  if (method !== "GET" && method !== "HEAD") {
+    const chunks = req[Symbol.asyncIterator]();
+    init.body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { value, done } = await chunks.next();
+        if (done) {
+          controller.close();
+        } else {
+          controller.enqueue(value);
+        }
+      },
+      async cancel() {
+        await chunks.return?.();
+      },
+    });
+    // A streamed body needs it, as the client's do.
+    Object.assign(init, { duplex: "half" });
+  }
+  return new Request(nodeUrl(req, trusts), init);
+}
+
+// nodeUrl returns the URL req was sent to: as the client sent it to the
+// first proxy trusts trusts, if it came through one, else by its Host.
+function nodeUrl(req: NodeRequest, trusts: ((address: string) => boolean) | undefined): string {
+  const path = req.originalUrl ?? req.url ?? "/";
+  let scheme = req.socket.encrypted === true ? "https" : "http";
+  let host = nodeHeader(req, "host") ?? "localhost";
+  const peer = req.socket.remoteAddress === undefined ? undefined : hostAddr(req.socket.remoteAddress);
+  if (trusts === undefined || peer === undefined || !trusts(peer)) {
+    return `${scheme}://${host}${path}`;
+  }
+  const hops = forwardedHops(req);
+  let used: Hop | undefined;
+  for (let i = hops.length - 1; i >= 0; i--) {
+    used = hops[i]!;
+    const from = hostAddr(used.from);
+    if (from === undefined || !trusts(from)) {
+      break;
+    }
+  }
+  if (used === undefined) {
+    return `${scheme}://${host}${path}`;
+  }
+  let prefix = "";
+  if (used.proto === "http" || used.proto === "https") {
+    scheme = used.proto;
+  }
+  if (used.host !== "" && validHost(used.host)) {
+    host = used.host;
+  }
+  if (/^[0-9]+$/.test(used.port)) {
+    const name = host.startsWith("[") ? host.slice(0, host.indexOf("]") + 1) : host.split(":")[0]!;
+    if (validHost(`${name}:${used.port}`)) {
+      host = `${name}:${used.port}`;
+    }
+  }
+  if (validPrefix(used.prefix)) {
+    prefix = used.prefix.replace(/\/$/, "");
+  }
+  return `${scheme}://${host}${prefix}${path}`;
+}
+
+// nodeHeader returns the value of the header name of req, or undefined.
+function nodeHeader(req: NodeRequest, name: string): string | undefined {
+  const v = req.headers[name];
+  return v === undefined ? undefined : typeof v === "string" ? v : v.join(", ");
+}
+
+/** What a proxy says about the request it received: from whom, and the
+ * scheme, host, port and path prefix it was sent to; "" if not said. */
+interface Hop {
+  from: string;
+  proto: string;
+  host: string;
+  port: string;
+  prefix: string;
+}
+
+// forwardedHops returns the hops the forwarding headers of req describe,
+// in order: the elements of Forwarded or, without it, the entries of
+// X-Forwarded-For with the X-Forwarded-Proto, -Host, -Port and -Prefix
+// entries at the same place from the right (a header with fewer entries
+// gives its first to the hops it has none for).
+function forwardedHops(req: NodeRequest): Hop[] {
+  const list = (name: string) => {
+    const v = req.headers[name];
+    const lines = v === undefined ? [] : typeof v === "string" ? [v] : v;
+    return lines.flatMap((line) => splitQuoted(line, ",").map((e) => e.trim()).filter((e) => e !== ""));
+  };
+  const fwd = list("forwarded");
+  if (fwd.length > 0) {
+    return fwd.map((el) => {
+      const hop: Hop = { from: "", proto: "", host: "", port: "", prefix: "" };
+      for (const pair of splitQuoted(el, ";")) {
+        const eq = pair.indexOf("=");
+        const k = (eq < 0 ? pair : pair.slice(0, eq)).trim().toLowerCase();
+        const v = eq < 0 ? "" : unquoteToken(pair.slice(eq + 1).trim());
+        if (k === "for") {
+          hop.from = v;
+        } else if (k === "proto") {
+          hop.proto = v.toLowerCase();
+        } else if (k === "host") {
+          hop.host = v;
+        }
+      }
+      return hop;
+    });
+  }
+  const from = list("x-forwarded-for");
+  const [proto, host, port, prefix] = ["x-forwarded-proto", "x-forwarded-host", "x-forwarded-port", "x-forwarded-prefix"].map(list) as [string[], string[], string[], string[]];
+  let n = from.length;
+  if (n === 0 && proto.length + host.length + port.length + prefix.length > 0) {
+    // Without X-Forwarded-For, the headers describe one hop, from whom
+    // is not said.
+    n = 1;
+  }
+  // right is the place of the hop from the right.
+  const at = (l: readonly string[], right: number) => (l.length === 0 ? "" : right < l.length ? l[l.length - 1 - right]! : l[0]!);
+  return Array.from({ length: n }, (_, i) => {
+    const right = n - 1 - i;
+    return { from: at(from, right), proto: at(proto, right).toLowerCase(), host: at(host, right), port: at(port, right), prefix: at(prefix, right) };
+  });
+}
+
+// splitQuoted splits s at sep outside quoted strings.
+function splitQuoted(s: string, sep: string): string[] {
+  const out: string[] = [];
+  let start = 0;
+  let quoted = false;
+  for (let i = 0; i < s.length; i++) {
+    if (quoted && s[i] === "\\") {
+      i++;
+    } else if (s[i] === '"') {
+      quoted = !quoted;
+    } else if (s[i] === sep && !quoted) {
+      out.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(s.slice(start));
+  return out;
+}
+
+// unquoteToken returns v, a token or quoted string, as its text.
+function unquoteToken(v: string): string {
+  if (v.length < 2 || !v.startsWith('"') || !v.endsWith('"')) {
+    return v;
+  }
+  return v.slice(1, -1).replace(/\\(.)/g, "$1");
+}
+
+// validHost reports whether h is a host, with an optional port, that a
+// URL can hold.
+function validHost(h: string): boolean {
+  if (h === "" || /[/?#@ \t\\]/.test(h)) {
+    return false;
+  }
+  try {
+    return new URL(`http://${h}`).hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+// validPrefix reports whether p is a path a proxy may strip: absolute,
+// with valid escapes and no query or fragment.
+function validPrefix(p: string): boolean {
+  if (!p.startsWith("/") || p.startsWith("//") || /[?# \t]/.test(p)) {
+    return false;
+  }
+  try {
+    decodeURI(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// proxyTrust returns whether to trust a proxy at an address, by option,
+// or undefined for none. It throws for an entry of a list that is no
+// address or prefix.
+function proxyTrust(trust: NodeHandlerOptions["trustProxy"]): ((address: string) => boolean) | undefined {
+  if (trust === undefined || trust === false) {
+    return undefined;
+  }
+  if (trust === true) {
+    return () => true;
+  }
+  if (typeof trust === "function") {
+    return trust;
+  }
+  const prefixes = trust.map((t) => {
+    const slash = t.indexOf("/");
+    const addr = slash < 0 ? t : t.slice(0, slash);
+    const ip = ipBytes(addr);
+    if (ip === undefined) {
+      throw new Error(`trustProxy: ${t} is not an address or prefix`);
+    }
+    // An IPv4 prefix counts the bits of the address mapped to IPv6.
+    const v4 = /^[0-9.]+$/.test(addr);
+    const bits = slash < 0 ? 128 : Number(t.slice(slash + 1)) + (v4 ? 96 : 0);
+    if (!Number.isInteger(bits) || bits < 0 || bits > 128) {
+      throw new Error(`trustProxy: ${t} is not an address or prefix`);
+    }
+    return { ip, bits };
+  });
+  return (address) => {
+    const ip = ipBytes(address);
+    return ip !== undefined && prefixes.some((p) => sameBits(ip, p.ip, p.bits));
+  };
+}
+
+// hostAddr returns the IP address of s, an address with or without a
+// port, as remoteAddress and the for parameter give it, or undefined.
+function hostAddr(s: string): string | undefined {
+  let a = s;
+  if (a.startsWith("[")) {
+    a = a.slice(1, a.indexOf("]") < 0 ? a.length : a.indexOf("]"));
+  } else if (/^[0-9.]+:[0-9]+$/.test(a)) {
+    a = a.slice(0, a.indexOf(":"));
+  }
+  return ipBytes(a) === undefined ? undefined : a;
+}
+
+// ipBytes returns the 16 bytes of an IPv6 address, or of an IPv4 one
+// mapped to IPv6, as Go's netip unmaps them; undefined if s is neither.
+function ipBytes(s: string): number[] | undefined {
+  if (/^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(s)) {
+    const parts = s.split(".").map(Number);
+    return parts.some((p) => p > 255) ? undefined : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, ...parts];
+  }
+  let v6 = s.split("%")[0]!;
+  if (!v6.includes(":")) {
+    return undefined;
+  }
+  const last = v6.lastIndexOf(":");
+  if (v6.slice(last + 1).includes(".")) {
+    // An IPv4 tail, as two groups.
+    const tail = ipBytes(v6.slice(last + 1));
+    if (tail === undefined) {
+      return undefined;
+    }
+    const hex = (i: number) => ((tail[i]! << 8) | tail[i + 1]!).toString(16);
+    v6 = `${v6.slice(0, last + 1)}${hex(12)}:${hex(14)}`;
+  }
+  const halves = v6.split("::");
+  if (halves.length > 2) {
+    return undefined;
+  }
+  const groups = (h: string) => (h === "" ? [] : h.split(":"));
+  const head = groups(halves[0]!);
+  const rest = halves.length === 2 ? groups(halves[1]!) : [];
+  const missing = 8 - head.length - rest.length;
+  if ((halves.length === 2 ? missing < 1 : missing !== 0) || [...head, ...rest].some((g) => !/^[0-9a-fA-F]{1,4}$/.test(g))) {
+    return undefined;
+  }
+  const all = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...rest];
+  return all.flatMap((g) => {
+    const n = parseInt(g, 16);
+    return [n >> 8, n & 255];
+  });
+}
+
+// sameBits reports whether the first bits of a and b are the same.
+function sameBits(a: readonly number[], b: readonly number[], bits: number): boolean {
+  for (let i = 0; i < 16 && bits > 0; i++, bits -= 8) {
+    const mask = bits >= 8 ? 255 : (0xff << (8 - bits)) & 255;
+    if ((a[i]! & mask) !== (b[i]! & mask)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// writeNode writes response to res, streaming its body, but not for a
+// HEAD request: waiting while res is full, and stopping when the client
+// is gone.
+async function writeNode(response: Response, method: string | undefined, res: NodeResponse, conn: { closed: boolean; wake: (() => void) | undefined }): Promise<void> {
+  const headers: Record<string, string | string[]> = {};
+  response.headers.forEach((v, k) => {
+    if (k !== "set-cookie") {
+      headers[k] = v;
+    }
+  });
+  const cookies = response.headers.getSetCookie();
+  if (cookies.length > 0) {
+    headers["set-cookie"] = cookies;
+  }
+  res.writeHead(response.status, headers);
+  if (response.body === null || method?.toUpperCase() === "HEAD") {
+    await response.body?.cancel();
+    res.end();
+    return;
+  }
+  const reader = response.body.getReader();
+  for (;;) {
+    if (conn.closed) {
+      await reader.cancel();
+      return;
+    }
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (!res.write(value) && !conn.closed) {
+      await new Promise<void>((resolve) => {
+        conn.wake = resolve;
+        res.once("drain", resolve);
+      });
+    }
+  }
+  res.end();
 }

@@ -21,6 +21,7 @@ import {
   type Received,
   type Schema,
 } from "./runtime.ts";
+import { handlePetPhotoWebhook } from "./receiver.ts";
 
 const int: Schema = { kind: "integer" };
 const str: Schema = { kind: "string" };
@@ -128,6 +129,51 @@ test("a missing or invalid parameter is answered 400 with where it is", async ()
   );
   const again = await receive(rcfg, op, async () => ({ status: 204 }), new Request("http://hooks.test/?n=0"));
   assert.deepEqual(((await again.json()) as { errors: unknown[] }).errors, [{ in: "query", parameter: "n", detail: "must be >= 1" }]);
+});
+
+test("absent parameters get their defaults, as a Go server gives them", async () => {
+  const tags = ["a"];
+  const op: OperationSpec = {
+    method: "GET",
+    path: "",
+    params: [
+      param({ key: "size", in: "query", default: "small", schema: { kind: "string", enum: ["small", "large"] } }),
+      param({ key: "quality", name: "X-Quality", in: "header", default: 80, schema: { kind: "integer", minimum: 1 } }),
+      param({ key: "tags", in: "cookie", shape: "array", default: tags, schema: { kind: "array", items: str } }),
+      param({ key: "note", in: "query", schema: str }),
+    ],
+    responses: noContent,
+  };
+  const got: Record<string, unknown>[] = [];
+  const rcfg = receiverConfig({}, undefined);
+  const handle = async (r: never) => {
+    got.push(r);
+    return { status: 204 };
+  };
+  assert.equal((await receive(rcfg, op, handle, new Request("http://hooks.test/"))).status, 204);
+  assert.equal((await receive(rcfg, op, handle, new Request("http://hooks.test/?size=large", { headers: { "X-Quality": "5", Cookie: "tags=b" } }))).status, 204);
+  assert.deepEqual(got, [
+    { size: "small", quality: 80, tags: ["a"] },
+    { size: "large", quality: 5, tags: ["b"] },
+  ]);
+  // Each request gets a copy of the default.
+  assert.notEqual(got[0]!["tags"], tags);
+  // A value given is checked; a default is the document's.
+  assert.equal((await receive(rcfg, op, handle, new Request("http://hooks.test/?size=huge"))).status, 400);
+});
+
+test("the generated receiver applies the document's defaults", async () => {
+  let got: Record<string, unknown> | undefined;
+  const photo = handlePetPhotoWebhook({
+    async petPhotoWebhook(req) {
+      got = req as unknown as Record<string, unknown>;
+      return { status: 200, xStored: 1, body: {} };
+    },
+  });
+  const resp = await photo(new Request("http://hooks.test/?petId=3", { method: "POST", headers: { "Content-Type": "image/png" }, body: new Uint8Array([1]) }));
+  assert.equal(resp.status, 200);
+  assert.equal(got?.["size"], "small");
+  assert.equal(got?.["xQuality"], 80);
 });
 
 const body = (media: NonNullable<OperationSpec["body"]>["media"]): OperationSpec => ({ method: "POST", path: "", params: [], body: { required: true, media }, responses: noContent });

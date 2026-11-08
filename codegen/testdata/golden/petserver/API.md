@@ -1417,6 +1417,8 @@ The API sends a pet's new photo, as a form or as the image itself.
 | --- | --- | --- | --- | --- |
 | `petId` | query | integer | yes |  |
 | `X-Tags` | header | array of string | no |  |
+| `size` | query | string | no | enum: `"small"`, `"large"`, default: `"small"` |
+| `X-Quality` | header | integer | no | minimum: `1`, default: `80` |
 
 **Request body** (required)
 

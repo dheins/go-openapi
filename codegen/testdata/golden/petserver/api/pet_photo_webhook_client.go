@@ -15,6 +15,10 @@ var petPhotoWebhookPetIDParam = server.Param{Name: "petId", Style: "form", Explo
 
 var petPhotoWebhookXTagsParam = server.Param{Name: "X-Tags", Style: "simple", Explode: false, Shape: server.Array}
 
+var petPhotoWebhookSizeParam = server.Param{Name: "size", Style: "form", Explode: true, Shape: server.Scalar}
+
+var petPhotoWebhookXQualityParam = server.Param{Name: "X-Quality", Style: "simple", Explode: false, Shape: server.Scalar}
+
 var petPhotoWebhookRequestMultipartProperties = server.Property{Type: "object", Properties: map[string]server.Property{"photo": {Type: "file"}, "meta": {Type: "object", Properties: map[string]server.Property{"width": {Type: "integer"}}}}}
 
 // NewPetPhotoWebhookRequest builds the HTTP request of the webhook
@@ -22,6 +26,18 @@ var petPhotoWebhookRequestMultipartProperties = server.Property{Type: "object", 
 func NewPetPhotoWebhookRequest(ctx context.Context, c *client.Config, target string, req *PetPhotoWebhookRequest) (*http.Request, error) {
 	if c.ValidateRequests {
 		var b server.Binder
+		if !client.IsZero(req.Size) {
+			var errs oapi.ValidationErrors
+			errs.Nested("", req.Size.Validate())
+			b.Param("query", "size", errs.Err())
+		}
+		if !client.IsZero(req.XQuality) {
+			var errs oapi.ValidationErrors
+			if req.XQuality < 1 {
+				errs.Add("", "must be at least 1")
+			}
+			b.Param("header", "X-Quality", errs.Err())
+		}
 		{
 			var errs oapi.ValidationErrors
 			errs.Nested("", req.Body.Validate())
@@ -35,6 +51,12 @@ func NewPetPhotoWebhookRequest(ctx context.Context, c *client.Config, target str
 	r.QueryParam(petPhotoWebhookPetIDParam, req.PetID)
 	if req.XTags.Set {
 		r.HeaderParam(petPhotoWebhookXTagsParam, req.XTags.Value)
+	}
+	if !client.IsZero(req.Size) {
+		r.QueryParam(petPhotoWebhookSizeParam, req.Size)
+	}
+	if !client.IsZero(req.XQuality) {
+		r.HeaderParam(petPhotoWebhookXQualityParam, req.XQuality)
 	}
 	mediaType := req.ContentType
 	if mediaType == "" {

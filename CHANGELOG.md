@@ -4,6 +4,12 @@
 
 ### Added
 
+- `nodeHandler(handle, options)` serves a TypeScript receiver's fetch
+  handlers, or any other, with Node's `http` module or Express: bodies
+  stream both ways with backpressure, the request aborts when the client
+  goes away, and Express's `req.params` are the path parameters.
+  `trustProxy` reads the client's URL from `Forwarded` or `X-Forwarded-*`
+  headers of trusted proxies, as `server.WithTrustedProxies` does.
 - `middleware.Validate` checks text request bodies against their schemas,
   and the items of JSON Lines and server-sent event bodies as the handler
   reads them: reading ends at the first invalid item, or line longer than
@@ -593,6 +599,9 @@
 
 ### Changed
 
+- TypeScript receivers give an absent parameter that has a `default` its
+  default, as Go servers do, rather than leaving it undefined. Parameter
+  specs carry `default`.
 - `middleware.Validate` no longer reads JSON Lines and event stream
   request bodies before the handler: the handler reads them as they
   arrive, each line with its line end, and with `RejectResponses` an

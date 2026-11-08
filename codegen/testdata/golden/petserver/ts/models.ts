@@ -382,6 +382,17 @@ export interface ConfirmAdoptionCallbackRequestBody {
 /** The schema of ConfirmAdoptionCallbackRequestBody, for validation and encoding. */
 export const ConfirmAdoptionCallbackRequestBodySchema: $Schema = { kind: "object", properties: { receiptUrl: { schema: { kind: "string", format: "uri" }, required: true }, note: { schema: { kind: "string" } } } };
 
+export type PetPhotoWebhookSize = "small" | "large";
+
+/** The values of PetPhotoWebhookSize. */
+export const PetPhotoWebhookSize = {
+  Small: "small",
+  Large: "large",
+} as const;
+
+/** The schema of PetPhotoWebhookSize, for validation and encoding. */
+export const PetPhotoWebhookSizeSchema: $Schema = { kind: "string", enum: ["small", "large"] };
+
 export interface PetPhotoWebhookRequestBody {
   photo: Blob;
   meta?: PetPhotoWebhookRequestBodyMeta;

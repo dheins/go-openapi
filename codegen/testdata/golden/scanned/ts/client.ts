@@ -18,7 +18,7 @@ export interface ListPetsRequest {
   /**
    * Limit is the most pets to return.
    *
-   * The server's default is 20.
+   * The server's default is 20, which receivers set when it is absent.
    */
   limit?: number;
   /** Kinds are the kinds to return. */
@@ -33,7 +33,7 @@ export type ListPetsResponse =
 const listPetsSpec: OperationSpec = {
   method: "GET",
   path: "/pets",
-  params: [{ key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "kind", name: "kind", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: $ref(() => $m.KindSchema) } }],
+  params: [{ key: "limit", name: "limit", in: "query", style: "form", explode: true, shape: "scalar", default: 20, schema: { kind: "integer", minimum: 1, maximum: 100 } }, { key: "kind", name: "kind", in: "query", style: "form", explode: false, shape: "array", schema: { kind: "array", items: $ref(() => $m.KindSchema) } }],
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: $ref(() => $m.PetSchema) }, headers: [{ key: "xTotal", name: "X-Total", required: true, schema: { kind: "integer" } }] }, { status: "default", mediaType: "application/problem+json", kind: "json", schema: $ref(() => $m.ProblemSchema) }],
 };
 

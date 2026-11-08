@@ -167,7 +167,8 @@ var tsRuntimeExports = []struct {
 	{"InvalidRequestError", false, false}, {"UnexpectedResponseError", false, false}, {"InvalidResponseError", false, false},
 	{"NoCredentialsError", false, false}, {"validate", false, false}, {"encode", false, false}, {"registerFormat", false, false},
 	{"ReceiverOptions", true, true}, {"Received", true, true}, {"CredentialCheck", true, true}, {"BasicCheck", true, true},
-	{"CertificateCheck", true, true}, {"MissingValueError", false, true},
+	{"CertificateCheck", true, true}, {"MissingValueError", false, true}, {"nodeHandler", false, true},
+	{"NodeHandlerOptions", true, true}, {"NodeRequest", true, true}, {"NodeResponse", true, true},
 }
 
 func (g *tsGen) index(hasClient, hasReceiver bool) (string, error) {

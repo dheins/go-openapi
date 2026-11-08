@@ -49,6 +49,36 @@ func HandlePetPhotoWebhook(c *server.Config, h WebhookHandler) http.Handler {
 				req.XTags = oapi.Some(v)
 			}
 		}
+		if vals, ok, err := petPhotoWebhookSizeParam.QueryValues(query); err != nil {
+			b.Param("query", "size", err)
+		} else if ok {
+			if v, err := server.ParseScalar[model.PetPhotoWebhookSize](vals.Items); err != nil {
+				b.Param("query", "size", err)
+			} else {
+				req.Size = v
+				var errs oapi.ValidationErrors
+				errs.Nested("", req.Size.Validate())
+				b.Param("query", "size", errs.Err())
+			}
+		} else if err := oapi.Decode([]byte("\"small\""), &req.Size); err != nil {
+			b.Param("query", "size", err)
+		}
+		if vals, ok, err := petPhotoWebhookXQualityParam.HeaderValues(r.Header); err != nil {
+			b.Param("header", "X-Quality", err)
+		} else if ok {
+			if v, err := server.ParseScalar[int64](vals.Items); err != nil {
+				b.Param("header", "X-Quality", err)
+			} else {
+				req.XQuality = v
+				var errs oapi.ValidationErrors
+				if req.XQuality < 1 {
+					errs.Add("", "must be at least 1")
+				}
+				b.Param("header", "X-Quality", errs.Err())
+			}
+		} else if err := oapi.Decode([]byte("80"), &req.XQuality); err != nil {
+			b.Param("header", "X-Quality", err)
+		}
 		if body, mediaType, ok := c.ReadBody(w, r, &b, []string{"multipart/form-data", "image/png"}, true); ok {
 			req.ContentType = mediaType
 			switch mediaType {

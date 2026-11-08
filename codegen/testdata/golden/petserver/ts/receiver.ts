@@ -60,6 +60,10 @@ const sendReceiptCallbackSpec: OperationSpec = {
 export interface PetPhotoWebhookRequest {
   petId: number;
   xTags?: string[];
+  /** The server's default is "small", which receivers set when it is absent. */
+  size?: $m.PetPhotoWebhookSize;
+  /** The server's default is 80, which receivers set when it is absent. */
+  xQuality?: number;
   body?: $m.PetPhotoWebhookRequestBody;
   binaryBody?: Blob;
   /** The media type the body was sent as. */
@@ -73,7 +77,7 @@ export type PetPhotoWebhookResponse =
 const petPhotoWebhookSpec: OperationSpec = {
   method: "POST",
   path: "",
-  params: [{ key: "petId", name: "petId", in: "query", style: "form", explode: true, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "xTags", name: "X-Tags", in: "header", style: "simple", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }],
+  params: [{ key: "petId", name: "petId", in: "query", style: "form", explode: true, shape: "scalar", required: true, schema: { kind: "integer" } }, { key: "xTags", name: "X-Tags", in: "header", style: "simple", explode: false, shape: "array", schema: { kind: "array", items: { kind: "string" } } }, { key: "size", name: "size", in: "query", style: "form", explode: true, shape: "scalar", default: "small", schema: $ref(() => $m.PetPhotoWebhookSizeSchema) }, { key: "xQuality", name: "X-Quality", in: "header", style: "simple", explode: false, shape: "scalar", default: 80, schema: { kind: "integer", minimum: 1 } }],
   body: { required: true, media: [{ mediaType: "multipart/form-data", kind: "multipart", key: "body", schema: $ref(() => $m.PetPhotoWebhookRequestBodySchema) }, { mediaType: "image/png", kind: "binary", key: "binaryBody", schema: { kind: "string", format: "byte" } }] },
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: $ref(() => $m.PetPhotoWebhook200ResponseBodySchema), headers: [{ key: "xStored", name: "X-Stored", required: true, schema: { kind: "integer" } }] }],
 };
