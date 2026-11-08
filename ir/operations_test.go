@@ -626,19 +626,30 @@ paths:
             application/atom+xml:
               schema: {type: array, items: {$ref: "#/components/schemas/Book"}}
             text/xml: {}
-  /bad:
+  /more:
     post:
-      operationId: bad
+      operationId: more
       requestBody:
         content:
-          application/xml: {schema: {type: object, additionalProperties: {type: array, items: {type: integer}}}}
-          application/json: {schema: {type: object, additionalProperties: {type: array, items: {type: integer}}}}
+          application/xml: {schema: {$ref: "#/components/schemas/Labels"}}
       responses:
         "200":
           description: ok
           content:
             application/xml: {schema: {$ref: "#/components/schemas/Value"}}
-            application/json: {schema: {$ref: "#/components/schemas/Value"}}
+  /bad:
+    post:
+      operationId: bad
+      requestBody:
+        content:
+          application/xml: {schema: {type: object, additionalProperties: {type: array, items: {type: array, items: {type: integer}}}}}
+          application/json: {schema: {type: object, additionalProperties: {type: array, items: {type: integer}}}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/xml: {schema: {$ref: "#/components/schemas/Listed"}}
+            application/json: {schema: {$ref: "#/components/schemas/Listed"}}
 components:
   schemas:
     Book:
@@ -647,7 +658,15 @@ components:
         isbn: {type: string, xml: {attribute: true}}
         authors: {type: array, items: {type: string, xml: {name: author}}, xml: {wrapped: true}}
     Value:
-      oneOf: [{type: string}, {$ref: "#/components/schemas/Book"}]
+      oneOf: [{type: string}, {type: integer}, {$ref: "#/components/schemas/Book"}]
+    Listed:
+      oneOf: [{type: string}, {type: array, items: {type: string}}]
+    Labels:
+      type: object
+      properties:
+        name: {type: string}
+        tags: {type: object, additionalProperties: {type: array, items: {type: string}}}
+      additionalProperties: {type: integer}
 `, Options{Operations: true})
 	ok := operationNamed(t, m, "Ok")
 	book := ok.Body.Media[0].XML
@@ -667,6 +686,26 @@ components:
 		t.Errorf("list shape = %+v", list)
 	}
 
+	// A map of arrays has an element per item, named by its key; an
+	// object's additional properties are typed; a union of a string, an
+	// integer and an object is all three.
+	more := operationNamed(t, m, "More")
+	labels := more.Body.Media[0].XML
+	if labels == nil {
+		t.Fatalf("no Labels shape: %+v", m.Warnings)
+	}
+	tags := labels.Properties[1].Node
+	if tags.Type != "map" || tags.Values.Type != "array" || tags.Values.Wrapped || tags.Values.Items.Name != "" || tags.Values.Items.Type != "string" {
+		t.Errorf("tags = %+v, values %+v", tags, tags.Values)
+	}
+	if a := labels.Additional; a == nil || a.Type != "integer" || a.Name != "" {
+		t.Errorf("additional = %+v", a)
+	}
+	value := more.Responses[0].XML
+	if value == nil || value.Type != "union" || strings.Join(value.Scalars, " ") != "string integer" || len(value.Properties) != 2 {
+		t.Errorf("Value = %+v", value)
+	}
+
 	bad := operationNamed(t, m, "Bad")
 	if len(bad.Body.Media) != 1 || bad.Body.Media[0].MediaType != "application/json" || len(bad.Responses) != 1 {
 		t.Errorf("bad: media %+v, responses %+v", bad.Body.Media, bad.Responses)
@@ -675,8 +714,8 @@ components:
 	for _, w := range m.Warnings {
 		all += w.Message + "\n"
 	}
-	for _, want := range []string{"maps of arrays cannot be written as XML; application/xml is answered with 415",
-		"Value has a variant that is not an object of its own, or contains the union inside itself, which cannot be written as XML; response 200 of type application/xml cannot be returned"} {
+	for _, want := range []string{"arrays of arrays cannot be written as XML; application/xml is answered with 415",
+		"Listed has a variant that is not an object of its own, a string, a number or a boolean, or contains the union inside itself, which cannot be written as XML; response 200 of type application/xml cannot be returned"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no warning %q in:\n%s", want, all)
 		}
