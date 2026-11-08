@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -221,6 +222,48 @@ func TestCallbackURLsOfResponses(t *testing.T) {
 	created := api.Subscribe201JSONResponse{Body: model.Subscribe201ResponseBody{ID: "s1"}}
 	if _, err := api.SubscribeMovedCallbackURL(ctx, req, created); err == nil || !strings.Contains(err.Error(), "$url is not set") {
 		t.Errorf("outside a request: %v", err)
+	}
+}
+
+// TestCallbackURLBehindProxy checks $url behind a proxy: the forwarding
+// headers of a trusted one give the URL the client sent to it, and those
+// of others, or of a client, are not read.
+func TestCallbackURLBehindProxy(t *testing.T) {
+	ctx := context.Background()
+	// The client stands in for a proxy on this machine, which appends to
+	// what the client sent itself: the leftmost values are the client's.
+	forwarded := []client.Option{
+		client.WithHeader("X-Forwarded-For", "10.1.1.1, 203.0.113.9"),
+		client.WithHeader("X-Forwarded-Host", "evil.example, api.example.com"),
+		client.WithHeader("X-Forwarded-Proto", "https"),
+		client.WithHeader("X-Forwarded-Prefix", "/public"),
+	}
+	for _, c := range []struct {
+		name string
+		opts []server.Option
+		want func(base string) string
+	}{
+		{"a trusted proxy", []server.Option{server.WithTrustedProxies(netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128"))},
+			func(string) string {
+				return "https://api.example.com/public/v1/subscriptions/moved?to=/subscriptions/s1"
+			}},
+		{"no trusted proxies", nil, func(base string) string { return base + "/v1/subscriptions/moved?to=/subscriptions/s1" }},
+		{"another proxy", []server.Option{server.WithTrustedProxies(netip.MustParsePrefix("10.0.0.0/8"))},
+			func(base string) string { return base + "/v1/subscriptions/moved?to=/subscriptions/s1" }},
+	} {
+		st := newStore()
+		srv := httptest.NewServer(newServer(st, append([]server.Option{server.WithLogger(slog.New(slog.DiscardHandler))}, c.opts...)...))
+		cl, err := newClient(petclient.Credentials{}, append([]client.Option{client.WithBaseURL(srv.URL + "/v1")}, forwarded...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cl.Subscribe(ctx, &api.SubscribeRequest{Body: model.SubscribeRequestBody{URL: "https://hooks.example.com"}}); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := st.seen["SubscribeURLs"].([]string)[1], c.want(srv.URL); got != want {
+			t.Errorf("%s: moved URL = %s, want %s", c.name, got, want)
+		}
+		srv.Close()
 	}
 }
 
