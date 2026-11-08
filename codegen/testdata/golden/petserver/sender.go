@@ -122,6 +122,44 @@ func (s *Sender) SendReceiptCallback(ctx context.Context, target string, req *ap
 	return api.ReadSendReceiptCallbackResponse(s.cfg, resp)
 }
 
+// PetPhotoWebhook sends the webhook "petPhoto" (POST) to target. A nil req
+// sends no parameters or body.
+//
+// The API sends a pet's new photo, as a form or as the image itself.
+func (s *Sender) PetPhotoWebhook(ctx context.Context, target string, req *api.PetPhotoWebhookRequest) (api.PetPhotoWebhookResponse, error) {
+	if req == nil {
+		req = &api.PetPhotoWebhookRequest{}
+	}
+	hreq, err := api.NewPetPhotoWebhookRequest(ctx, s.cfg, target, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPetPhotoWebhookResponse(s.cfg, resp)
+}
+
+// PetFeedWebhook sends the webhook "petFeed" (POST) to target. A nil req
+// sends no parameters or body.
+//
+// The API streams the pets it adds; the consumer answers with an event per pet as it reads them.
+func (s *Sender) PetFeedWebhook(ctx context.Context, target string, req *api.PetFeedWebhookRequest) (api.PetFeedWebhookResponse, error) {
+	if req == nil {
+		req = &api.PetFeedWebhookRequest{}
+	}
+	hreq, err := api.NewPetFeedWebhookRequest(ctx, s.cfg, target, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPetFeedWebhookResponse(s.cfg, resp)
+}
+
 // SubscribeStatusCallback sends the callback "status" of Subscribe (POST
 // {$request.body#/url}/subscriptions/{$response.body#/id}?status={$statusCode})
 // to target. A nil req sends no parameters or body.

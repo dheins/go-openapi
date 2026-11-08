@@ -155,7 +155,7 @@ test("form, multipart, text, binary and XML bodies are read", async () => {
     { mediaType: "application/x-www-form-urlencoded", kind: "form", key: "form", schema: form },
     { mediaType: "multipart/form-data", kind: "multipart", key: "upload", schema: upload },
     { mediaType: "text/plain", kind: "text", key: "text", schema: str },
-    { mediaType: "application/octet-stream", kind: "binary", key: "bytes", schema: { kind: "any" } },
+    { mediaType: "application/octet-stream", kind: "binary", key: "bytes", schema: { kind: "string", format: "byte" } },
     { mediaType: "application/xml", kind: "xml", key: "xml", schema: point, xml: { name: "point", type: "object", properties: [{ name: "x", node: { name: "x", type: "integer" } }, { name: "y", node: { name: "y", type: "integer" } }] } },
   ]);
   const f = await roundTrip(op, { form: { name: "Rex", tags: ["a", "b"], at: { x: 1, y: 2 } } });

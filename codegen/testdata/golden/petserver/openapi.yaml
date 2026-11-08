@@ -1456,6 +1456,70 @@ webhooks:
                       responses:
                         "204":
                           description: Received.
+  petPhoto:
+    post:
+      description: The API sends a pet's new photo, as a form or as the image itself.
+      parameters:
+        - name: petId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: X-Tags
+          in: header
+          schema:
+            type: array
+            items:
+              type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                meta:
+                  type: object
+                  properties:
+                    width:
+                      type: integer
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Stored.
+          headers:
+            X-Stored:
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  size:
+                    type: integer
+  petFeed:
+    post:
+      description: The API streams the pets it adds; the consumer answers with an event per pet as it reads them.
+      requestBody:
+        required: true
+        content:
+          application/jsonl:
+            itemSchema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "200":
+          description: An event per pet.
+          content:
+            text/event-stream: {}
 components:
   schemas:
     Order:

@@ -2414,8 +2414,9 @@ function checkRequest(op: OperationSpec, req: Values): void {
     if (given.length === 0 && op.body.required) {
       issues.push({ in: "body", pointer: "", message: "the request body is missing" });
     }
-    // The items of a stream are checked as they are written.
-    for (const m of given.filter((m, i, all) => all.findIndex((n) => n.key === m.key) === i && m.kind !== "jsonl" && m.kind !== "sse" && m.kind !== "partstream")) {
+    // The items of a stream are checked as they are written, and a binary
+    // body is its bytes, whatever its schema says of a string.
+    for (const m of given.filter((m, i, all) => all.findIndex((n) => n.key === m.key) === i && !["jsonl", "sse", "partstream", "binary"].includes(m.kind))) {
       const found = m.kind === "parts" ? partsIssues(m.parts!, req[m.key]) : validate(m.schema, req[m.key], "request");
       for (const i of found) {
         issues.push({ ...i, in: "body" });

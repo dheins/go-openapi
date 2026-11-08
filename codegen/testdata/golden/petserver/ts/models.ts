@@ -379,3 +379,25 @@ export interface ConfirmAdoptionCallbackRequestBody {
 
 /** The schema of ConfirmAdoptionCallbackRequestBody, for validation and encoding. */
 export const ConfirmAdoptionCallbackRequestBodySchema: $Schema = { kind: "object", properties: { receiptUrl: { schema: { kind: "string", format: "uri" }, required: true }, note: { schema: { kind: "string" } } } };
+
+export interface PetPhotoWebhookRequestBody {
+  photo: Blob;
+  meta?: PetPhotoWebhookRequestBodyMeta;
+}
+
+/** The schema of PetPhotoWebhookRequestBody, for validation and encoding. */
+export const PetPhotoWebhookRequestBodySchema: $Schema = { kind: "object", properties: { photo: { schema: { kind: "file" }, required: true }, meta: { schema: $ref(() => PetPhotoWebhookRequestBodyMetaSchema) } } };
+
+export interface PetPhotoWebhookRequestBodyMeta {
+  width?: number;
+}
+
+/** The schema of PetPhotoWebhookRequestBodyMeta, for validation and encoding. */
+export const PetPhotoWebhookRequestBodyMetaSchema: $Schema = { kind: "object", properties: { width: { schema: { kind: "integer" } } } };
+
+export interface PetPhotoWebhook200ResponseBody {
+  size?: number;
+}
+
+/** The schema of PetPhotoWebhook200ResponseBody, for validation and encoding. */
+export const PetPhotoWebhook200ResponseBodySchema: $Schema = { kind: "object", properties: { size: { schema: { kind: "integer" } } } };
