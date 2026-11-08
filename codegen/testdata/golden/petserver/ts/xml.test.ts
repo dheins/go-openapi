@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { Client, InvalidResponseError, type Family } from "./index.ts";
 import { codecs } from "./codecs.test.ts";
+import { fromXML, toXML, type XMLNode } from "./runtime.ts";
 
 // answering returns a client whose fetch answers every request with the
 // XML body, and the requests it was sent.
@@ -110,4 +111,55 @@ test("null values are written with xsi:nil and read back", async () => {
   const doc = `<p:card xmlns:p="urn:example:pets" id="1"><p:name>a</p:name><remark xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:nil="true"/></p:card>`;
   const got = await answering(doc).client.getCard({ petId: 1 }, { headers: { Accept: "application/xml" } });
   assert.deepEqual(got.status === 200 && got.body, { id: 1, name: "a", note: null });
+});
+
+// labels is runtime/server's labelsXML: a map of arrays, a union of a
+// string, an integer and an object, and typed additional properties.
+const labels: XMLNode = {
+  name: "labels",
+  type: "object",
+  properties: [
+    { name: "name", node: { name: "name", type: "string" } },
+    { name: "tags", node: { name: "tags", type: "map", values: { type: "array", items: { type: "string" } } } },
+    {
+      name: "value",
+      node: {
+        name: "value",
+        type: "union",
+        scalars: ["integer", "string"],
+        properties: [
+          { name: "unit", node: { name: "unit", kind: "attribute", type: "string" } },
+          { name: "amount", node: { name: "amount", type: "number" } },
+        ],
+      },
+    },
+  ],
+  additional: { type: "integer" },
+};
+
+test("maps of arrays, unions of scalars and objects, additional properties", () => {
+  // The cases of runtime/server's TestXMLGaps, read the same.
+  for (const [doc, want] of [
+    [
+      "<labels><name>a</name><tags><color>red</color><size>L</size><color>blue</color></tags><count>3</count><more>4</more></labels>",
+      { count: 3, more: 4, name: "a", tags: { color: ["red", "blue"], size: ["L"] } },
+    ],
+    ["<labels><value>42</value></labels>", { value: 42 }],
+    ["<labels><value> 4x </value></labels>", { value: " 4x " }],
+    ['<labels><value unit="kg"><amount>1.5</amount></value></labels>', { value: { amount: 1.5, unit: "kg" } }],
+    ["<labels><value>  <amount>2</amount></value></labels>", { value: { amount: 2 } }],
+    ["<labels><value/></labels>", { value: {} }],
+    ['<labels other="x"><n>1</n></labels>', { n: 1 }],
+  ] as const) {
+    const got = fromXML(doc, labels);
+    assert.deepEqual(got, want, doc);
+    assert.deepEqual(fromXML(toXML(got, labels), labels), want, doc);
+  }
+  assert.equal(
+    toXML({ name: "a", tags: { color: ["red", "blue"] }, value: "x", count: 3 }, labels),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<labels><name>a</name><tags><color>red</color><color>blue</color></tags><value>x</value><count>3</count></labels>`,
+  );
+  assert.deepEqual(fromXML("<v>true</v>", { name: "v", type: "union", scalars: ["boolean", "number"] }), true);
+  assert.throws(() => fromXML("<v><x/></v>", { name: "v", type: "union", scalars: ["boolean", "number"] }), /expected text/);
+  assert.throws(() => toXML({ tags: { "a b": ["x"] } }, labels), /cannot be written/);
 });
