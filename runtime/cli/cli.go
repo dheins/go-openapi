@@ -54,13 +54,17 @@ type Param struct {
 type Media struct {
 	MediaType string
 	// Kind is json, xml, form, codec or multipart (the body is its JSON),
-	// text, binary, or parts or partstream (positional parts, given with
-	// -part or as a multipart document).
+	// text, binary, parts or partstream (positional parts, given with
+	// -part or as a multipart document), jsonl or sse.
 	Kind string
 	// Field is the request's field holding the body.
 	Field string
 	// Files are the file properties of a multipart body.
 	Files []File
+	// Stream, for a JSON Lines or event stream body, returns the stream
+	// of the field's type reading the body from r as it is sent: one of
+	// JSONLines, Events or TypedEvents.
+	Stream func(r io.Reader) any
 }
 
 // File is a file property of a multipart body: its flag, and the JSON
@@ -151,6 +155,7 @@ func Run[C any](app App[C], args []string, stdout, stderr io.Writer) int {
 		return ExitFailure
 	}
 	req, err := request(g, cmd)
+	defer g.close(stderr)
 	if err != nil {
 		return fail(err)
 	}
@@ -245,11 +250,23 @@ type given struct {
 	contentType string
 	files       map[string]string
 	parts       []partArg
-	server      string
-	headers     multi
-	timeout     time.Duration
-	verbose     bool
-	creds       map[string]*Credential
+	// closers are the sources of streamed bodies, closed when the
+	// command is done.
+	closers []io.Closer
+	server  string
+	headers multi
+	timeout time.Duration
+	verbose bool
+	creds   map[string]*Credential
+}
+
+// close closes the sources of streamed bodies.
+func (g *given) close(stderr io.Writer) {
+	for _, c := range g.closers {
+		if err := c.Close(); err != nil {
+			fmt.Fprintf(stderr, "closing the body: %v\n", err)
+		}
+	}
 }
 
 // flags returns the flag set of cmd: its parameters and body, then the
@@ -281,7 +298,7 @@ func (app App[C]) flags(cmd *Command[C], stderr io.Writer) (*flag.FlagSet, *give
 		for _, m := range cmd.Media {
 			kinds = append(kinds, m.MediaType)
 		}
-		help := "the request body: JSON (or text) as it is, @file, or - for stdin"
+		help := "the request body: JSON (or text) as it is, @file, or - for stdin; a stream is sent as it is read"
 		if cmd.BodyRequired {
 			help += " (required)"
 		}

@@ -77,6 +77,9 @@ func request[C any](g *given, cmd *Command[C]) (any, error) {
 	if !field.IsValid() {
 		return nil, fmt.Errorf("the request has no field %s", m.Field)
 	}
+	if m.Stream != nil || (m.Kind == "partstream" && len(g.parts) == 0) {
+		return req, setStream(settable(field), m, g)
+	}
 	if m.Kind == "parts" || m.Kind == "partstream" {
 		if err := setPartsBody(settable(field), g); err != nil {
 			return nil, err
@@ -94,6 +97,30 @@ func request[C any](g *given, cmd *Command[C]) (any, error) {
 		return nil, fmt.Errorf("-body: %w", err)
 	}
 	return req, nil
+}
+
+// setStream sets target, a streamed body, to the stream of -body, read
+// as it is sent.
+func setStream(target reflect.Value, m Media, g *given) error {
+	if len(g.parts) > 0 {
+		return fmt.Errorf("-part is for bodies of parts, not %s", m.MediaType)
+	}
+	src, err := openSource(g.body)
+	if err != nil {
+		return fmt.Errorf("-body: %w", err)
+	}
+	g.closers = append(g.closers, src)
+	stream := reflect.Value{}
+	if m.Stream != nil {
+		stream = reflect.ValueOf(m.Stream(src))
+	} else {
+		stream = partStream(target.Type(), src, g.contentType)
+	}
+	if !stream.Type().AssignableTo(target.Type()) {
+		return fmt.Errorf("-body: a %s is not a %s", stream.Type(), target.Type())
+	}
+	target.Set(stream)
+	return nil
 }
 
 // setPartsBody sets a body of positional parts from the -part flags, or

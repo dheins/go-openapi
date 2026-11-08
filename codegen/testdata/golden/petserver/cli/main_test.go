@@ -26,6 +26,8 @@ import (
 type handler struct {
 	api.Handler
 	seen map[string]any
+	// arrived, if set, is told the name of each pet ImportLines reads.
+	arrived chan string
 }
 
 func (h *handler) ListPets(_ context.Context, req *api.ListPetsRequest) (api.ListPetsResponse, error) {
@@ -82,6 +84,63 @@ func (h *handler) PutNotes(_ context.Context, req *api.PutNotesRequest) (api.Put
 func (h *handler) UploadBundle(_ context.Context, req *api.UploadBundleRequest) (api.UploadBundleResponse, error) {
 	h.seen["UploadBundle"] = req
 	return api.UploadBundle200RelatedResponse{Body: req.Body}, nil
+}
+
+// ImportLines counts the pets as they arrive, telling arrived of each.
+func (h *handler) ImportLines(_ context.Context, req *api.ImportLinesRequest) (api.ImportLinesResponse, error) {
+	if req.JSONBody.Set {
+		return api.ImportLines200JSONResponse{Body: int64(len(req.JSONBody.Value))}, nil
+	}
+	var n int64
+	for p, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		if h.arrived != nil {
+			h.arrived <- p.Name
+		}
+		n++
+	}
+	return api.ImportLines200JSONResponse{Body: n}, nil
+}
+
+func (h *handler) PostEvents(_ context.Context, req *api.PostEventsRequest) (api.PostEventsResponse, error) {
+	var n int64
+	for ev, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		h.seen["PostEvents"] = ev
+		n++
+	}
+	return api.PostEvents200JSONResponse{Body: n}, nil
+}
+
+func (h *handler) PostTypedEvents(_ context.Context, req *api.PostTypedEventsRequest) (api.PostTypedEventsResponse, error) {
+	names := []string{}
+	for ev, err := range req.Body {
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, ev.ID+":"+ev.Data.Name)
+	}
+	return api.PostTypedEvents200JSONResponse{Body: names}, nil
+}
+
+func (h *handler) StreamPhotos(_ context.Context, req *api.StreamPhotosRequest) (api.StreamPhotosResponse, error) {
+	acks := func(yield func(oapi.Part[string], error) bool) {
+		for photo, err := range req.Body {
+			if err != nil {
+				yield(oapi.Part[string]{}, err)
+				return
+			}
+			seq := photo.Header.Get("X-Seq")
+			if !yield(oapi.Part[string]{Header: textproto.MIMEHeader{"X-Seq": {seq}}, Value: "photo " + seq + ": " + string(photo.Data)}, nil) {
+				return
+			}
+		}
+	}
+	return api.StreamPhotos200MixedResponse{Items: acks}, nil
 }
 
 func (h *handler) Secure(context.Context, *api.SecureRequest) (api.SecureResponse, error) {
@@ -216,6 +275,78 @@ func TestCommands(t *testing.T) {
 	if req := h.seen["UploadBundle"].(*api.UploadBundleRequest); len(req.Body) != 2 || string(req.Body[0].Data) != "PNG" || req.Body[1].Header.Get("X-Order") != "2" {
 		t.Errorf("upload-bundle request = %+v", req.Body)
 	}
+
+	// Streams are sent as -body is read: JSON Lines, events, typed events,
+	// and parts.
+	lines := filepath.Join(dir, "pets.jsonl")
+	if err := os.WriteFile(lines, []byte("{\"name\":\"Rex\"}\n\n{\"name\":\"Tom\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errOut := runCLI("import-lines", "-body", "@"+lines); code != 0 || out != "2\n" {
+		t.Errorf("import-lines: %d %q %q", code, out, errOut)
+	}
+	if code, out, errOut := runCLI("import-lines", "-body", "[{\"name\":\"Rex\"}]", "-content-type", "application/json"); code != 0 || out != "1\n" {
+		t.Errorf("import-lines as JSON: %d %q %q", code, out, errOut)
+	}
+	if code, _, errOut := runCLI("import-lines", "-body", "{\"name\":\"Rex\"}\n{\"name\":\n"); code != 2 || !strings.Contains(errOut, "item 1") {
+		t.Errorf("import-lines invalid: %d %q", code, errOut)
+	}
+	if code, out, errOut := runCLI("post-events", "-body", "id: 1\ndata: a\n\n: comment\n\nid: 2\ndata: b\ndata: c\n\n"); code != 0 || out != "2\n" {
+		t.Errorf("post-events: %d %q %q", code, out, errOut)
+	}
+	if ev := h.seen["PostEvents"].(server.Event); ev.ID != "2" || ev.Data != "b\nc" {
+		t.Errorf("post-events event = %+v", ev)
+	}
+	code, out, errOut = runCLI("post-typed-events", "-body", "id: a\ndata: {\"name\":\"Rex\"}\n\nid: b\ndata: {\"name\":\"Tom\"}\n\n")
+	if code != 0 || !strings.Contains(out, `"a:Rex"`) || !strings.Contains(out, `"b:Tom"`) {
+		t.Errorf("post-typed-events: %d %q %q", code, out, errOut)
+	}
+	// The client checks each event before sending it.
+	if code, _, errOut := runCLI("post-typed-events", "-body", "data: {\"name\":\"\"}\n\n"); code != 2 || !strings.Contains(errOut, "/0/data/name") {
+		t.Errorf("post-typed-events invalid: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI("post-typed-events", "-body", "data: {\n\n"); code != 2 || !strings.Contains(errOut, "event 0") {
+		t.Errorf("post-typed-events not JSON: %d %q", code, errOut)
+	}
+	code, out, errOut = runCLI("stream-photos", "-pet-id", "1", "-part", "@"+photo, "-part-header", "X-Seq: 1", "-part", "@"+photo, "-part-header", "X-Seq: 2")
+	if code != 0 || !strings.Contains(out, "photo 1: PNG") || !strings.Contains(out, "photo 2: PNG") {
+		t.Errorf("stream-photos: %d %q %q", code, out, errOut)
+	}
+	doc = "--p\r\nContent-Type: image/png\r\nX-Seq: 7\r\n\r\nGIF\r\n--p--\r\n"
+	if code, out, errOut := runCLI("stream-photos", "-pet-id", "1", "-body", doc); code != 0 || !strings.Contains(out, "photo 7: GIF") {
+		t.Errorf("stream-photos document: %d %q %q", code, out, errOut)
+	}
+
+	// From stdin, each line is sent as it is read: the server has the first
+	// pet before the second is written.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = stdin })
+	h.arrived = make(chan string, 2)
+	done := make(chan int)
+	go func() {
+		code, _, _ := runCLI("import-lines", "-body", "-")
+		done <- code
+	}()
+	if _, err := w.Write([]byte("{\"name\":\"Rex\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if name := <-h.arrived; name != "Rex" {
+		t.Errorf("first pet %q", name)
+	}
+	if _, err := w.Write([]byte("{\"name\":\"Tom\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if code := <-done; code != 0 || <-h.arrived != "Tom" {
+		t.Errorf("import-lines from stdin: %d", code)
+	}
+	os.Stdin = stdin
+	h.arrived = nil
 
 	// Credentials by flag, or by environment variable.
 	if code, _, _ := runCLI("secure"); code != 2 {

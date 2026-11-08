@@ -76,7 +76,8 @@ func newClient(creds map[string]cli.Credential, opts ...goapiclient.Option) (*{{
 {{- if .Media}}
 			Media: []cli.Media{
 {{- range .Media}}
-				{MediaType: {{quote .MediaType}}, Kind: {{quote .Kind}}, Field: {{quote .Field}}{{if .Files}}, Files: []cli.File{ {{- range .Files}}{Flag: {{quote .Flag}}, Property: {{quote .Property}}, Field: {{quote .Field}}}, {{end -}} }{{end}}},
+				{MediaType: {{quote .MediaType}}, Kind: {{quote .Kind}}, Field: {{quote .Field}}{{if .Files}}, Files: []cli.File{ {{- range .Files}}{Flag: {{quote .Flag}}, Property: {{quote .Property}}, Field: {{quote .Field}}}, {{end -}} }{{end}}{{with cliStream .IR}},
+					Stream: {{.}}{{end}}},
 {{- end}}
 			},
 {{- if .BodyRequired}}

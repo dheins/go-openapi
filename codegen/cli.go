@@ -118,6 +118,7 @@ type cliParam struct {
 }
 
 type cliMedia struct {
+	IR                     *ir.BodyMedia
 	MediaType, Kind, Field string
 	Files                  []cliFile
 }
@@ -166,12 +167,12 @@ func cliCommandOf(o *ir.Operation) (*cliCommand, string) {
 	fields := map[string]bool{}
 	for _, m := range o.Body.Media {
 		switch m.Kind {
-		case "json", "xml", "form", "codec", "multipart", "text", "binary", "parts", "partstream":
+		case "json", "xml", "form", "codec", "multipart", "text", "binary", "parts", "partstream", "jsonl", "sse":
 		default:
 			unsupported = append(unsupported, m.MediaType)
 			continue
 		}
-		md := cliMedia{MediaType: m.MediaType, Kind: m.Kind, Field: m.Field.Name}
+		md := cliMedia{IR: m, MediaType: m.MediaType, Kind: m.Kind, Field: m.Field.Name}
 		if m.Kind == "multipart" {
 			for _, prop := range m.Properties {
 				if prop.Type != "file" {
@@ -198,6 +199,20 @@ func cliCommandOf(o *ir.Operation) (*cliCommand, string) {
 		cmd.ContentType = "ContentType"
 	}
 	return cmd, ""
+}
+
+// cliStream returns the function reading a JSON Lines or event stream
+// body of m from a command line's -body, or "" for other bodies.
+func (f *fileGen) cliStream(m *ir.BodyMedia) string {
+	switch {
+	case m.Kind == "jsonl":
+		return fmt.Sprintf("func(r io.Reader) any { return cli.JSONLines[%s](r) }", f.goType(m.Field.Value.Elem))
+	case m.Kind == "sse" && m.Events == nil:
+		return "func(r io.Reader) any { return cli.Events(r) }"
+	case m.Kind == "sse":
+		return fmt.Sprintf("func(r io.Reader) any { return cli.TypedEvents(r, %s) }", f.eventDecoder(m.Events, "Request"))
+	}
+	return ""
 }
 
 // structField returns the Go field of the property of JSON name prop of

@@ -10,8 +10,11 @@ import (
 
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/api"
 	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/client"
+	"github.com/dheins/go-openapi/codegen/testdata/golden/petserver/model"
+	"github.com/dheins/go-openapi/oapi"
 	"github.com/dheins/go-openapi/runtime/cli"
 	goapiclient "github.com/dheins/go-openapi/runtime/client"
+	"github.com/dheins/go-openapi/runtime/server"
 )
 
 // petserverctl is a command-line client of Pet server: a command per
@@ -448,6 +451,18 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "post-events", Summary: "Events read as they arrive.", Tag: "",
+			Request: func() any { return new(api.PostEventsRequest) },
+			Media: []cli.Media{
+				{MediaType: "text/event-stream", Kind: "sse", Field: "Body",
+					Stream: func(r io.Reader) any { return cli.Events(r) }},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PostEvents(ctx, req.(*api.PostEventsRequest))
+			},
+		},
+		{
 			Name: "feed", Summary: "Changes to the pets, as they happen.", Tag: "",
 			Request: func() any { return new(api.FeedRequest) },
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
@@ -455,9 +470,34 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "post-typed-events", Summary: "Pets sent as events, one kind of event.", Tag: "",
+			Request: func() any { return new(api.PostTypedEventsRequest) },
+			Media: []cli.Media{
+				{MediaType: "text/event-stream", Kind: "sse", Field: "Body",
+					Stream: func(r io.Reader) any {
+						return cli.TypedEvents(r, func(ev server.Event, validate bool) (server.TypedEvent[model.Pet], error) {
+							out := server.TypedEvent[model.Pet]{ID: ev.ID, Event: ev.Event, Retry: ev.Retry}
+							data, err := server.EventData(ev, oapi.Request, validate, func(item model.Pet) error {
+								var errs oapi.ValidationErrors
+								errs.Nested("", item.Validate())
+								return errs.Err()
+							})
+							out.Data = data
+							return out, err
+						})
+					}},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PostTypedEvents(ctx, req.(*api.PostTypedEventsRequest))
+			},
+		},
+		{
 			Name: "import-lines", Summary: "Pets added one by one as they arrive, or all at once.", Tag: "",
 			Request: func() any { return new(api.ImportLinesRequest) },
 			Media: []cli.Media{
+				{MediaType: "application/jsonl", Kind: "jsonl", Field: "Body",
+					Stream: func(r io.Reader) any { return cli.JSONLines[model.Pet](r) }},
 				{MediaType: "application/json", Kind: "json", Field: "JSONBody"},
 			},
 			BodyRequired: true,
@@ -469,6 +509,10 @@ var app = cli.App[*client.Client]{
 		{
 			Name: "echo", Summary: "Each pet sent back as it arrives.", Tag: "",
 			Request: func() any { return new(api.EchoRequest) },
+			Media: []cli.Media{
+				{MediaType: "application/x-ndjson", Kind: "jsonl", Field: "Body",
+					Stream: func(r io.Reader) any { return cli.JSONLines[model.Pet](r) }},
+			},
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.Echo(ctx, req.(*api.EchoRequest))
 			},
