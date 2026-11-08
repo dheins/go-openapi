@@ -918,6 +918,27 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M58 – XML maps of arrays, scalar unions and additional properties ✅
+- [x] ir: `XMLNode.Values` arrays, `Additional`, and `union` nodes with
+  `Scalars`, where the three shapes were refused
+- [x] Go runtime: reading and writing them, with the XML fuzz target's
+  round trip covering them
+- [x] TypeScript runtime and descriptors, reading the Go runtime's cases
+  the same
+- [x] End to end: the petserver putLabels operation through the server,
+  Go and TypeScript clients, `middleware.Validate` and the CLI
+
+**How it went**
+- *Most of the writer was there*: undeclared properties were already
+  written by name and unions as objects or text, so the work was in
+  typing what is read: a key's items collected as for unwrapped array
+  properties, and a union decided by whether its element has children or
+  attributes.
+- *What XML cannot tell apart*: a string that reads as a number of the
+  union, and white space where there are object variants; the guide says
+  so, and the fuzz target, starting from XML, round-trips.
+- *Not done*: see [features.md](../features.md).
+
 ### M57 – Replayable streamed request bodies ✅
 - [x] Go: a recording in place of the pipe, ranged over once and kept up
   to `WithReplayLimit` (1 MiB) for `GetBody`; `ErrNotReplayable` past it;

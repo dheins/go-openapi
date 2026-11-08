@@ -908,12 +908,27 @@ decoder to accept or reject.
 
 Other shapes:
 - **Maps** (`additionalProperties` alone) are an element per key, named by
-  the key: `<scores><speed>7</speed></scores>`. A key that is not an XML
-  name cannot be written.
+  the key: `<scores><speed>7</speed></scores>`. A map of arrays has an
+  element per item, named by its key, as an array property's items are:
+  `<tags><color>red</color><color>blue</color></tags>` is
+  `{"color": ["red", "blue"]}`. A key that is not an XML name cannot be
+  written.
+- **Additional properties** next to declared ones are the elements the
+  object does not declare, named by their keys and typed by
+  `additionalProperties` (an element per item for arrays, too); with them
+  typed, other attributes are not read.
 - **Unions** (`oneOf`, `anyOf`, and objects with them) are one object with
-  the properties of all their variants, the first variant describing a
-  property they share; the decoder then picks the variant, as for JSON.
-  Every variant must be an object.
+  the properties of all their object variants, the first variant
+  describing a property they share; the decoder then picks the variant,
+  as for JSON. A union with string, number or boolean variants is its
+  element's text when the element has neither child elements nor
+  attributes, read as the first of boolean, integer, number and string
+  among the variants that the text is: `<value>42</value>` is the integer
+  42 of a union of an integer and a string. An empty element is the
+  object, if there are object variants. A string that reads as a number
+  of the union (`"42"`), or white space where there are object variants,
+  is read back as that, as XML cannot tell them apart. A union with arrays
+  among its variants cannot be written.
 - **Recursive types** are written to any depth: the generated
   `server.XMLNode` refers to the type's shape (`Ref`) in a table on the
   root (`Shapes`).
@@ -926,10 +941,9 @@ declared property or one of its elements, is ignored, as it could not be
 written back.
 
 XML without a schema (or with a string schema) stays bytes, or a string
-for `text/xml`. Schemas XML cannot describe, such as maps of arrays,
-unions of non-objects and objects with typed `additionalProperties` next
-to properties, are answered with 415 in requests and cannot be returned
-in responses, with a warning. Documents are read with `encoding/xml`,
+for `text/xml`. Schemas XML cannot describe, such as arrays of arrays
+and unions with arrays among their variants, are answered with 415 in
+requests and cannot be returned in responses, with a warning. Documents are read with `encoding/xml`,
 which does not process DTDs or external entities; nesting is limited.
 TypeScript clients write and read XML the same way, with a reader of
 their own.

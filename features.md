@@ -33,9 +33,9 @@ shipped in.
   types than JSON and text. — later
 - Streamed request bodies longer than the replay limit sent again
   (keeping them on disk rather than in memory). — later
-- XML for maps of arrays, unions of non-object variants, and objects with
-  typed `additionalProperties` next to their properties (answered with
-  415 today). — later
+- XML for unions with arrays among their variants, additional
+  properties as attributes, and arrays of arrays (answered with 415
+  today). — later
 - Headers (response and part headers) whose objects hold arrays or other
   objects, which the simple style cannot write; only their presence is
   checked. — later
@@ -145,6 +145,10 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] XML for maps of arrays, unions of string, number, boolean and
+  object variants, and objects with typed `additionalProperties` next to
+  their properties, in Go and TypeScript servers, clients, receivers,
+  `middleware.Validate` and CLIs. (ff3d35a, 8e48616, 3ec00d7, 6994335)
 - [x] Streamed request bodies that can be sent again: Go clients keep up
   to `WithReplayLimit` of them for `GetBody`, TypeScript clients up to
   `replayLimit` behind `init.body`, so retrying middleware and fetch
