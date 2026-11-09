@@ -238,8 +238,28 @@ type EventStream struct {
 	// Data is the type of the data of every event: the schema's, or a
 	// oneOf union of the kinds'.
 	Data *Ref
-	// Kinds are the named kinds, in document order; none for one kind.
+	// Media is how the data of every event is read, for one kind.
+	Media EventMedia
+	// Kinds are the kinds, in document order; none for one kind. A kind
+	// without a name is one of the unnamed kinds, which an event whose
+	// name is none of the named kinds' is: the one its data is (AnyOf:
+	// the first).
 	Kinds []EventKind
+	AnyOf bool
+	// ID and Retry check the id and retry fields, if their schemas
+	// constrain them; nil otherwise.
+	ID, Retry *Ref
+}
+
+// EventMedia says how the data of an event is read and written: as JSON
+// (json), as itself (text), as the text of a number, boolean or enum
+// (scalar, of Type), as an XML document (xml, as XML describes it), as
+// form fields of an object (form, with Form its properties), or with the
+// codec of MediaType (codec).
+type EventMedia struct {
+	Kind, MediaType, Type string
+	XML                   *XMLNode
+	Form                  *ParamProperty
 }
 
 // EventKind is a kind of event, named by the event field, and the variant
@@ -249,6 +269,12 @@ type EventKind struct {
 	Name    string
 	Variant *Variant
 	Text    bool
+	Media   EventMedia
+}
+
+// Unnamed reports whether es has kinds without names.
+func (es *EventStream) Unnamed() bool {
+	return slices.ContainsFunc(es.Kinds, func(k EventKind) bool { return k.Name == "" })
 }
 
 // Response is one declared response, a variant the handler can return.
@@ -1114,7 +1140,19 @@ func (b *builder) eventStream(media *oas.MediaType, hint string) *EventStream {
 		return nil
 	}
 	if data, ok := eventData(item); ok && data.ContentSchema != nil {
-		return &EventStream{Data: b.use(data.ContentSchema, hint+"Data", nil)}
+		m, value, why := b.eventMedia(data)
+		if why != "" {
+			b.warnAt(item, []string{"properties", "data"}, why+"; the events are not typed")
+			return nil
+		}
+		ref := b.use(value, hint+"Data", nil)
+		if m, why = b.eventMediaOf(m, ref, value); why != "" {
+			b.warnAt(item, []string{"properties", "data"}, why+"; the events are not typed")
+			return nil
+		}
+		events := &EventStream{Data: ref, Media: m}
+		b.eventFields(events, item, nil, hint)
+		return events
 	}
 	members, path := item.OneOf, "oneOf"
 	if len(members) == 0 {
@@ -1125,42 +1163,41 @@ func (b *builder) eventStream(media *oas.MediaType, hint string) *EventStream {
 	}
 	union := &oas.Schema{}
 	var names []string
-	var text []bool
+	var medias []EventMedia
+	var values []*oas.Schema
 	for i, m := range members {
 		m = deref(m)
-		name, named := eventName(m)
+		name, _ := eventName(m)
 		data, ok := eventData(m)
-		switch {
-		case !named || !ok:
-			b.warnAt(item, []string{path, strconv.Itoa(i)}, "a kind of event needs a const event name and a data property; the events are not typed")
+		if !ok {
+			b.warnAt(item, []string{path, strconv.Itoa(i)}, "a kind of event needs a data property; the events are not typed")
 			return nil
-		case slices.Contains(names, name):
+		}
+		if name != "" && slices.Contains(names, name) {
 			b.warnAt(item, []string{path, strconv.Itoa(i)}, fmt.Sprintf("the event %q has two kinds; the events are not typed", name))
 			return nil
 		}
-		plain := data.ContentSchema == nil
-		switch types, _ := splitTypes(data); {
-		case !plain:
-			data = data.ContentSchema
-		case len(types) == 0:
-			// Data is text.
-			d := *data
-			d.Type = oas.Types{"string"}
-			data = &d
-		case !slices.Equal(types, []string{"string"}):
-			b.warnAt(item, []string{path, strconv.Itoa(i), "properties", "data"}, "the data of an event is text, or JSON with a contentSchema; the events are not typed")
+		em, value, why := b.eventMedia(data)
+		if why != "" {
+			b.warnAt(item, []string{path, strconv.Itoa(i), "properties", "data"}, why+"; the events are not typed")
 			return nil
 		}
 		names = append(names, name)
-		text = append(text, plain)
-		union.OneOf = append(union.OneOf, data)
+		medias = append(medias, em)
+		values = append(values, value)
+		union.OneOf = append(union.OneOf, value)
 	}
-	for i, data := range union.OneOf {
-		if !text[i] {
-			// Inline data is named after its kind, before the union would
-			// name it after its position.
-			b.use(data, hint+GoName(names[i])+"Data", nil)
+	for i, value := range values {
+		if medias[i].Kind == "text" {
+			continue
 		}
+		// Inline data is named after its kind, before the union would
+		// name it after its position.
+		kind := GoName(names[i])
+		if kind == "" {
+			kind = "Kind" + strconv.Itoa(i+1)
+		}
+		b.use(value, hint+kind+"Data", nil)
 	}
 	ref := b.use(union, hint+"Data", nil)
 	t := ref.Type
@@ -1171,11 +1208,116 @@ func (b *builder) eventStream(media *oas.MediaType, hint string) *EventStream {
 	}
 	t.Location, _ = b.spec.Location(item)
 	t.Doc = describeSchema(item)
-	events := &EventStream{Data: ref}
+	events := &EventStream{Data: ref, AnyOf: path == "anyOf"}
 	for i, name := range names {
-		events.Kinds = append(events.Kinds, EventKind{Name: name, Variant: t.Variants[i], Text: text[i]})
+		em, why := b.eventMediaOf(medias[i], t.Variants[i].Type, values[i])
+		if why != "" {
+			b.warnAt(item, []string{path, strconv.Itoa(i), "properties", "data"}, why+"; the events are not typed")
+			return nil
+		}
+		events.Kinds = append(events.Kinds, EventKind{Name: name, Variant: t.Variants[i], Text: em.Kind == "text", Media: em})
 	}
+	b.eventFields(events, item, members, hint)
 	return events
+}
+
+// eventMedia returns how the data of an event, of schema data, is read,
+// and the schema of its value: JSON, XML, form fields or a codec's, by the
+// contentMediaType of its contentSchema; text, or a number, boolean or
+// enum written as text, without one. It says why it cannot be instead.
+func (b *builder) eventMedia(data *oas.Schema) (EventMedia, *oas.Schema, string) {
+	if cs := data.ContentSchema; cs != nil {
+		mt := mediaBase(data.ContentMediaType)
+		types, _ := splitTypes(deref(cs))
+		switch {
+		case mt == "" || isJSONMediaType(mt):
+			return EventMedia{Kind: "json"}, cs, ""
+		case isXMLMediaType(mt):
+			return EventMedia{Kind: "xml"}, cs, ""
+		case mt == "application/x-www-form-urlencoded":
+			return EventMedia{Kind: "form"}, cs, ""
+		case b.codecKind("", mt, nil) == "codec" || schemaCodec(data):
+			return EventMedia{Kind: "codec", MediaType: mt}, cs, ""
+		case strings.HasPrefix(mt, "text/") && len(types) == 1 && types[0] != "string" && types[0] != "object" && types[0] != "array":
+			return EventMedia{Kind: "scalar", Type: types[0]}, cs, ""
+		case strings.HasPrefix(mt, "text/"):
+			return eventText(data), textSchema(data), ""
+		}
+		return EventMedia{}, nil, fmt.Sprintf("the data of an event of type %s is not supported", data.ContentMediaType)
+	}
+	switch types, _ := splitTypes(data); {
+	case len(types) == 0 || slices.Equal(types, []string{"string"}):
+		return eventText(data), textSchema(data), ""
+	case len(types) == 1 && (types[0] == "integer" || types[0] == "number" || types[0] == "boolean"):
+		return EventMedia{Kind: "scalar", Type: types[0]}, data, ""
+	}
+	return EventMedia{}, nil, "the data of an event is text, a number or a boolean, or a document with a contentSchema"
+}
+
+func eventText(*oas.Schema) EventMedia { return EventMedia{Kind: "text"} }
+
+// textSchema returns data as the schema of text: a string.
+func textSchema(data *oas.Schema) *oas.Schema {
+	d := *data
+	d.ContentSchema, d.ContentMediaType = nil, ""
+	d.Type = oas.Types{"string"}
+	return &d
+}
+
+// schemaCodec reports whether a data schema says, with x-goapi-codec,
+// that its contentMediaType has a codec.
+func schemaCodec(s *oas.Schema) bool {
+	if s.Extra == nil {
+		return false
+	}
+	raw, ok := s.Extra.Get("x-goapi-codec")
+	var v bool
+	return ok && json.Unmarshal(raw, &v) == nil && v
+}
+
+// eventMediaOf completes m, for a value of type ref from schema value:
+// the XML document or form fields it is.
+func (b *builder) eventMediaOf(m EventMedia, ref *Ref, value *oas.Schema) (EventMedia, string) {
+	switch m.Kind {
+	case "xml":
+		node, why := b.xmlRoot(ref, value)
+		if why != "" {
+			return m, why
+		}
+		m.XML = node
+	case "form":
+		obj, ok := objectProperties(stripNullable(ref), false)
+		if !ok {
+			return m, "the data of an event of type application/x-www-form-urlencoded must be an object of primitive values, arrays of them or objects of them"
+		}
+		m.Form = &obj
+	}
+	return m, ""
+}
+
+// eventFields sets the checks of the id and retry fields of events of
+// item, or of its kinds, members, if their schemas constrain them.
+func (b *builder) eventFields(es *EventStream, item *oas.Schema, members []*oas.Schema, hint string) {
+	field := func(name string) *oas.Schema {
+		for _, s := range append([]*oas.Schema{item}, members...) {
+			if s = deref(s); s != nil && s.Properties != nil {
+				if f, ok := s.Properties.Get(name); ok && deref(f) != nil {
+					return deref(f)
+				}
+			}
+		}
+		return nil
+	}
+	if s := field("id"); s != nil {
+		if ref := b.use(s, hint+"ID", nil); ref.Checks != nil || ref.Kind == Named {
+			es.ID = ref
+		}
+	}
+	if s := field("retry"); s != nil {
+		if ref := b.use(s, hint+"Retry", nil); ref.Checks != nil || ref.Kind == Named {
+			es.Retry = ref
+		}
+	}
 }
 
 // eventData returns the schema of the data property of an event, and
@@ -1189,11 +1331,6 @@ func eventData(s *oas.Schema) (*oas.Schema, bool) {
 	data = deref(data)
 	if !ok || data == nil {
 		return nil, false
-	}
-	if data.ContentSchema != nil && !isJSONMediaType(data.ContentMediaType) {
-		plain := *data
-		plain.ContentSchema = nil
-		return &plain, true
 	}
 	return data, true
 }

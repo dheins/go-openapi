@@ -410,3 +410,83 @@ components:
 		t.Errorf("without hooks: %d webhooks, sender schemes %v, inbound %v", len(m.Webhooks), names(m.SenderSchemes), names(m.InboundSchemes))
 	}
 }
+
+func TestTypedEventsBeyond(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /mixed:
+    get:
+      operationId: mixed
+      responses:
+        "200":
+          description: ok
+          content:
+            text/event-stream:
+              itemSchema:
+                properties:
+                  id: {type: string, pattern: "^[0-9]+$"}
+                  retry: {type: integer, maximum: 60000}
+                oneOf:
+                  - properties:
+                      event: {const: added}
+                      data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}
+                  - properties:
+                      data: {contentMediaType: application/json, contentSchema: {type: object, required: [kind], properties: {kind: {const: a}, n: {type: integer}}}}
+                  - properties:
+                      data: {contentMediaType: application/json, contentSchema: {type: object, required: [kind], properties: {kind: {const: b}}}}
+                  - properties:
+                      event: {const: doc}
+                      data: {contentMediaType: application/xml, contentSchema: {$ref: "#/components/schemas/Pet"}}
+                  - properties:
+                      event: {const: form}
+                      data: {contentMediaType: application/x-www-form-urlencoded, contentSchema: {$ref: "#/components/schemas/Pet"}}
+                  - properties:
+                      event: {const: count}
+                      data: {type: integer, minimum: 0}
+                  - properties:
+                      event: {const: yaml}
+                      data: {contentMediaType: application/x-yaml, contentSchema: {$ref: "#/components/schemas/Pet"}}
+  /bad:
+    get:
+      operationId: bad
+      responses:
+        "200":
+          description: ok
+          content:
+            text/event-stream:
+              itemSchema:
+                properties:
+                  data: {contentMediaType: image/png, contentSchema: {type: string}}
+components:
+  schemas:
+    Pet: {type: object, properties: {name: {type: string}}}
+`, Options{Operations: true, Codecs: []string{"application/x-yaml"}})
+	ev := operationNamed(t, m, "Mixed").Responses[0].Events
+	if ev == nil {
+		t.Fatalf("no events: %+v", m.Warnings)
+	}
+	var kinds []string
+	for _, k := range ev.Kinds {
+		kinds = append(kinds, k.Name+":"+k.Media.Kind+k.Media.Type+k.Media.MediaType)
+	}
+	if want := "added:json :json :json doc:xml form:form count:scalarinteger yaml:codecapplication/x-yaml"; strings.Join(kinds, " ") != want {
+		t.Errorf("kinds %q, want %q", strings.Join(kinds, " "), want)
+	}
+	if !ev.Unnamed() || ev.AnyOf || ev.Kinds[3].Media.XML == nil || ev.Kinds[4].Media.Form == nil {
+		t.Errorf("events = %+v", ev)
+	}
+	if ev.ID == nil || ev.Retry == nil {
+		t.Errorf("id %+v, retry %+v", ev.ID, ev.Retry)
+	}
+	if bad := operationNamed(t, m, "Bad").Responses[0]; bad.Events != nil {
+		t.Errorf("bad events = %+v", bad.Events)
+	}
+	var warnings []string
+	for _, w := range m.Warnings {
+		warnings = append(warnings, w.Message)
+	}
+	if all := strings.Join(warnings, "\n"); !strings.Contains(all, "the data of an event of type image/png is not supported; the events are not typed") {
+		t.Errorf("warnings:\n%s", all)
+	}
+}
