@@ -1077,7 +1077,8 @@ func init() {
 func TestCodecs(t *testing.T) {
 	_, h := newTestServer()
 	r := do(t, h, "PUT", "/sizes", "application/x-tc", `TC{"w":2,"h":3}`, "Accept", "application/x-tc2")
-	if r.status != 200 || r.header.Get("Content-Type") != "application/x-tc2" || r.body != `TC{"w":2,"h":3}` {
+	// The codec gets the value as JSON has it: an object is a map.
+	if r.status != 200 || r.header.Get("Content-Type") != "application/x-tc2" || r.body != `TC{"h":3,"w":2}` {
 		t.Errorf("codec response: %d %s %s", r.status, r.header.Get("Content-Type"), r.body)
 	}
 	r = do(t, h, "PUT", "/sizes", "application/x-tc", `TC{"w":2}`)

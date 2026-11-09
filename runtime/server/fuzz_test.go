@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dheins/go-openapi/oapi"
@@ -370,6 +371,44 @@ func FuzzRange(f *testing.F) {
 					t.Fatalf("%q of %d: part %d is %+v", header, size, i, br)
 				}
 			}
+		}
+	})
+}
+
+// FuzzCodecValue checks that a JSON document goes to the value a codec
+// encodes and back to the same JSON, also as the values a CBOR library
+// gives (maps of any keys, int64 and float64 numbers).
+func FuzzCodecValue(f *testing.F) {
+	f.Add([]byte(`{"a":[1,2.5,"s",true,null],"b":{"c":-3}}`))
+	f.Add([]byte(`[{"":{}},[],1e300,"é"]`))
+	f.Add([]byte(`9007199254740993`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if !json.Valid(data) {
+			return
+		}
+		same := func(a, b []byte) bool {
+			var x, y any
+			return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
+		}
+		v, err := CodecValue(data)
+		if err != nil {
+			if !strings.Contains(err.Error(), "out of range") {
+				t.Fatalf("CodecValue(%s): %v", data, err)
+			}
+			return
+		}
+		back, err := CodecJSON(v)
+		if err != nil || !same(data, back) {
+			t.Fatalf("%s -> %#v -> %s (%v)", data, v, back, err)
+		}
+		var raw any
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber()
+		if dec.Decode(&raw) != nil {
+			return
+		}
+		if back, err := CodecJSON(cborValue(raw)); err != nil || !same(data, back) {
+			t.Fatalf("%s as CBOR values -> %s (%v)", data, back, err)
 		}
 	})
 }

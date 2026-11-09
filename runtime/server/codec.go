@@ -11,10 +11,14 @@ import (
 )
 
 // Codec encodes and decodes bodies of a media type goapi does not know,
-// such as application/msgpack or application/cbor, to and from the
-// generated types: Marshal and Unmarshal of a library for the format fit
-// as they are. A document declares such media types with x-goapi-codec,
-// or goapi generate -codec.
+// such as application/msgpack or application/cbor: Marshal and Unmarshal
+// of a library for the format fit as they are. They get the value as
+// JSON has it, not the generated types: Unmarshal decodes into an any
+// (maps, slices and scalars), which goapi converts to JSON (CodecJSON)
+// and decodes with the JSON decoder's rules, and Marshal gets the JSON
+// encoding of the value as maps of strings, slices and scalars
+// (CodecValue). A document declares such media types with
+// x-goapi-codec, or goapi generate -codec.
 type Codec interface {
 	Marshal(v any) ([]byte, error)
 	Unmarshal(data []byte, v any) error
@@ -64,30 +68,61 @@ func MissingCodecs(codecs map[string]Codec, mediaTypes []string) []string {
 	return missing
 }
 
-// DecodeCodec decodes a request body of a codec's media type as T. A body
-// the codec cannot decode is a validation error, answered with 400; its
-// constraints are checked by T's Validate, which the caller runs.
+// DecodeCodec decodes a request body of a codec's media type as T, as a
+// JSON request body is decoded: a body the codec cannot decode, or whose
+// value is not T's, is a validation error, answered with 400, at its
+// JSON pointer; its constraints are checked by T's Validate, which the
+// caller runs.
 func DecodeCodec[T any](c *Config, mediaType string, body []byte) (T, error) {
 	var v T
-	codec, ok := c.Codecs[CodecKey(mediaType)]
+	data, err := codecJSON(c.Codecs, mediaType, body)
+	if err != nil {
+		return v, err
+	}
+	err = oapi.DecodeRequest(data, &v)
+	return v, err
+}
+
+// codecJSON decodes body, of a codec's media type, as JSON.
+func codecJSON(codecs map[string]Codec, mediaType string, body []byte) ([]byte, error) {
+	codec, ok := codecs[CodecKey(mediaType)]
 	if !ok {
-		return v, fmt.Errorf("server: no codec for %s", mediaType)
+		return nil, fmt.Errorf("server: no codec for %s", mediaType)
 	}
-	if err := codec.Unmarshal(body, &v); err != nil {
-		return v, &oapi.ValidationError{Message: fmt.Sprintf("invalid %s: %v", CodecKey(mediaType), err)}
+	var value any
+	if err := codec.Unmarshal(body, &value); err != nil {
+		return nil, &oapi.ValidationError{Message: fmt.Sprintf("invalid %s: %v", CodecKey(mediaType), err)}
 	}
-	return v, nil
+	data, err := CodecJSON(value)
+	if err != nil {
+		return nil, &oapi.ValidationError{Message: fmt.Sprintf("invalid %s: %v", CodecKey(mediaType), err)}
+	}
+	return data, nil
+}
+
+// EncodeCodec encodes v, in direction dir, with the codec of mediaType:
+// the codec marshals the value as JSON has it.
+func EncodeCodec(codecs map[string]Codec, mediaType string, v any, dir oapi.Direction) ([]byte, error) {
+	codec, ok := codecs[CodecKey(mediaType)]
+	if !ok {
+		return nil, fmt.Errorf("no codec for %s", mediaType)
+	}
+	data, err := oapi.EncodeValue(v, dir)
+	if err != nil {
+		return nil, err
+	}
+	value, err := CodecValue(data)
+	if err != nil {
+		return nil, err
+	}
+	return codec.Marshal(value)
 }
 
 // WriteCodec sends body encoded by the codec of contentType, with the
 // given status and headers. Like WriteJSON, nothing is written when
 // encoding fails.
 func (c *Config) WriteCodec(w http.ResponseWriter, status int, contentType string, body any, header http.Header) error {
-	codec, ok := c.Codecs[CodecKey(contentType)]
-	if !ok {
-		return fmt.Errorf("encoding the %d response: no codec for %s", status, contentType)
-	}
-	data, err := codec.Marshal(body)
+	data, err := EncodeCodec(c.Codecs, contentType, body, oapi.Response)
 	if err != nil {
 		return fmt.Errorf("encoding the %d response: %w", status, err)
 	}
