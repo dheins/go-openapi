@@ -289,13 +289,22 @@ func codecMediaTypes(ops []*ir.Operation) []string {
 		for _, p := range o.Params {
 			add(p.ContentKind, p.Content)
 		}
+		addParts := func(p *ir.Parts) {
+			if p != nil {
+				for _, mt := range p.Codecs {
+					add("codec", mt)
+				}
+			}
+		}
 		if o.Body != nil {
 			for _, m := range o.Body.Media {
 				add(m.Kind, m.MediaType)
+				addParts(m.Parts)
 			}
 		}
 		for _, r := range o.Responses {
 			add(r.Kind, r.MediaType)
+			addParts(r.Parts)
 			for _, h := range r.Headers {
 				add(h.ContentKind, h.Content)
 			}
@@ -564,7 +573,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 				w(3, "req.%s = server.JSONLinesBody(%s, r, %s)", m.Field.Name, cfg, f.itemValidation(m.Field.Value.Elem))
 			case m.Kind == "partstream":
 				_, sub, _ := strings.Cut(m.MediaType, "/")
-				parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+				parts := f.partsVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", m.Parts)
 				w(3, "req.%s = server.PartStreamBody(%s, r, %s, %s)", m.Field.Name, cfg, parts, f.itemValidation(m.Field.Value.Elem))
 			case m.Events != nil:
 				w(3, "req.%s = server.TypedEventsBody(%s, r, %s)", m.Field.Name, cfg, f.eventDecoder(m.Events, "Request"))
@@ -604,7 +613,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			pw(3, "}")
 		case "parts":
 			_, sub, _ := strings.Cut(m.MediaType, "/")
-			parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+			parts := f.partsVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", m.Parts)
 			if m.Field.Value.Kind == ir.Tuple {
 				pw(3, "if v, err := server.DecodeTuple[%s](body, r.Header.Get(\"Content-Type\"), %s, %s.Request); err != nil {", elem(), parts, f.imp(oapiImport, "oapi"))
 				pw(4, "b.Body(err)")
@@ -837,6 +846,17 @@ func (f *fileGen) tupleDecls(o *ir.Operation) string {
 
 // partsLiteral renders how positional parts are read and written as a
 // server.Parts.
+// partsVar declares the server.Parts of p as name, and returns it, with
+// the codecs of c, the server's or client's configuration, if parts use
+// them.
+func (f *fileGen) partsVar(name string, p *ir.Parts) string {
+	v := f.declareVar(name, f.partsLiteral(p))
+	if len(p.Codecs) > 0 {
+		return v + ".WithCodecs(c.Codecs)"
+	}
+	return v
+}
+
 func (f *fileGen) partsLiteral(p *ir.Parts) string {
 	rule := func(r ir.ParamProperty) string {
 		var fields []string
@@ -1286,7 +1306,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		stmts := f.validation("r.Body", r.Body, 2)
 		if r.Kind == "parts" && r.Parts.HasHeaders() {
 			// Reading the parts checks their headers; writing them does not.
-			parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+			parts := f.partsVar(lowerFirst(r.TypeName)+"Parts", r.Parts)
 			check := "CheckParts"
 			if r.Body.Kind == ir.Tuple {
 				check = "CheckTuple"
@@ -1354,7 +1374,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "json":
 		w(1, "return c.WriteJSON(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "parts":
-		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+		parts := f.partsVar(lowerFirst(r.TypeName)+"Parts", r.Parts)
 		write := "WriteParts"
 		if r.Body.Kind == ir.Tuple {
 			write = "WriteTuple"
@@ -1380,7 +1400,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "jsonl":
 		w(1, "return server.WriteJSONLines(c, w, req, %s, %s, r.Items, %s)", status, contentType, header)
 	case "partstream":
-		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+		parts := f.partsVar(lowerFirst(r.TypeName)+"Parts", r.Parts)
 		w(1, "return server.WritePartStream(c, w, req, %s, %s, r.Items, %s, %s)", status, contentType, parts, header)
 	case "sse":
 		if r.Events != nil {

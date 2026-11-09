@@ -900,7 +900,7 @@ func (f *fileGen) requestValidation(w func(int, string, ...any), o *ir.Operation
 				check = fmt.Sprintf("b.Body(server.CheckFileHeaders(%s, %s))", value, props)
 			case m.Kind == "parts" && m.Parts.HasHeaders():
 				_, sub, _ := strings.Cut(m.MediaType, "/")
-				parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+				parts := f.partsVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", m.Parts)
 				check = fmt.Sprintf("b.Body(server.CheckParts(%s, %s))", value, parts)
 				if m.Field.Value.Kind == ir.Tuple {
 					check = fmt.Sprintf("b.Body(server.CheckTuple(%s, %s))", value, parts)
@@ -1006,7 +1006,7 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("r.MultipartBody(%s, %s)", value, props)
 		case "parts":
 			f.imp(serverImport, "server")
-			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+			parts := f.partsVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", m.Parts)
 			stmt = fmt.Sprintf("client.PartsBody(r, %s, %s, %s)", ct, value, parts)
 			if m.Field.Value.Kind == ir.Tuple {
 				stmt = fmt.Sprintf("client.TupleBody(r, %s, %s, %s)", ct, value, parts)
@@ -1019,7 +1019,7 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			stmt = fmt.Sprintf("client.JSONLinesBody(c, r, %s, %s, %s)", ct, value, f.itemValidation(m.Field.Value.Elem))
 		case "partstream":
 			f.imp(serverImport, "server")
-			parts := f.declareVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+			parts := f.partsVar(lowerFirst(o.Name)+"Request"+ir.GoName(sub)+"Parts", m.Parts)
 			stmt = fmt.Sprintf("client.PartStreamBody(c, r, %s, %s, %s, %s)", ct, value, parts, f.itemValidation(m.Field.Value.Elem))
 		case "sse":
 			stmt = fmt.Sprintf("r.EventsBody(%s)", value)
@@ -1129,7 +1129,7 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 	case "parts":
 		readBody("body")
 		f.imp(serverImport, "server")
-		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", f.partsLiteral(r.Parts))
+		parts := f.partsVar(lowerFirst(r.TypeName)+"ReadParts", r.Parts)
 		if r.Body.Kind == ir.Tuple {
 			w(2, "tuple, err := client.DecodeTuple[%s](resp, body, %s)", f.goType(r.Body), parts)
 			w(2, "if err != nil {")
@@ -1148,7 +1148,7 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		w(2, "v.Items = client.JSONLines[%s](resp)", f.goType(r.Item))
 	case "partstream":
 		f.imp(serverImport, "server")
-		parts := f.declareVar(lowerFirst(r.TypeName)+"ReadParts", f.partsLiteral(r.Parts))
+		parts := f.partsVar(lowerFirst(r.TypeName)+"ReadParts", r.Parts)
 		w(2, "v.Items = client.PartStream[%s](c, resp, %s)", f.goType(r.Item), parts)
 	case "sse":
 		if r.Events != nil {

@@ -1337,6 +1337,9 @@ type Parts struct {
 	Kinds  []string
 	Prefix []ParamProperty
 	Rest   ParamProperty
+	// Codecs are the media types of the encodings a codec encodes: their
+	// JSON parts are read and written with it.
+	Codecs []string
 }
 
 // TupleType is the struct generated for a body of positional parts with
@@ -1394,6 +1397,13 @@ func (b *builder) parts(value *Ref, m *oas.MediaType, hint string) *Parts {
 	}
 	if m.Encoding.Len() > 0 {
 		b.warnAt(m, []string{"encoding"}, "encoding by name applies to multipart/form-data only; use prefixEncoding and itemEncoding for positional parts")
+	}
+	for _, rule := range append(slices.Clone(p.Prefix), p.Rest) {
+		for _, ct := range rule.ContentTypes {
+			if !strings.Contains(ct, "*") && b.codecKind("", ct, nil) == "codec" && !slices.Contains(p.Codecs, ct) {
+				p.Codecs = append(p.Codecs, ct)
+			}
+		}
 	}
 	return p
 }

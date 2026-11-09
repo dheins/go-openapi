@@ -165,3 +165,26 @@ type binaryCodec struct{}
 
 func (binaryCodec) Marshal(any) ([]byte, error)        { return []byte{0xff, 0x00, '\n'}, nil }
 func (binaryCodec) Unmarshal(data []byte, v any) error { return errors.New("unused") }
+
+// TestCodecParts checks json parts of a codec's content type, written and
+// read with it.
+func TestCodecParts(t *testing.T) {
+	p := Parts{Item: "json", Rest: Property{ContentTypes: []string{"application/x-cbor"}}}.WithCodecs(map[string]Codec{"application/x-cbor": cborish{}})
+	pets := []codecPet{{Name: "Rex", Age: 1}, {Name: "Tom", Age: 2}}
+	body, ct, err := EncodeParts(pets, "multipart/mixed", p, oapi.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Content-Type: application/x-cbor") {
+		t.Errorf("parts are not of the codec's type:\n%s", body)
+	}
+	got, err := DecodeParts[codecPet](body, ct, p)
+	if err != nil || !reflect.DeepEqual(got, pets) {
+		t.Errorf("read %+v %v", got, err)
+	}
+	// Without the codecs, a json part is JSON.
+	plain := Parts{Item: "json", Rest: Property{ContentTypes: []string{"application/x-cbor"}}}
+	if _, _, err := EncodeParts(pets, "multipart/mixed", plain, oapi.Request); err != nil {
+		t.Errorf("without codecs: %v", err)
+	}
+}

@@ -1263,6 +1263,10 @@ paths:
 	if h := a.Responses[0].Headers[0]; h.ContentKind != "codec" {
 		t.Errorf("X-Page = %q", h.ContentKind)
 	}
+	// The JSON parts of a codec's content type are its.
+	if p := operationNamed(t, m, "B").Body.Media[0].Parts; p == nil || strings.Join(p.Codecs, " ") != "application/x-yaml" {
+		t.Errorf("parts = %+v", p)
+	}
 	all := ""
 	for _, w := range m.Warnings {
 		all += w.Message + "\n"
