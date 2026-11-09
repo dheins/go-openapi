@@ -576,7 +576,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 				parts := f.partsVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", m.Parts)
 				w(3, "req.%s = server.PartStreamBody(%s, r, %s, %s)", m.Field.Name, cfg, parts, f.itemValidation(m.Field.Value.Elem))
 			case m.Events != nil:
-				w(3, "req.%s = server.TypedEventsBody(%s, r, %s)", m.Field.Name, cfg, f.eventDecoder(m.Events, "Request"))
+				w(3, "req.%s = server.TypedEventsBody(%s, r, %s)", m.Field.Name, cfg, f.eventDecoder(m.Events, "Request", "c.Codecs"))
 			default:
 				w(3, "req.%s = server.EventsBody(%s, r)", m.Field.Name, cfg)
 			}
@@ -693,54 +693,135 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 
 // eventDecoder returns a function turning a server.Event of es into its
 // server.TypedEvent, decoding its data in direction dir (Request or
-// Response): of the kind its name selects, for named kinds.
-func (f *fileGen) eventDecoder(es *ir.EventStream, dir string) string {
-	srv, oapi := f.imp(serverImport, "server"), f.imp(oapiImport, "oapi")
+// Response): of the kind its name selects, for named kinds, or of the
+// unnamed kind its data is. codecs is the expression of the codecs the
+// data of codec kinds is read with.
+func (f *fileGen) eventDecoder(es *ir.EventStream, dir, codecs string) string {
+	srv := f.imp(serverImport, "server")
 	typ := f.goType(es.Data)
 	var b strings.Builder
 	fmt.Fprintf(&b, "func(ev %s.Event, validate bool) (%s.TypedEvent[%s], error) {\n", srv, srv, typ)
 	fmt.Fprintf(&b, "out := %s.TypedEvent[%s]{ID: ev.ID, Event: ev.Event, Retry: ev.Retry}\n", srv, typ)
+	f.eventFieldChecks(&b, es)
 	if len(es.Kinds) == 0 {
-		fmt.Fprintf(&b, "data, err := %s.EventData(ev, %s.%s, validate, %s)\n", srv, oapi, dir, f.itemValidation(es.Data))
+		fmt.Fprintf(&b, "data, err := %s\n", f.eventValue(es.Media, es.Data, dir, "validate", codecs))
 		b.WriteString("out.Data = data\nreturn out, err\n}")
 		return b.String()
 	}
 	union := es.Data.Type
 	models := func(name string) string { return f.qualify(f.gen.lay.modelsImport, f.gen.lay.modelsPkg, name) }
+	wrapped := func(v *ir.Variant) string {
+		switch {
+		case v.WrapperStruct:
+			return models(union.Sealed.Constructor) + "(" + models(v.Wrapper) + "{Value: data})"
+		case v.Wrapper != "":
+			return models(union.Sealed.Constructor) + "(" + models(v.Wrapper) + "(data))"
+		}
+		return models(union.Sealed.Constructor) + "(data)"
+	}
 	var names []string
 	b.WriteString("switch ev.Event {\n")
 	for _, k := range es.Kinds {
+		if k.Name == "" {
+			continue
+		}
 		names = append(names, strconv.Quote(k.Name))
-		v := k.Variant
-		data := "data"
-		switch {
-		case v.WrapperStruct:
-			data = models(v.Wrapper) + "{Value: data}"
-		case v.Wrapper != "":
-			data = models(v.Wrapper) + "(data)"
-		}
 		fmt.Fprintf(&b, "case %q:\n", k.Name)
-		if k.Text {
-			fmt.Fprintf(&b, "data, err := %s.EventText(ev, validate, %s)\n", srv, f.itemValidation(v.Type))
-		} else {
-			fmt.Fprintf(&b, "data, err := %s.EventData(ev, %s.%s, validate, %s)\n", srv, oapi, dir, f.itemValidation(v.Type))
-		}
+		fmt.Fprintf(&b, "data, err := %s\n", f.eventValue(k.Media, k.Variant.Type, dir, "validate", codecs))
 		b.WriteString("if err != nil {\nreturn out, err\n}\n")
-		fmt.Fprintf(&b, "out.Data = %s(%s)\n", models(union.Sealed.Constructor), data)
+		fmt.Fprintf(&b, "out.Data = %s\n", wrapped(k.Variant))
 	}
-	fmt.Fprintf(&b, "default:\nreturn out, %s.UnknownEvent(ev.Event, %s)\n}\nreturn out, nil\n}", srv, strings.Join(names, ", "))
+	b.WriteString("default:\n")
+	if !es.Unnamed() {
+		fmt.Fprintf(&b, "return out, %s.UnknownEvent(ev.Event, %s)\n}\nreturn out, nil\n}", srv, strings.Join(names, ", "))
+		return b.String()
+	}
+	// The unnamed kind the data is: always checked, as that is how the
+	// kinds are told apart.
+	b.WriteString("found := 0\n")
+	for _, k := range es.Kinds {
+		if k.Name != "" {
+			continue
+		}
+		fmt.Fprintf(&b, "if data, err := %s; err == nil {\n", f.eventValue(k.Media, k.Variant.Type, dir, "true", codecs))
+		fmt.Fprintf(&b, "out.Data = %s\nfound++\n", wrapped(k.Variant))
+		if es.AnyOf {
+			b.WriteString("return out, nil\n")
+		}
+		b.WriteString("}\n")
+	}
+	fmt.Fprintf(&b, "switch found {\ncase 0:\nreturn out, %s.NoEventKind(ev.Event, %s)\n", srv, strings.Join(names, ", "))
+	if !es.AnyOf {
+		fmt.Fprintf(&b, "case 1:\ndefault:\nreturn out, %s.EventKinds()\n", srv)
+	}
+	b.WriteString("}\n}\nreturn out, nil\n}")
 	return b.String()
+}
+
+// eventFieldChecks writes the checks of the id and retry fields of the
+// events of es, if their schemas have any.
+func (f *fileGen) eventFieldChecks(b *strings.Builder, es *ir.EventStream) {
+	srv := f.imp(serverImport, "server")
+	for _, field := range []struct {
+		ref       *ir.Ref
+		at, value string
+	}{{es.ID, "/id", "ev.ID"}, {es.Retry, "/retry", "ev.Retry"}} {
+		if field.ref == nil {
+			continue
+		}
+		value := field.value
+		if typ := f.goType(field.ref); field.at == "/retry" {
+			value = typ + "(" + value + ")"
+		} else if typ != "string" {
+			value = typ + "(" + value + ")"
+		}
+		fmt.Fprintf(b, "if validate {\nif err := %s.CheckEventField(%q, %s, %s); err != nil {\nreturn out, err\n}\n}\n", srv, field.at, value, f.itemValidation(field.ref))
+	}
+}
+
+// eventValue returns the call decoding the data of an event of media m
+// into a value of type r, in direction dir, checked if validate is.
+func (f *fileGen) eventValue(m ir.EventMedia, r *ir.Ref, dir, validate, codecs string) string {
+	srv, oapi := f.imp(serverImport, "server"), f.imp(oapiImport, "oapi")
+	switch m.Kind {
+	case "", "json":
+		return fmt.Sprintf("%s.EventData(ev, %s.%s, %s, %s)", srv, oapi, dir, validate, f.itemValidation(r))
+	case "text":
+		return fmt.Sprintf("%s.EventText(ev, %s, %s)", srv, validate, f.itemValidation(r))
+	}
+	return fmt.Sprintf("%s.EventValue(ev, %s, %s.%s, %s, %s)", srv, f.eventMedia(m, codecs), oapi, dir, validate, f.itemValidation(r))
+}
+
+// eventMedia returns the server.EventMedia literal of m.
+func (f *fileGen) eventMedia(m ir.EventMedia, codecs string) string {
+	srv := f.imp(serverImport, "server")
+	fields := []string{fmt.Sprintf("Kind: %q", m.Kind)}
+	switch m.Kind {
+	case "scalar":
+		fields = append(fields, fmt.Sprintf("Type: %q", m.Type))
+	case "xml":
+		fields = append(fields, "XML: "+xmlNodeLiteral(m.XML))
+	case "form":
+		fields = append(fields, "Form: "+f.objectProperty(m.Form.Properties, m.Form.Additional, m.Form.Shape))
+	case "codec":
+		fields = append(fields, fmt.Sprintf("MediaType: %q", m.MediaType), "Codecs: "+codecs)
+	}
+	return srv + ".EventMedia{" + strings.Join(fields, ", ") + "}"
 }
 
 // eventEncoder returns a function turning a server.TypedEvent of es into
 // the server.Event to send, its data encoded in direction dir (Request or
 // Response) and, for named kinds, named after its variant; nil, for the
-// runtime's own, for one kind.
-func (f *fileGen) eventEncoder(es *ir.EventStream, dir string) string {
-	if len(es.Kinds) == 0 {
+// runtime's own, for one kind of JSON.
+func (f *fileGen) eventEncoder(es *ir.EventStream, dir, codecs string) string {
+	if len(es.Kinds) == 0 && (es.Media.Kind == "json" || es.Media.Kind == "") {
 		return "nil"
 	}
 	srv, oapi := f.imp(serverImport, "server"), f.imp(oapiImport, "oapi")
+	if len(es.Kinds) == 0 {
+		return fmt.Sprintf("func(ev %s.TypedEvent[%s]) (%s.Event, error) {\nreturn %s.EncodeEventValue(ev, \"\", ev.Data, %s, %s.%s)\n}",
+			srv, f.goType(es.Data), srv, srv, f.eventMedia(es.Media, codecs), oapi, dir)
+	}
 	models := func(name string) string { return f.qualify(f.gen.lay.modelsImport, f.gen.lay.modelsPkg, name) }
 	var b strings.Builder
 	fmt.Fprintf(&b, "func(ev %s.TypedEvent[%s]) (%s.Event, error) {\n", srv, f.goType(es.Data), srv)
@@ -752,14 +833,17 @@ func (f *fileGen) eventEncoder(es *ir.EventStream, dir string) string {
 			stored = models(v.Wrapper)
 		}
 		fmt.Fprintf(&b, "case %s:\n", stored)
-		if k.Text {
+		switch k.Media.Kind {
+		case "text":
 			text := f.unwrap(v, "v")
 			if f.goType(v.Type) != "string" {
 				text = "string(" + text + ")"
 			}
 			fmt.Fprintf(&b, "return %s.EncodeTextEvent(ev, %q, %s)\n", srv, k.Name, text)
-		} else {
+		case "", "json":
 			fmt.Fprintf(&b, "return %s.EncodeEvent(ev, %q, %s, %s.%s)\n", srv, k.Name, f.unwrap(v, "v"), oapi, dir)
+		default:
+			fmt.Fprintf(&b, "return %s.EncodeEventValue(ev, %q, %s, %s, %s.%s)\n", srv, k.Name, f.unwrap(v, "v"), f.eventMedia(k.Media, codecs), oapi, dir)
 		}
 	}
 	fmt.Fprintf(&b, "}\nreturn %s.Event{}, %s.New(\"the event has no data\")\n}", srv, f.imp("errors", "errors"))
@@ -1417,7 +1501,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		w(1, "return server.WritePartStream(c, w, req, %s, %s, r.Items, %s, %s)", status, contentType, parts, header)
 	case "sse":
 		if r.Events != nil {
-			w(1, "return server.WriteTypedEvents(c, w, req, %s, r.Events, %s, %s)", status, header, f.eventEncoder(r.Events, "Response"))
+			w(1, "return server.WriteTypedEvents(c, w, req, %s, r.Events, %s, %s)", status, header, f.eventEncoder(r.Events, "Response", "c.Codecs"))
 			break
 		}
 		w(1, "return server.WriteEvents(c, w, req, %s, r.Events, %s)", status, header)

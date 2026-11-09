@@ -328,7 +328,7 @@ func (f *fileGen) cliStream(m *ir.BodyMedia) string {
 	case m.Kind == "sse" && m.Events == nil:
 		return "func(r io.Reader) any { return cli.Events(r) }"
 	case m.Kind == "sse":
-		return fmt.Sprintf("func(r io.Reader) any { return cli.TypedEvents(r, %s) }", f.eventDecoder(m.Events, "Request"))
+		return fmt.Sprintf("func(r io.Reader) any { return cli.TypedEvents(r, %s) }", f.eventDecoder(m.Events, "Request", "nil"))
 	}
 	return ""
 }
