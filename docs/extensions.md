@@ -175,10 +175,13 @@ A schema with no type, or a type list, is left as it is.
 
 ## `x-goapi-codec`
 
-On a media type object, `true`: its bodies are encoded and decoded with a
-codec registered at run time (`server.WithCodec`, `client.WithCodec`,
-or a TypeScript client's `codecs` option), as `goapi generate -codec`
-declares one. See the guide's [codecs](guide.md#codecs).
+On a media type object, `true`: its bodies, parameters and headers are
+encoded and decoded with a codec registered at run time
+(`server.WithCodec`, `client.WithCodec`, `middleware.WithCodec`, or a
+TypeScript client's or receiver's `codecs` option), as `goapi generate
+-codec` declares one. On a range (`application/*`), with whichever
+registered codec the media type sent has. See the guide's
+[codecs](guide.md#codecs).
 
 ```yaml
 content:

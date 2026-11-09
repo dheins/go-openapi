@@ -956,7 +956,9 @@ A media type goapi does not know, such as `application/msgpack` or
 `client` and `ts-client`) or `x-goapi-codec: true` on its media type
 object ([extensions](extensions.md#x-goapi-codec)). Its body is then the
 schema's type, like JSON's, and its responses are `...<Subtype>Response`
-variants (`...MsgpackResponse`).
+variants (`...MsgpackResponse`). The same media type in a parameter's or
+header's `content`, or in a positional part's `encoding` `contentType`,
+is read and written with the codec too.
 
 Register the codec at run time: a `server.Codec`, whose `Marshal` and
 `Unmarshal` a library for the format has as they are.
@@ -975,16 +977,40 @@ c, err := petclient.New(client.WithCodec("application/msgpack", msgpackCodec{}))
 media type its operations use has no codec, so a missing registration is
 found at start. Media types match without parameters or case.
 
-The codec decodes into the generated type itself, and `Validate` then
-checks it. What the JSON decoder does besides is not done: required
-properties are only checked if the type's zero value fails `Validate`,
-read-only and write-only properties are kept in both directions,
-defaults are not applied, and problems the codec reports have no JSON
-pointer (`body: invalid application/msgpack: ...`). Wildcards
-(`application/*`) cannot have codecs.
+A codec gets the value as JSON has it, not the generated types:
+`Unmarshal` decodes into an `any` (maps, slices and scalars, as format
+libraries give them), which is converted to JSON (`server.CodecJSON`:
+keys that are strings, integers or booleans, `[]byte` as base64, times
+as RFC 3339) and decoded by the JSON decoder, with all its rules:
+required properties, read-only and write-only ones, defaults, and
+problems at JSON pointers (`body /name: required property is missing`).
+`Marshal` gets the JSON encoding as plain values (`server.CodecValue`:
+maps of strings, `int64` and `float64`), so an object's properties come
+in the codec's own order. Only a body the codec cannot read is reported
+without a pointer (`body: invalid application/msgpack: ...`).
 
-TypeScript clients take codecs as an option, and throw without one they
-need:
+- **Parameters and headers** of a codec's media type hold what the codec
+  writes, which must be a line of text: the codecs of text formats, such
+  as YAML, fit; a binary codec's output cannot be sent in one. Part
+  headers of one are only checked for presence.
+- **Positional parts** whose encoding's `contentType` is a codec's are
+  read and written with it, in bodies, tuples and streams of parts.
+- **Ranges:** `application/*` (or `*/*`) with `x-goapi-codec`, or
+  `-codec application/*`, reads a body with the registered codec of the
+  media type it was sent as, named in the request's `ContentType` field
+  (415 without one), and writes a response with the codec of the media
+  type its variant's `ContentType` names. A client sends a body as its
+  request's `ContentType` names. At least one codec in each range must be
+  registered.
+
+`middleware.Validate` checks codec bodies, parameters and headers when
+given the codecs (`middleware.WithCodec`, which also declares the media
+type as a codec's, as `-codec` does), and only their media types
+without.
+
+TypeScript clients and receivers take codecs as an option, and throw
+without one they need; they read and write codec parameters, headers,
+parts and ranges the same way, a range's media type in `contentType`:
 
 ```ts
 const client = new Client({
