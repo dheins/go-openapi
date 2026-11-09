@@ -188,3 +188,22 @@ func TestCodecParts(t *testing.T) {
 		t.Errorf("without codecs: %v", err)
 	}
 }
+
+// TestCodecRanges checks a body of a codec's range, read with the codec
+// of the media type sent.
+func TestCodecRanges(t *testing.T) {
+	c := NewConfig(WithCodec("application/x-cbor", cborish{}), WithCodec("application/x-other", cborish{}))
+	if missing := MissingCodecs(c.Codecs, []string{"application/*", "text/*"}); !reflect.DeepEqual(missing, []string{"text/*"}) {
+		t.Errorf("missing %q", missing)
+	}
+	var b Binder
+	r := httptest.NewRequest("PUT", "/", nil)
+	r.Header.Set("Content-Type", "application/x-cbor; v=1")
+	if mt, ok := c.BodyCodec(&b, r, "application/*"); !ok || mt != "application/x-cbor" || b.Failed() {
+		t.Errorf("BodyCodec = %q %v", mt, ok)
+	}
+	r.Header.Set("Content-Type", "application/x-gob")
+	if _, ok := c.BodyCodec(&b, r, "application/*"); ok || b.Problem().Status != 415 || !strings.Contains(b.Problem().Detail, "application/x-cbor or application/x-other") {
+		t.Errorf("unregistered: %v %+v", ok, b.Problem())
+	}
+}

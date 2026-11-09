@@ -977,7 +977,16 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 		}
 		w(2, "}")
 		w(1, "}")
-		w(1, "switch mediaType {")
+		var patterns []string
+		for _, m := range body.Media {
+			patterns = append(patterns, strconv.Quote(m.MediaType))
+		}
+		if slices.ContainsFunc(body.Media, func(m *ir.BodyMedia) bool { return strings.Contains(m.MediaType, "*") }) {
+			// A media type of a range is sent as the range's.
+			w(1, "switch client.MediaPattern(mediaType, %s) {", strings.Join(patterns, ", "))
+		} else {
+			w(1, "switch mediaType {")
+		}
 	}
 	for _, m := range body.Media {
 		depth := 1
@@ -997,6 +1006,10 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 			shape := f.declareVar(lowerFirst(o.Name)+"RequestXMLShape", xmlNodeLiteral(m.XML))
 			stmt = fmt.Sprintf("r.XMLBody(%s, %s, %s)", ct, value, shape)
 		case "codec":
+			if strings.Contains(m.MediaType, "*") {
+				// The request names the media type of the range it is.
+				ct = "req.ContentType"
+			}
 			stmt = fmt.Sprintf("r.CodecBody(c, %s, %s)", ct, value)
 		case "form":
 			stmt = fmt.Sprintf("r.FormBody(%s, %s)", ct, value)
@@ -1109,6 +1122,11 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		check(fmt.Sprintf("client.DecodeXML(resp, body, %s, &v.Body)", shape))
 	case "codec":
 		readBody("body")
+		if r.ContentTypeField {
+			check("c.DecodeCodec(resp, body, resp.Header.Get(\"Content-Type\"), &v.Body)")
+			w(2, "v.ContentType = resp.Header.Get(\"Content-Type\")")
+			break
+		}
 		check(fmt.Sprintf("c.DecodeCodec(resp, body, %q, &v.Body)", r.MediaType))
 	case "text":
 		readBody("body")

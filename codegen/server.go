@@ -558,7 +558,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 		// for the other media types.
 		w(1, "if mediaType, ok := %s.BodyMediaType(r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
 	}
-	if len(body.Media) > 1 {
+	if body.MediaTypeField {
 		w(2, "req.ContentType = mediaType")
 	}
 	if streamed {
@@ -631,6 +631,19 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			validate(4)
 			pw(3, "}")
 		case "codec":
+			if strings.Contains(m.MediaType, "*") {
+				// The codec is that of the media type the body was sent as.
+				pw(3, "if mt, ok := c.BodyCodec(&b, r, %q); ok {", m.MediaType)
+				pw(4, "req.ContentType = mt")
+				pw(4, "if v, err := server.DecodeCodec[%s](c, mt, body); err != nil {", elem())
+				pw(5, "b.Body(err)")
+				pw(4, "} else {")
+				pw(5, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
+				validate(5)
+				pw(4, "}")
+				pw(3, "}")
+				break
+			}
 			pw(3, "if v, err := server.DecodeCodec[%s](c, %q, body); err != nil {", elem(), m.MediaType)
 			pw(4, "b.Body(err)")
 			pw(3, "} else {")

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/dheins/go-openapi/oapi"
+	"github.com/dheins/go-openapi/runtime/problem"
 )
 
 // Codec encodes and decodes bodies of a media type goapi does not know,
@@ -59,15 +60,47 @@ func (c *Config) RequireCodecs(mediaTypes ...string) {
 }
 
 // MissingCodecs returns the media types that codecs has no codec for, in
-// order and once each.
+// order and once each; a range (application/*) needs one codec of a media
+// type in it.
 func MissingCodecs(codecs map[string]Codec, mediaTypes []string) []string {
 	var missing []string
 	for _, mt := range mediaTypes {
-		if _, ok := codecs[CodecKey(mt)]; !ok && !slices.Contains(missing, mt) {
+		if len(codecsIn(codecs, mt)) == 0 && !slices.Contains(missing, mt) {
 			missing = append(missing, mt)
 		}
 	}
 	return missing
+}
+
+// codecsIn returns the media types of codecs that mediaType is, or is a
+// range of, sorted.
+func codecsIn(codecs map[string]Codec, mediaType string) []string {
+	key := CodecKey(mediaType)
+	if _, ok := codecs[key]; ok {
+		return []string{key}
+	}
+	var in []string
+	if strings.Contains(key, "*") {
+		for k := range codecs {
+			if matchMediaType(k, []string{key}) {
+				in = append(in, k)
+			}
+		}
+	}
+	slices.Sort(in)
+	return in
+}
+
+// BodyCodec returns the media type of r's body, of the range pattern
+// (application/*), if a codec is registered for it. Otherwise it records
+// on b that the body is answered with 415, naming those there are.
+func (c *Config) BodyCodec(b *Binder, r *http.Request, pattern string) (string, bool) {
+	mt := CodecKey(r.Header.Get("Content-Type"))
+	if _, ok := c.Codecs[mt]; ok && matchMediaType(mt, []string{pattern}) {
+		return mt, true
+	}
+	b.fatal = problem.Newf(http.StatusUnsupportedMediaType, "content type %q is not supported; use %s", r.Header.Get("Content-Type"), strings.Join(codecsIn(c.Codecs, pattern), " or "))
+	return "", false
 }
 
 // DecodeCodec decodes a request body of a codec's media type as T, as a

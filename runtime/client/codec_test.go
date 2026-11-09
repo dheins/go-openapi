@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -55,5 +56,27 @@ func TestCodecs(t *testing.T) {
 	// A value of the wrong type is an invalid response too, at its pointer.
 	if err := c.DecodeCodec(resp, []byte(`{"id":"two"}`), "application/x-json", &got); !errors.As(err, &invalid) {
 		t.Errorf("wrong type: %v", err)
+	}
+}
+
+func TestMediaPattern(t *testing.T) {
+	for _, tt := range []struct{ mt, want string }{
+		{"application/json", "application/json"},
+		{"Application/X-Cbor; v=1", "application/*"},
+		{"text/plain", "text/plain"},
+	} {
+		if got := MediaPattern(tt.mt, "application/json", "application/*"); got != tt.want {
+			t.Errorf("%s: %s, want %s", tt.mt, got, tt.want)
+		}
+	}
+	c, err := NewConfig(WithBaseURL("http://pets.test"), WithCodec("application/x-json", jsonCodec{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A range is not a media type to send a body as.
+	r := NewRequest("POST")
+	r.CodecBody(c, "application/*", 1)
+	if r.err == nil || !strings.Contains(r.err.Error(), "ContentType") {
+		t.Errorf("range: %v", r.err)
 	}
 }

@@ -742,7 +742,12 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 	case "xml":
 		doc, err = server.XMLToJSON(data, m.xml)
 	case "codec":
-		if doc, err = codecJSON(cfg.Codecs, m.ir.MediaType, data); errors.Is(err, errNoCodec) {
+		mt := m.ir.MediaType
+		if strings.Contains(mt, "*") {
+			// A codec's range: the codec of the media type sent.
+			mt = r.Header.Get("Content-Type")
+		}
+		if doc, err = codecJSON(cfg.Codecs, mt, data); errors.Is(err, errNoCodec) {
 			return nil
 		}
 	default:

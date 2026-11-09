@@ -176,7 +176,11 @@ type Body struct {
 	Required bool
 	// Media are the accepted media types.
 	Media []*BodyMedia
-	Doc   string
+	// MediaTypeField says the request has a ContentType field, the media
+	// type its body was sent as: with several media types, or a codec's
+	// range (application/*).
+	MediaTypeField bool
+	Doc            string
 	// Value is the type of the first media type's body, and Type the type
 	// of the Body field: Value, made optional if the body is not required.
 	Value, Type *Ref
@@ -961,8 +965,8 @@ func structured(kind string) bool {
 
 // codecKind returns "codec" when a body of media type mt decodes with a
 // codec, by Options.Codecs or x-goapi-codec on its media type object m,
-// and kind otherwise. A wildcard cannot have a codec, which is
-// registered for one media type.
+// and kind otherwise. A wildcard (application/*) decodes with whichever
+// registered codec its value's media type has.
 func (b *builder) codecKind(kind, mt string, m *oas.MediaType) string {
 	declared := slices.ContainsFunc(b.opts.Codecs, func(c string) bool { return mediaBase(c) == mediaBase(mt) })
 	if !declared && m != nil && m.Extensions != nil {
@@ -972,10 +976,6 @@ func (b *builder) codecKind(kind, mt string, m *oas.MediaType) string {
 		}
 	}
 	if !declared {
-		return kind
-	}
-	if strings.Contains(mt, "*") {
-		b.warnAt(m, nil, fmt.Sprintf("%s is a wildcard and cannot have a codec, which is registered for one media type", mt))
 		return kind
 	}
 	return "codec"
@@ -1096,6 +1096,9 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 		}
 	}
 	body.Value, body.Type = body.Fields[0].Value, body.Fields[0].Type
+	body.MediaTypeField = len(body.Media) > 1 || slices.ContainsFunc(body.Media, func(m *BodyMedia) bool {
+		return m.Kind == "codec" && strings.Contains(m.MediaType, "*")
+	})
 	return body
 }
 
@@ -1680,8 +1683,12 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			suffix = "JSON"
 		case "codec":
 			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
+			v.ContentTypeField = strings.Contains(mt, "*")
 			_, sub, _ := strings.Cut(mediaBase(mt), "/")
 			suffix = GoName(sub)
+			if sub == "*" {
+				suffix = GoName(strings.TrimSuffix(mediaBase(mt), "/*"))
+			}
 		case "xml":
 			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
 			node, why := b.xmlRoot(v.Body, media.Schema)

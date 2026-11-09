@@ -382,7 +382,11 @@ func (m *responseMedia) check(set *schemas.Set, codecs map[string]server.Codec, 
 	case "text":
 		doc, err = server.ValuesJSON(server.Values{Items: []string{string(body)}}, server.Scalar, m.prop)
 	case "codec":
-		if doc, err = codecJSON(codecs, m.mediaType, body); errors.Is(err, errNoCodec) {
+		mt := m.mediaType
+		if strings.Contains(mt, "*") {
+			mt = contentType
+		}
+		if doc, err = codecJSON(codecs, mt, body); errors.Is(err, errNoCodec) {
 			return nil
 		}
 	default:

@@ -1213,15 +1213,16 @@ components:
 	for _, r := range o.Responses {
 		responses = append(responses, r.MediaType+"="+r.Kind+":"+r.TypeName)
 	}
-	if got := strings.Join(responses, " "); got != "application/cbor=codec:A200CborResponse application/*=binary:A200ApplicationResponse" {
+	// A codec's range decodes with the codec of the media type sent, named
+	// in a ContentType field.
+	if got := strings.Join(responses, " "); got != "application/cbor=codec:A200CborResponse application/*=codec:A200ApplicationResponse" {
 		t.Errorf("responses = %s", got)
 	}
-	all := ""
-	for _, w := range m.Warnings {
-		all += w.Message + "\n"
+	if r := o.Responses[1]; !r.ContentTypeField {
+		t.Errorf("application/* has no ContentType field")
 	}
-	if want := "application/* is a wildcard and cannot have a codec, which is registered for one media type"; !strings.Contains(all, want) {
-		t.Errorf("no warning %q in:\n%s", want, all)
+	if !o.Body.MediaTypeField {
+		t.Errorf("the request has no ContentType field")
 	}
 }
 

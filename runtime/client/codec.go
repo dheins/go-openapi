@@ -35,10 +35,33 @@ func (c *Config) RequireCodecs(mediaTypes ...string) error {
 	return nil
 }
 
+// MediaPattern returns the pattern of patterns, the media types of a body
+// in its document, that mediaType is: itself, or a range it is in; or
+// mediaType if none.
+func MediaPattern(mediaType string, patterns ...string) string {
+	key := server.CodecKey(mediaType)
+	for _, p := range patterns {
+		if server.CodecKey(p) == key {
+			return p
+		}
+	}
+	for _, p := range patterns {
+		if strings.Contains(p, "*") && server.MatchMediaType(key, p) {
+			return p
+		}
+	}
+	return mediaType
+}
+
 // CodecBody sets the body to v encoded by the codec of contentType, as a
 // request: the codec marshals the value as JSON has it, leaving out
-// read-only properties.
+// read-only properties. A body of a codec's range (application/*) is sent
+// as the media type its request's ContentType names.
 func (r *Request) CodecBody(c *Config, contentType string, v any) {
+	if contentType == "" || strings.Contains(contentType, "*") {
+		r.fail(fmt.Errorf("body: set the request's ContentType to the media type to send it as, %q is a range", contentType))
+		return
+	}
 	data, err := server.EncodeCodec(c.Codecs, contentType, v, oapi.Request)
 	if err != nil {
 		r.fail(fmt.Errorf("body: %w", err))
