@@ -29,7 +29,8 @@ func TestMiddlewareParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mw, err := middleware.Validate(spec, middleware.WithLogger(slog.New(slog.DiscardHandler)))
+	mw, err := middleware.Validate(spec, middleware.WithLogger(slog.New(slog.DiscardHandler)),
+		middleware.WithCodec("application/x-tc", tcCodec{}), middleware.WithCodec("application/x-tc2", tcCodec{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +114,12 @@ func TestMiddlewareParity(t *testing.T) {
 		{"PUT", "/labels", "application/xml", "<labels><name>b</name><other>x</other></labels>", nil},
 		{"PUT", "/labels", "application/xml", `<labels><name>b</name><value unit="kg"></value></labels>`, nil},
 		{"PUT", "/labels", "application/xml", "<labels><value>7</value></labels>", nil},
+		// Codecs: parameters, headers and bodies of a codec's range.
+		{"GET", `/coded?where=TC{"w":0}`, "", "", []string{"X-Meta", `TC{"h":0}`}},
+		{"GET", "/coded?where=nope", "", "", nil},
+		{"PUT", "/coded", "application/x-tc2", `TC{"tag":"x"}`, nil},
+		{"PUT", "/coded", "application/x-tc", `TC{"name":""}`, nil},
+		{"PUT", "/coded", "application/x-gob", "x", nil},
 	} {
 		want := do(t, generated, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)
 		got := do(t, accept, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)

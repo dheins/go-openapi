@@ -656,6 +656,47 @@ var app = cli.App[*client.Client]{
 			},
 		},
 		{
+			Name: "get-coded", Summary: "Parameters and a header with content of a codec's media type.", Tag: "",
+			Request: func() any { return new(api.GetCodedRequest) },
+			Params: []cli.Param{
+				{Flag: "where", Field: "Where", In: "query", Name: "where", Kind: cli.JSON, Required: true},
+				{Flag: "x-meta", Field: "XMeta", In: "header", Name: "X-Meta", Kind: cli.JSON},
+			},
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.GetCoded(ctx, req.(*api.GetCodedRequest))
+			},
+		},
+		{
+			Name: "put-coded", Summary: "A body of any codec's media type, echoed in one the handler picks.", Tag: "",
+			Request: func() any { return new(api.PutCodedRequest) },
+			Media: []cli.Media{
+				{MediaType: "application/*", Kind: "codec", Field: "Body"},
+			},
+			BodyRequired: true,
+			FieldsOf:     "Body",
+			BodyFields: []cli.BodyField{
+				{Flag: "body.name", Path: "name", Type: "string"},
+				{Flag: "body.tag", Path: "tag", Type: "string"},
+				{Flag: "body.secret", Path: "secret", Type: "string"},
+			},
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PutCoded(ctx, req.(*api.PutCodedRequest))
+			},
+		},
+		{
+			Name: "post-coded-parts", Summary: "Pets as parts of a codec's media type, and a stream of them.", Tag: "",
+			Request: func() any { return new(api.PostCodedPartsRequest) },
+			Media: []cli.Media{
+				{MediaType: "multipart/mixed", Kind: "parts", Field: "Body"},
+				{MediaType: "multipart/related", Kind: "partstream", Field: "RelatedBody"},
+			},
+			BodyRequired: true,
+			ContentType:  "ContentType",
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PostCodedParts(ctx, req.(*api.PostCodedPartsRequest))
+			},
+		},
+		{
 			Name: "put-labels", Summary: "Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.", Tag: "",
 			Request: func() any { return new(api.PutLabelsRequest) },
 			Media: []cli.Media{

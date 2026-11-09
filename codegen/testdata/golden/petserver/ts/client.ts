@@ -852,6 +852,64 @@ const putLinesSpec: OperationSpec = {
   responses: [{ status: "204" }],
 };
 
+/** The inputs of getCoded. */
+export interface GetCodedRequest {
+  where: $m.Size;
+  xMeta?: $m.Size;
+}
+
+/** The responses of getCoded. */
+export type GetCodedResponse =
+  | { status: 204; headers: { xPage?: $m.Size } };
+
+const getCodedSpec: OperationSpec = {
+  method: "GET",
+  path: "/coded",
+  params: [{ key: "where", name: "where", in: "query", style: "", explode: false, shape: "scalar", content: "codec", mediaType: "application/x-tc2", required: true, schema: $ref(() => $m.SizeSchema) }, { key: "xMeta", name: "X-Meta", in: "header", style: "", explode: false, shape: "scalar", content: "codec", mediaType: "application/x-tc2", schema: $ref(() => $m.SizeSchema) }],
+  responses: [{ status: "204", headers: [{ key: "xPage", name: "X-Page", content: "codec", mediaType: "application/x-tc2", schema: $ref(() => $m.SizeSchema) }] }],
+};
+
+/** The inputs of putCoded. */
+export interface PutCodedRequest {
+  body: $m.Pet;
+  /** The media type to send the body as; by default the first of the
+   * property that is set. */
+  contentType?: `application/${string}`;
+}
+
+/** The responses of putCoded. */
+export type PutCodedResponse =
+  | { status: 200; contentType: string; body: $m.Pet };
+
+const putCodedSpec: OperationSpec = {
+  method: "PUT",
+  path: "/coded",
+  params: [],
+  body: { required: true, media: [{ mediaType: "application/*", kind: "codec", key: "body", schema: $ref(() => $m.PetSchema) }] },
+  responses: [{ status: "200", mediaType: "application/*", kind: "codec", schema: $ref(() => $m.PetSchema) }],
+};
+
+/** The inputs of postCodedParts. */
+export interface PostCodedPartsRequest {
+  body?: $m.Pet[];
+  relatedBody?: Iterable<$m.Pet> | AsyncIterable<$m.Pet>;
+  /** The media type to send the body as; by default the first of the
+   * property that is set. */
+  contentType?: "multipart/mixed" | "multipart/related";
+}
+
+/** The responses of postCodedParts. */
+export type PostCodedPartsResponse =
+  | { status: 200; body: string[] };
+
+const postCodedPartsSpec: OperationSpec = {
+  method: "POST",
+  path: "/coded",
+  params: [],
+  body: { required: true, media: [{ mediaType: "multipart/mixed", kind: "parts", key: "body", schema: { kind: "any" }, parts: { item: { kind: "json", schema: $ref(() => $m.PetSchema) }, encoding: { contentTypes: ["application/x-tc2"] } } }, { mediaType: "multipart/related", kind: "partstream", key: "relatedBody", schema: { kind: "any" }, parts: { item: { kind: "json", schema: $ref(() => $m.PetSchema) }, encoding: { contentTypes: ["application/x-tc2"] } } }] },
+  responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: { kind: "string" } } }],
+};
+
 /** The inputs of putLabels. */
 export interface PutLabelsRequest {
   body: $m.Labels;
@@ -927,7 +985,7 @@ export class Client {
   readonly #cfg: Config;
 
   constructor(options: ClientOptions & { credentials?: Credentials } = {}) {
-    this.#cfg = config(options, defaultServerUrl, options.credentials, ["application/x-tc", "application/x-tc2"]);
+    this.#cfg = config(options, defaultServerUrl, options.credentials, ["application/x-tc", "application/x-tc2", "application/*"]);
   }
 
   /**
@@ -1322,6 +1380,33 @@ export class Client {
   /** PUT /orders/{id}/lines. */
   putLines(req: PutLinesRequest, call?: CallOptions): Promise<PutLinesResponse> {
     return send(this.#cfg, putLinesSpec, req, call) as Promise<PutLinesResponse>;
+  }
+
+  /**
+   * GET /coded.
+   *
+   * Parameters and a header with content of a codec's media type.
+   */
+  getCoded(req: GetCodedRequest, call?: CallOptions): Promise<GetCodedResponse> {
+    return send(this.#cfg, getCodedSpec, req, call) as Promise<GetCodedResponse>;
+  }
+
+  /**
+   * PUT /coded.
+   *
+   * A body of any codec's media type, echoed in one the handler picks.
+   */
+  putCoded(req: PutCodedRequest, call?: CallOptions): Promise<PutCodedResponse> {
+    return send(this.#cfg, putCodedSpec, req, call) as Promise<PutCodedResponse>;
+  }
+
+  /**
+   * POST /coded.
+   *
+   * Pets as parts of a codec's media type, and a stream of them.
+   */
+  postCodedParts(req: PostCodedPartsRequest = {}, call?: CallOptions): Promise<PostCodedPartsResponse> {
+    return send(this.#cfg, postCodedPartsSpec, req, call) as Promise<PostCodedPartsResponse>;
   }
 
   /**

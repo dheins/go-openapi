@@ -148,6 +148,18 @@ type Handler interface {
 	CreateOrder(ctx context.Context, req *CreateOrderRequest) (CreateOrderResponse, error)
 	// PutLines handles PUT /orders/{id}/lines.
 	PutLines(ctx context.Context, req *PutLinesRequest) (PutLinesResponse, error)
+	// GetCoded handles GET /coded.
+	//
+	// Parameters and a header with content of a codec's media type.
+	GetCoded(ctx context.Context, req *GetCodedRequest) (GetCodedResponse, error)
+	// PutCoded handles PUT /coded.
+	//
+	// A body of any codec's media type, echoed in one the handler picks.
+	PutCoded(ctx context.Context, req *PutCodedRequest) (PutCodedResponse, error)
+	// PostCodedParts handles POST /coded.
+	//
+	// Pets as parts of a codec's media type, and a stream of them.
+	PostCodedParts(ctx context.Context, req *PostCodedPartsRequest) (PostCodedPartsResponse, error)
 	// PutLabels handles PUT /labels.
 	//
 	// Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.

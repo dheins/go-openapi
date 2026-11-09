@@ -37,6 +37,9 @@ type settings struct {
 	server      []server.Option
 	passThrough bool
 	responses   ResponseMode
+	// codecs are the media types WithCodec registers, which the document
+	// reads as codecs' as goapi generate -codec does.
+	codecs []string
 }
 
 // WithBasePath serves the operations below prefix, such as "/v1"; by
@@ -65,11 +68,15 @@ func WithMaxBodyBytes(n int64) Option {
 }
 
 // WithCodec registers the codec of a media type goapi does not know, as
-// server.WithCodec does for generated servers: bodies and parameters of
-// that type are then checked against their schemas, decoded as the codec
-// reads them. Without it, only their media types are checked.
+// server.WithCodec does for generated servers, and as goapi generate
+// -codec declares it: bodies, parameters and headers of that type are
+// then checked against their schemas, decoded as the codec reads them.
+// Without it, only their media types are checked.
 func WithCodec(mediaType string, codec server.Codec) Option {
-	return func(s *settings) { s.server = append(s.server, server.WithCodec(mediaType, codec)) }
+	return func(s *settings) {
+		s.server = append(s.server, server.WithCodec(mediaType, codec))
+		s.codecs = append(s.codecs, mediaType)
+	}
 }
 
 // WithPassThrough hands requests the document has no operation for to the
@@ -145,7 +152,7 @@ func Validate(spec *loader.Spec, opts ...Option) (func(http.Handler) http.Handle
 	for _, opt := range opts {
 		opt(&s)
 	}
-	model := ir.Build(spec, ir.Options{Operations: true})
+	model := ir.Build(spec, ir.Options{Operations: true, Codecs: s.codecs})
 	cfg := server.NewConfig(append([]server.Option{server.WithBasePath(model.BasePath)}, s.server...)...)
 	set, err := schemas.New(spec, schemas.JSONStrings())
 	if err != nil {
@@ -744,8 +751,15 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 	case "codec":
 		mt := m.ir.MediaType
 		if strings.Contains(mt, "*") {
-			// A codec's range: the codec of the media type sent.
-			mt = r.Header.Get("Content-Type")
+			// A codec's range: the codec of the media type sent, a 415
+			// without one, unless no codecs are registered at all.
+			if len(cfg.Codecs) == 0 {
+				return nil
+			}
+			var ok bool
+			if mt, ok = cfg.BodyCodec(b, r, mt); !ok {
+				return nil
+			}
 		}
 		if doc, err = codecJSON(cfg.Codecs, mt, data); errors.Is(err, errNoCodec) {
 			return nil

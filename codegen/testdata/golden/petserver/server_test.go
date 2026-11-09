@@ -1754,3 +1754,33 @@ func TestTupleParts(t *testing.T) {
 func (s *store) PutLabels(_ context.Context, req *api.PutLabelsRequest) (api.PutLabelsResponse, error) {
 	return api.PutLabels200XMLResponse{Body: req.Body}, nil
 }
+
+func (s *store) GetCoded(_ context.Context, req *api.GetCodedRequest) (api.GetCodedResponse, error) {
+	s.seen["GetCoded"] = req
+	return api.GetCoded204Response{XPage: oapi.Some(req.Where)}, nil
+}
+
+// PutCoded echoes the pet as application/x-tc, whatever it came as.
+func (s *store) PutCoded(_ context.Context, req *api.PutCodedRequest) (api.PutCodedResponse, error) {
+	s.seen["PutCoded"] = req
+	pet := req.Body
+	pet.ID = 7
+	return api.PutCoded200ApplicationResponse{ContentType: "application/x-tc", Body: pet}, nil
+}
+
+func (s *store) PostCodedParts(_ context.Context, req *api.PostCodedPartsRequest) (api.PostCodedPartsResponse, error) {
+	names := []string{}
+	for _, p := range req.Body {
+		names = append(names, p.Name)
+	}
+	if req.RelatedBody == nil {
+		return api.PostCodedParts200JSONResponse{Body: names}, nil
+	}
+	for p, err := range req.RelatedBody {
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, p.Name)
+	}
+	return api.PostCodedParts200JSONResponse{Body: names}, nil
+}

@@ -54,6 +54,9 @@ Version `1.0`
   - [`GET` `/orders`](#get-orders)
   - [`POST` `/orders`](#post-orders)
   - [`PUT` `/orders/{id}/lines`](#put-ordersidlines)
+  - [`GET` `/coded`](#get-coded)
+  - [`PUT` `/coded`](#put-coded)
+  - [`POST` `/coded`](#post-coded)
   - [`PUT` `/labels`](#put-labels)
   - [`POST` `/trees`](#post-trees)
   - [`GET` `/public`](#get-public)
@@ -1196,6 +1199,77 @@ An order as a form, its lines as an array of objects.
 | Status | Description |
 | --- | --- |
 | `204` | Stored. |
+
+### `GET` `/coded`
+
+Parameters and a header with content of a codec's media type.
+
+- Operation ID: `getCoded`
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `where` | query | [Size](#size) as `application/x-tc2` | yes |  |
+| `X-Meta` | header | [Size](#size) as `application/x-tc2` | no |  |
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `204` | Seen. |
+
+`204`:
+
+Headers:
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `X-Page` | [Size](#size) as `application/x-tc2` | no |  |
+
+### `PUT` `/coded`
+
+A body of any codec's media type, echoed in one the handler picks.
+
+- Operation ID: `putCoded`
+
+**Request body** (required)
+
+- `application/*`: [Pet](#pet)
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `200` | The pet. |
+
+`200`:
+
+- `application/*`: [Pet](#pet)
+
+### `POST` `/coded`
+
+Pets as parts of a codec's media type, and a stream of them.
+
+- Operation ID: `postCodedParts`
+
+**Request body** (required)
+
+- `multipart/mixed`: array of [Pet](#pet)
+  - `each part` as `application/x-tc2`
+
+- `multipart/related`: a stream of [Pet](#pet)
+  - `each part` as `application/x-tc2`
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `200` | Their names. |
+
+`200`:
+
+- `application/json`: array of string
 
 ### `PUT` `/labels`
 

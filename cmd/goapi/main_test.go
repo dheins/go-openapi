@@ -175,7 +175,7 @@ func TestGenerateModelErrors(t *testing.T) {
 		{"bad optional style", []string{"generate", "model", "-optional", "maybe", "x.yaml"}, exitFailure},
 		{"bad format type", []string{"generate", "model", "-format-type", "uuid", "x.yaml"}, exitFailure},
 		{"bad format Go type", []string{"generate", "model", "-format-type", "uuid=a b", "x.yaml"}, exitFailure},
-		{"bad codec", []string{"generate", "server", "-codec", "application/*", "x.yaml"}, exitFailure},
+		{"bad codec", []string{"generate", "server", "-codec", "msgpack", "x.yaml"}, exitFailure},
 		{"codec of models", []string{"generate", "model", "-codec", "application/msgpack", "x.yaml"}, exitFailure},
 		{"unknown target", []string{"generate", "client", "x.yaml"}, exitFailure},
 		{"no document", []string{"generate", "model"}, exitFailure},
@@ -564,7 +564,7 @@ func TestGenerateClientSelection(t *testing.T) {
 func TestGenerateTSClient(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "web")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"generate", "ts-client", "-out", out, petserverDoc}, &stdout, &stderr); code != exitOK {
+	if code := run([]string{"generate", "ts-client", "-out", out, "-codec", "application/x-tc2", petserverDoc}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit code %d\nstderr: %s", code, &stderr)
 	}
 	for _, name := range []string{"runtime.ts", "models.ts", "client.ts", "index.ts"} {

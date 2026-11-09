@@ -16,11 +16,11 @@ const BasePath = "/v1"
 
 // NewServer returns an http.Handler that serves the operations of the
 // document with h, checking credentials with sec. It panics
-// unless opts register the codecs of "application/x-tc", "application/x-tc2"
+// unless opts register the codecs of "application/x-tc", "application/x-tc2", "application/*"
 // (server.WithCodec).
 func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) http.Handler {
 	cfg := server.NewConfig(append([]server.Option{server.WithBasePath(BasePath)}, opts...)...)
-	cfg.RequireCodecs("application/x-tc", "application/x-tc2")
+	cfg.RequireCodecs("application/x-tc", "application/x-tc2", "application/*")
 	cfg.Handle(server.Operation{ID: "listPets", Name: "ListPets", Method: "GET", Path: "/pets"}, "/pets", api.HandleListPets(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "createPet", Name: "CreatePet", Method: "POST", Path: "/pets"}, "/pets", api.HandleCreatePet(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "getPet", Name: "GetPet", Method: "GET", Path: "/pets/{petId}"}, "/pets/{p0}", api.HandleGetPet(cfg, h, sec))
@@ -66,6 +66,9 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "findOrders", Name: "FindOrders", Method: "GET", Path: "/orders"}, "/orders", api.HandleFindOrders(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "createOrder", Name: "CreateOrder", Method: "POST", Path: "/orders"}, "/orders", api.HandleCreateOrder(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putLines", Name: "PutLines", Method: "PUT", Path: "/orders/{id}/lines"}, "/orders/{p0}/lines", api.HandlePutLines(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "getCoded", Name: "GetCoded", Method: "GET", Path: "/coded"}, "/coded", api.HandleGetCoded(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "putCoded", Name: "PutCoded", Method: "PUT", Path: "/coded"}, "/coded", api.HandlePutCoded(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "postCodedParts", Name: "PostCodedParts", Method: "POST", Path: "/coded"}, "/coded", api.HandlePostCodedParts(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putLabels", Name: "PutLabels", Method: "PUT", Path: "/labels"}, "/labels", api.HandlePutLabels(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "plantTree", Name: "PlantTree", Method: "POST", Path: "/trees"}, "/trees", api.HandlePlantTree(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "public", Name: "Public", Method: "GET", Path: "/public"}, "/public", api.HandlePublic(cfg, h, sec))

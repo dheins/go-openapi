@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { Client } from "./index.ts";
 import { config, receive, receiverConfig, send, type Codec, type OperationSpec, type Received, type Schema } from "./runtime.ts";
 
 // tc is a codec of a format of its own: "TC" and JSON, as the Go tests'.
@@ -104,4 +105,28 @@ test("a codec that writes no text cannot write a header", async () => {
   };
   const cfg = config({ baseUrl: "http://hooks.test", fetch: async () => new Response(null, { status: 204 }), codecs: { "application/x-bin": binary } }, "", undefined);
   await assert.rejects(send(cfg, op, { f: { name: "x" } }));
+});
+
+// The generated client sends and reads what the Go server does, in
+// TestCodecEverywhere.
+test("the generated client sends parameters and ranges with codecs", async () => {
+  const sent: Request[] = [];
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const r = new Request(input, init);
+    sent.push(r);
+    if (r.method === "GET") {
+      return new Response(null, { status: 204, headers: { "X-Page": 'TC{"w":2}' } });
+    }
+    return new Response('TC{"id":7,"name":"Rex"}', { status: 200, headers: { "Content-Type": "application/x-tc" } });
+  };
+  const client = new Client({ baseUrl: "http://pets.test", fetch, codecs });
+  const got = await client.getCoded({ where: { w: 2 }, xMeta: { h: 3 } });
+  assert.deepEqual(got, { status: 204, headers: { xPage: { w: 2 } } });
+  assert.equal(new URL(sent[0]!.url).searchParams.get("where"), 'TC{"w":2}');
+  assert.equal(sent[0]!.headers.get("X-Meta"), 'TC{"h":3}');
+  const put = await client.putCoded({ body: { id: 0, name: "Rex" }, contentType: "application/x-tc2" });
+  assert.deepEqual(put, { status: 200, contentType: "application/x-tc", body: { id: 7, name: "Rex" } });
+  assert.equal(sent[1]!.headers.get("Content-Type"), "application/x-tc2");
+  // Read-only properties are left out of requests, as in JSON.
+  assert.equal(await sent[1]!.text(), 'TC{"name":"Rex"}');
 });

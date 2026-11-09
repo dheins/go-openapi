@@ -52,7 +52,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 	templates := fs.String("templates", "", "directory of *.tmpl files whose blocks replace the built-in ones (experimental)")
 	var codecs codecFlag
 	if operations {
-		fs.Var(&codecs, "codec", "a media type whose bodies are encoded and decoded with a codec registered at run time, such as application/msgpack (repeatable)")
+		fs.Var(&codecs, "codec", "a media type whose bodies, parameters and parts are encoded and decoded with a codec registered at run time, such as application/msgpack, or a range (application/*) decoded with any registered codec in it (repeatable)")
 	}
 	formats := formatFlag{}
 	fs.Var(formats, "format-type", "`format=type`: the Go type of a format's values, a predeclared type or an import path and type name, such as uuid=github.com/google/uuid.UUID (repeatable)")
@@ -362,8 +362,8 @@ type codecFlag []string
 func (f *codecFlag) String() string { return strings.Join(*f, ",") }
 
 func (f *codecFlag) Set(v string) error {
-	if _, _, err := mime.ParseMediaType(v); err != nil || strings.Contains(v, "*") {
-		return fmt.Errorf("%q is not a media type", v)
+	if _, _, err := mime.ParseMediaType(v); err != nil || !strings.Contains(v, "/") {
+		return fmt.Errorf("%q is not a media type or range", v)
 	}
 	*f = append(*f, v)
 	return nil

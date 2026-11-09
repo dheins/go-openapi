@@ -46,7 +46,7 @@ func New(creds Credentials, opts ...client.Option) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.RequireCodecs("application/x-tc", "application/x-tc2"); err != nil {
+	if err := cfg.RequireCodecs("application/x-tc", "application/x-tc2", "application/*"); err != nil {
 		return nil, err
 	}
 	return &Client{cfg: cfg, creds: creds}, nil
@@ -1068,6 +1068,60 @@ func (c *Client) PutLines(ctx context.Context, req *api.PutLinesRequest) (api.Pu
 		return nil, err
 	}
 	return api.ReadPutLinesResponse(c.cfg, resp)
+}
+
+// GetCoded calls GET /coded. A nil req sends no parameters or body.
+//
+// Parameters and a header with content of a codec's media type.
+func (c *Client) GetCoded(ctx context.Context, req *api.GetCodedRequest) (api.GetCodedResponse, error) {
+	if req == nil {
+		req = &api.GetCodedRequest{}
+	}
+	hreq, err := api.NewGetCodedRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadGetCodedResponse(c.cfg, resp)
+}
+
+// PutCoded calls PUT /coded. A nil req sends no parameters or body.
+//
+// A body of any codec's media type, echoed in one the handler picks.
+func (c *Client) PutCoded(ctx context.Context, req *api.PutCodedRequest) (api.PutCodedResponse, error) {
+	if req == nil {
+		req = &api.PutCodedRequest{}
+	}
+	hreq, err := api.NewPutCodedRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPutCodedResponse(c.cfg, resp)
+}
+
+// PostCodedParts calls POST /coded. A nil req sends no parameters or body.
+//
+// Pets as parts of a codec's media type, and a stream of them.
+func (c *Client) PostCodedParts(ctx context.Context, req *api.PostCodedPartsRequest) (api.PostCodedPartsResponse, error) {
+	if req == nil {
+		req = &api.PostCodedPartsRequest{}
+	}
+	hreq, err := api.NewPostCodedPartsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPostCodedPartsResponse(c.cfg, resp)
 }
 
 // PutLabels calls PUT /labels. A nil req sends no parameters or body.

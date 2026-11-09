@@ -350,7 +350,7 @@ func TestClientResponses(t *testing.T) {
 	if size.Body.W.Value != 2 || size.Body.H.Value != 3 {
 		t.Errorf("size = %+v", size.Body)
 	}
-	if _, err := petclient.New(petclient.Credentials{}); err == nil || err.Error() != "client: no codec for application/x-tc, application/x-tc2; register one with client.WithCodec" {
+	if _, err := petclient.New(petclient.Credentials{}); err == nil || err.Error() != "client: no codec for application/x-tc, application/x-tc2, application/*; register one with client.WithCodec" {
 		t.Errorf("no codecs: %v", err)
 	}
 
