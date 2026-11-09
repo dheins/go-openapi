@@ -1342,6 +1342,125 @@ paths:
                 type: array
                 items:
                   type: string
+  /pets/events:
+    post:
+      operationId: petEvents
+      description: Events of every kind, told apart by name or by their data, echoed back.
+      requestBody:
+        required: true
+        content:
+          text/event-stream:
+            itemSchema:
+              properties:
+                id:
+                  type: string
+                  pattern: "^[0-9]+$"
+                retry:
+                  type: integer
+                  maximum: 60000
+              oneOf:
+                - properties:
+                    event:
+                      const: added
+                    data:
+                      contentMediaType: application/json
+                      contentSchema:
+                        $ref: "#/components/schemas/Pet"
+                - properties:
+                    data:
+                      contentMediaType: application/json
+                      contentSchema:
+                        $ref: "#/components/schemas/Toy"
+                - properties:
+                    data:
+                      contentMediaType: application/json
+                      contentSchema:
+                        $ref: "#/components/schemas/Treat"
+                - properties:
+                    event:
+                      const: card
+                    data:
+                      contentMediaType: application/xml
+                      contentSchema:
+                        $ref: "#/components/schemas/Card"
+                - properties:
+                    event:
+                      const: size
+                    data:
+                      contentMediaType: application/x-www-form-urlencoded
+                      contentSchema:
+                        $ref: "#/components/schemas/Size"
+                - properties:
+                    event:
+                      const: count
+                    data:
+                      type: integer
+                      minimum: 0
+                - properties:
+                    event:
+                      const: coded
+                    data:
+                      contentMediaType: application/x-tc2
+                      contentSchema:
+                        $ref: "#/components/schemas/Size"
+      responses:
+        "200":
+          description: The events back, a pet's with its id.
+          content:
+            text/event-stream:
+              itemSchema:
+                properties:
+                  id:
+                    type: string
+                    pattern: "^[0-9]+$"
+                  retry:
+                    type: integer
+                    maximum: 60000
+                oneOf:
+                  - properties:
+                      event:
+                        const: added
+                      data:
+                        contentMediaType: application/json
+                        contentSchema:
+                          $ref: "#/components/schemas/Pet"
+                  - properties:
+                      data:
+                        contentMediaType: application/json
+                        contentSchema:
+                          $ref: "#/components/schemas/Toy"
+                  - properties:
+                      data:
+                        contentMediaType: application/json
+                        contentSchema:
+                          $ref: "#/components/schemas/Treat"
+                  - properties:
+                      event:
+                        const: card
+                      data:
+                        contentMediaType: application/xml
+                        contentSchema:
+                          $ref: "#/components/schemas/Card"
+                  - properties:
+                      event:
+                        const: size
+                      data:
+                        contentMediaType: application/x-www-form-urlencoded
+                        contentSchema:
+                          $ref: "#/components/schemas/Size"
+                  - properties:
+                      event:
+                        const: count
+                      data:
+                        type: integer
+                        minimum: 0
+                  - properties:
+                      event:
+                        const: coded
+                      data:
+                        contentMediaType: application/x-tc2
+                        contentSchema:
+                          $ref: "#/components/schemas/Size"
   /labels:
     put:
       operationId: putLabels
@@ -1623,6 +1742,23 @@ webhooks:
             text/event-stream: {}
 components:
   schemas:
+    Toy:
+      type: object
+      required: [kind, name]
+      properties:
+        kind:
+          const: toy
+        name:
+          type: string
+    Treat:
+      type: object
+      required: [kind, calories]
+      properties:
+        kind:
+          const: treat
+        calories:
+          type: integer
+          minimum: 0
     Labels:
       type: object
       xml:

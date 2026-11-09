@@ -1784,3 +1784,37 @@ func (s *store) PostCodedParts(_ context.Context, req *api.PostCodedPartsRequest
 	}
 	return api.PostCodedParts200JSONResponse{Body: names}, nil
 }
+
+// PetEvents echoes the events, a pet's with its id, as the response's.
+func (s *store) PetEvents(_ context.Context, req *api.PetEventsRequest) (api.PetEventsResponse, error) {
+	events := func(yield func(server.TypedEvent[model.PetEvents200EventData], error) bool) {
+		for ev, err := range req.Body {
+			if err != nil {
+				yield(server.TypedEvent[model.PetEvents200EventData]{}, err)
+				return
+			}
+			out := server.TypedEvent[model.PetEvents200EventData]{ID: ev.ID, Event: ev.Event, Retry: ev.Retry}
+			switch v := ev.Data.Value().(type) {
+			case model.Pet:
+				v.ID = 1
+				out.Data = model.NewPetEvents200EventData(v)
+			case model.Toy:
+				out.Data = model.NewPetEvents200EventData(v)
+			case model.Treat:
+				out.Data = model.NewPetEvents200EventData(v)
+			case model.Card:
+				out.Data = model.NewPetEvents200EventData(v)
+			case model.Size:
+				out.Data = model.NewPetEvents200EventData(v)
+			case model.PetEventsRequestEventDataInteger:
+				out.Data = model.NewPetEvents200EventData(model.PetEvents200EventDataInteger(v))
+			case model.PetEventsRequestEventDataSize2:
+				out.Data = model.NewPetEvents200EventData(model.PetEvents200EventDataSize2(v))
+			}
+			if !yield(out, nil) {
+				return
+			}
+		}
+	}
+	return api.PetEvents200EventsResponse{Events: events}, nil
+}

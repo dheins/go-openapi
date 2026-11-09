@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { Client } from "./index.ts";
 import { config, receive, receiverConfig, send, type Codec, type EventsSpec, type OperationSpec, type Received, type Schema } from "./runtime.ts";
 
 const tc: Codec = { encode: (v) => "TC" + JSON.stringify(v), decode: (b) => JSON.parse(new TextDecoder().decode(b).slice(2)) };
@@ -84,4 +85,44 @@ test("events that are no kind, or whose id or retry is invalid, are refused", as
     assert.ok(err instanceof Error, JSON.stringify(ev));
     assert.match(String((err as Error).message) + JSON.stringify(err), message, JSON.stringify(ev));
   }
+});
+
+// The generated client writes the stream the Go tests send
+// (events_test.go, petEventsDoc), and reads the one the Go server writes.
+test("the generated client sends and reads every kind of event", async () => {
+  const sent: Request[] = [];
+  const answer =
+    'event: added\ndata: {"id":1,"name":"Rex"}\n\n' +
+    'data: {"kind":"toy","name":"ball"}\n\n' +
+    'id: 7\nretry: 100\ndata: {"kind":"treat","calories":5}\n\n' +
+    'event: card\ndata: <p:card xmlns:p="urn:example:pets" id="3"><p:name>Kit</p:name></p:card>\n\n' +
+    "event: size\ndata: h=3&w=2\n\n" +
+    "event: count\ndata: 4\n\n" +
+    'event: coded\ndata: TC{"w":5}\n\n';
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push(new Request(input, init));
+    return new Response(answer, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  };
+  const client = new Client({ baseUrl: "http://pets.test", fetch, codecs: { "application/x-tc": tc, "application/x-tc2": tc } });
+  const resp = await client.petEvents({
+    body: [
+      { event: "added", data: { id: 0, name: "Rex" } },
+      { data: { kind: "toy", name: "ball" } },
+      { id: "7", retry: 100, data: { kind: "treat", calories: 5 } },
+      { event: "card", data: { id: 3, name: "Kit" } },
+      { event: "size", data: { w: 2, h: 3 } },
+      { event: "count", data: 4 },
+      { event: "coded", data: { w: 5 } },
+    ],
+  });
+  const body = await sent[0]!.text();
+  for (const part of ['event: added\ndata: {"name":"Rex"}', "event: size\ndata: w=2&h=3", 'event: coded\ndata: TC{"w":5}', 'data: {"kind":"toy","name":"ball"}', "event: count\ndata: 4"]) {
+    assert.ok(body.includes(part), `no ${JSON.stringify(part)} in ${body}`);
+  }
+  assert.equal(resp.status, 200);
+  const got: unknown[] = [];
+  for await (const ev of (resp as { events: AsyncIterable<{ event?: string; data: unknown }> }).events) {
+    got.push(ev.data);
+  }
+  assert.deepEqual(got, [{ id: 1, name: "Rex" }, { kind: "toy", name: "ball" }, { kind: "treat", calories: 5 }, { id: 3, name: "Kit" }, { h: 3, w: 2 }, 4, { w: 5 }]);
 });

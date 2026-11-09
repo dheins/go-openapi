@@ -69,6 +69,7 @@ func NewServer(h api.Handler, sec api.SecurityHandler, opts ...server.Option) ht
 	cfg.Handle(server.Operation{ID: "getCoded", Name: "GetCoded", Method: "GET", Path: "/coded"}, "/coded", api.HandleGetCoded(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putCoded", Name: "PutCoded", Method: "PUT", Path: "/coded"}, "/coded", api.HandlePutCoded(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "postCodedParts", Name: "PostCodedParts", Method: "POST", Path: "/coded"}, "/coded", api.HandlePostCodedParts(cfg, h, sec))
+	cfg.Handle(server.Operation{ID: "petEvents", Name: "PetEvents", Method: "POST", Path: "/pets/events"}, "/pets/events", api.HandlePetEvents(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "putLabels", Name: "PutLabels", Method: "PUT", Path: "/labels"}, "/labels", api.HandlePutLabels(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "plantTree", Name: "PlantTree", Method: "POST", Path: "/trees"}, "/trees", api.HandlePlantTree(cfg, h, sec))
 	cfg.Handle(server.Operation{ID: "public", Name: "Public", Method: "GET", Path: "/public"}, "/public", api.HandlePublic(cfg, h, sec))

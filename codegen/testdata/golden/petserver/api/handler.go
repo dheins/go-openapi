@@ -160,6 +160,10 @@ type Handler interface {
 	//
 	// Pets as parts of a codec's media type, and a stream of them.
 	PostCodedParts(ctx context.Context, req *PostCodedPartsRequest) (PostCodedPartsResponse, error)
+	// PetEvents handles POST /pets/events.
+	//
+	// Events of every kind, told apart by name or by their data, echoed back.
+	PetEvents(ctx context.Context, req *PetEventsRequest) (PetEventsResponse, error)
 	// PutLabels handles PUT /labels.
 	//
 	// Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.
