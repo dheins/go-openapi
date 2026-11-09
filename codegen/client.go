@@ -938,6 +938,8 @@ func (f *fileGen) contentParam(o *ir.Operation, p *ir.Param, value string) strin
 	case "xml":
 		shape := f.declareVar(lowerFirst(o.Name)+"Request"+p.Field+"XMLShape", xmlNodeLiteral(p.XML))
 		return fmt.Sprintf("r.XMLContentParam(%q, %q, %s, %s)", p.In, p.Name, value, shape)
+	case "codec":
+		return fmt.Sprintf("r.CodecContentParam(c, %q, %q, %q, %s)", p.In, p.Name, p.Content, value)
 	}
 	return fmt.Sprintf("r.ContentParam(%q, %q, %s)", p.In, p.Name, value)
 }
@@ -1171,7 +1173,7 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 			read = fmt.Sprintf("client.JSONHeader(resp, %q, &%s)", h.Name, x)
 		case h.Content != "":
 			typ, hint := f.goType(inner), lowerFirst(r.TypeName)+"Read"+ir.GoName(h.Name)
-			decode := f.decodeContent(h.ContentKind, typ, "raw", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Response")
+			decode := f.decodeContent(h.ContentKind, h.Content, typ, "raw", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Response")
 			read = fmt.Sprintf("client.ContentHeader(resp, %q, func(raw string) (%s, error) { return %s }, &%s)", h.Name, typ, decode, x)
 		case h.Array:
 			elem := f.goType(h.Elem)

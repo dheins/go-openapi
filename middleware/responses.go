@@ -134,7 +134,7 @@ func (b *builder) responseMedia(mt string, m *oas.MediaType, variants []*ir.Resp
 		rm.kind = "form"
 	}
 	switch rm.kind {
-	case "json", "xml", "form", "text":
+	case "json", "xml", "form", "text", "codec":
 		if m.Schema != nil {
 			rm.schema = b.set.Compile(m.Schema)
 		}
@@ -255,7 +255,7 @@ func (op *operation) checkResponse(cfg *server.Config, set *schemas.Set, mode Re
 	if bw.status == 0 {
 		bw.status = http.StatusOK
 	}
-	problems := op.responseProblems(set, bw.status, bw.header, bw.body.Bytes())
+	problems := op.responseProblems(set, cfg.Codecs, bw.status, bw.header, bw.body.Bytes())
 	if len(problems) > 0 {
 		report(bw.status, problems)
 		if mode == RejectResponses {
@@ -295,12 +295,12 @@ func (op *operation) responseStream(status int, header http.Header) *stream {
 }
 
 // responseProblems returns what is wrong with a response of op.
-func (op *operation) responseProblems(set *schemas.Set, status int, header http.Header, body []byte) []string {
+func (op *operation) responseProblems(set *schemas.Set, codecs map[string]server.Codec, status int, header http.Header, body []byte) []string {
 	resp, ok := declared(op.responses, status)
 	if !ok {
 		return []string{fmt.Sprintf("status %d is not declared", status)}
 	}
-	problems := resp.headerProblems(set, header)
+	problems := resp.headerProblems(set, codecs, header)
 	if len(resp.media) == 0 {
 		if len(body) > 0 {
 			problems = append(problems, "the response declares no content")
@@ -314,14 +314,14 @@ func (op *operation) responseProblems(set *schemas.Set, status int, header http.
 	if m == nil {
 		return append(problems, problem)
 	}
-	if err := m.check(set, body, header.Get("Content-Type")); err != nil {
+	if err := m.check(set, codecs, body, header.Get("Content-Type")); err != nil {
 		problems = append(problems, "body: "+err.Error())
 	}
 	return problems
 }
 
 // headerProblems returns what is wrong with the headers of a response.
-func (resp *response) headerProblems(set *schemas.Set, header http.Header) []string {
+func (resp *response) headerProblems(set *schemas.Set, codecs map[string]server.Codec, header http.Header) []string {
 	var problems []string
 	for _, name := range resp.headers {
 		if header.Get(name) == "" {
@@ -333,7 +333,7 @@ func (resp *response) headerProblems(set *schemas.Set, header http.Header) []str
 	var b server.Binder
 	var params Params
 	for _, p := range resp.values {
-		p.bind(set, r, server.Query{}, nil, &b, &params)
+		p.bind(set, codecs, r, server.Query{}, nil, &b, &params)
 	}
 	if b.Failed() {
 		for _, e := range b.Problem().Errors {
@@ -348,7 +348,7 @@ func (resp *response) headerProblems(set *schemas.Set, header http.Header) []str
 }
 
 // check returns what is wrong with a body of m, sent with contentType.
-func (m *responseMedia) check(set *schemas.Set, body []byte, contentType string) error {
+func (m *responseMedia) check(set *schemas.Set, codecs map[string]server.Codec, body []byte, contentType string) error {
 	if m.stream != nil {
 		sp := &splitter{events: m.stream.events}
 		sp.write(body)
@@ -381,6 +381,10 @@ func (m *responseMedia) check(set *schemas.Set, body []byte, contentType string)
 		}
 	case "text":
 		doc, err = server.ValuesJSON(server.Values{Items: []string{string(body)}}, server.Scalar, m.prop)
+	case "codec":
+		if doc, err = codecJSON(codecs, m.mediaType, body); errors.Is(err, errNoCodec) {
+			return nil
+		}
 	default:
 		return nil
 	}

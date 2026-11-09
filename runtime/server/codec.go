@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"mime"
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dheins/go-openapi/oapi"
 )
@@ -132,4 +134,31 @@ func (c *Config) WriteCodec(w http.ResponseWriter, status int, contentType strin
 	// The status line is sent; a failed write means the client is gone.
 	_, _ = w.Write(data)
 	return nil
+}
+
+// DecodeCodecContent decodes a parameter or header serialized with the
+// codec of mediaType, its text as the codec's input, in direction dir:
+// oapi.Response for a client reading a response header.
+func DecodeCodecContent[T any](codecs map[string]Codec, mediaType, raw string, dir oapi.Direction) (T, error) {
+	var v T
+	data, err := codecJSON(codecs, mediaType, []byte(raw))
+	if err != nil {
+		return v, err
+	}
+	err = oapi.DecodeValue(data, &v, dir)
+	return v, err
+}
+
+// EncodeCodecContent writes v as the text of a parameter or header
+// serialized with the codec of mediaType, in direction dir. A header
+// cannot hold every byte: what the codec writes must be text.
+func EncodeCodecContent(codecs map[string]Codec, mediaType string, v any, dir oapi.Direction) (string, error) {
+	data, err := EncodeCodec(codecs, mediaType, v, dir)
+	if err != nil {
+		return "", fmt.Errorf("formatting %s value: %w", CodecKey(mediaType), err)
+	}
+	if !utf8.Valid(data) || bytes.ContainsAny(data, "\r\n\x00") {
+		return "", fmt.Errorf("formatting %s value: the codec wrote bytes that are not a line of text", CodecKey(mediaType))
+	}
+	return string(data), nil
 }

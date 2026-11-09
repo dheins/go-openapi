@@ -139,3 +139,29 @@ func TestCodecJSON(t *testing.T) {
 		t.Errorf("CodecValue = %#v %v", v, err)
 	}
 }
+
+func TestCodecContent(t *testing.T) {
+	codecs := map[string]Codec{"application/x-cbor": cborish{}}
+	pet, err := DecodeCodecContent[codecPet](codecs, "application/x-cbor", `{"name":"Rex","age":2}`, oapi.Request)
+	if err != nil || pet != (codecPet{Name: "Rex", Age: 2}) {
+		t.Errorf("decoded %+v %v", pet, err)
+	}
+	if _, err := DecodeCodecContent[codecPet](codecs, "application/x-cbor", "{", oapi.Request); err == nil {
+		t.Error("invalid: no error")
+	}
+	text, err := EncodeCodecContent(codecs, "application/x-cbor", codecPet{Name: "Tom"}, oapi.Response)
+	if err != nil || text != `{"age":0,"name":"Tom"}` {
+		t.Errorf("encoded %q %v", text, err)
+	}
+	// A header holds a line of text, which a binary codec may not write.
+	binary := map[string]Codec{"application/x-bin": binaryCodec{}}
+	if _, err := EncodeCodecContent(binary, "application/x-bin", 1, oapi.Request); err == nil || !strings.Contains(err.Error(), "not a line of text") {
+		t.Errorf("binary: %v", err)
+	}
+}
+
+// binaryCodec writes bytes that are no text.
+type binaryCodec struct{}
+
+func (binaryCodec) Marshal(any) ([]byte, error)        { return []byte{0xff, 0x00, '\n'}, nil }
+func (binaryCodec) Unmarshal(data []byte, v any) error { return errors.New("unused") }

@@ -551,12 +551,14 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 	schema := p.Schema
 	if p.Content.Len() > 0 || p.In == "querystring" {
 		// The value is serialized as a whole with a media type.
+		var media *oas.MediaType
 		for mt, m := range p.Content.All() {
 			param.Content = strings.ToLower(mt)
-			schema = m.Deref().Schema
+			media = m.Deref()
+			schema = media.Schema
 			break
 		}
-		param.ContentKind = contentKind(param.Content)
+		param.ContentKind = b.contentKind(param.Content, media)
 		if param.ContentKind == "" || p.In == "querystring" && param.ContentKind != "json" && param.ContentKind != "form" {
 			return nil, fmt.Sprintf("parameter %q has content of type %q, which is not supported yet", p.Name, param.Content)
 		}
@@ -1309,6 +1311,9 @@ func (b *builder) encodingRules(enc *oas.Encoding, hint string) (contentTypes []
 			continue
 		}
 		header, why := b.typedHeader(http.CanonicalHeaderKey(hname), h.Deref(), hint+GoName(hname))
+		if why == "" && header.ContentKind == "codec" {
+			why = fmt.Sprintf("has content of type %s, which only a codec reads", header.Content)
+		}
 		if why != "" {
 			// Its presence is still checked.
 			b.warnAt(h, nil, fmt.Sprintf("part header %q %s; only its presence is checked", hname, why))
@@ -1760,13 +1765,15 @@ func (h *Header) String() string { return h.Name }
 func (b *builder) typedHeader(name string, h *oas.Header, hint string) (*Header, string) {
 	header := &Header{Name: name, Doc: strings.TrimSpace(h.Description), Required: h.Required}
 	schema := h.Schema
+	var media *oas.MediaType
 	for mt, m := range h.Content.All() {
-		header.Content, schema = strings.ToLower(mt), m.Deref().Schema
+		media = m.Deref()
+		header.Content, schema = strings.ToLower(mt), media.Schema
 		break
 	}
 	ref := stripNullable(b.use(schema, hint, nil))
 	if header.Content != "" {
-		if header.ContentKind = contentKind(header.Content); header.ContentKind == "" {
+		if header.ContentKind = b.contentKind(header.Content, media); header.ContentKind == "" {
 			// Another media type's value is taken as its text.
 			if jsonType(ref) != "string" {
 				return nil, fmt.Sprintf("with content of type %s is not a string, which it is read as", header.Content)
@@ -1829,6 +1836,16 @@ func flatObject(obj ParamProperty) bool {
 		}
 	}
 	return true
+}
+
+// contentKind classifies the media type mt of a parameter or header with
+// content, m in the document: codec, if a codec encodes it, else as
+// contentKind does.
+func (b *builder) contentKind(mt string, m *oas.MediaType) string {
+	if !strings.Contains(mt, "*") && b.codecKind("", mt, m) == "codec" {
+		return "codec"
+	}
+	return contentKind(mt)
 }
 
 // contentKind classifies the media type of a parameter or header with

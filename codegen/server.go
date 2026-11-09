@@ -271,9 +271,9 @@ func codecs(ops []*ir.Operation) string {
 	return strings.Join(out, ", ")
 }
 
-// codecMediaTypes returns the media types the bodies and responses of ops
-// (those generated) encode and decode with codecs, as server.CodecKey has
-// them, in the order they are first used.
+// codecMediaTypes returns the media types the bodies, responses,
+// parameters and headers of ops (those generated) encode and decode with
+// codecs, as server.CodecKey has them, in the order they are first used.
 func codecMediaTypes(ops []*ir.Operation) []string {
 	var out []string
 	add := func(kind, mt string) {
@@ -286,6 +286,9 @@ func codecMediaTypes(ops []*ir.Operation) []string {
 		if o.Unsupported != "" {
 			continue
 		}
+		for _, p := range o.Params {
+			add(p.ContentKind, p.Content)
+		}
 		if o.Body != nil {
 			for _, m := range o.Body.Media {
 				add(m.Kind, m.MediaType)
@@ -293,6 +296,9 @@ func codecMediaTypes(ops []*ir.Operation) []string {
 		}
 		for _, r := range o.Responses {
 			add(r.Kind, r.MediaType)
+			for _, h := range r.Headers {
+				add(h.ContentKind, h.Content)
+			}
 		}
 	}
 	return out
@@ -989,9 +995,12 @@ func (f *fileGen) partHeaders(headers []*ir.Header) string {
 // with content of kind, into a typ, in direction dir: a form needs the
 // object's properties, which form returns, and XML the document's shape,
 // declared under hint.
-func (f *fileGen) decodeContent(kind, typ, raw string, form func() string, xml *ir.XMLNode, hint, dir string) string {
+func (f *fileGen) decodeContent(kind, mediaType, typ, raw string, form func() string, xml *ir.XMLNode, hint, dir string) string {
 	dir = f.imp(oapiImport, "oapi") + "." + dir
 	switch kind {
+	case "codec":
+		// c is the server's or the client's configuration, where this is.
+		return fmt.Sprintf("server.DecodeCodecContent[%s](c.Codecs, %q, %s, %s)", typ, mediaType, raw, dir)
 	case "text":
 		return fmt.Sprintf("server.DecodeTextContent[%s](%s)", typ, raw)
 	case "form":
@@ -1023,7 +1032,7 @@ func (f *fileGen) partHeaderCheck(h *ir.Header) string {
 	switch {
 	case h.Content != "":
 		hint := "partHeader" + ir.GoName(h.Name)
-		parse = f.decodeContent(h.ContentKind, f.goType(h.Type), "vals[0]", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Request")
+		parse = f.decodeContent(h.ContentKind, h.Content, f.goType(h.Type), "vals[0]", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Request")
 	case h.Object:
 		props := f.headerFields(h, "partHeader"+ir.GoName(h.Name))
 		parse = fmt.Sprintf("server.ParseObjectHeader[%s](vals, %t, %s, %s.Request)", f.goType(h.Type), h.Explode, props, f.imp(oapiImport, "oapi"))
@@ -1104,7 +1113,7 @@ func (f *fileGen) bindParam(w func(int, string, ...any), o *ir.Operation, p *ir.
 	case p.In == "querystring" && p.Object:
 		convert = fmt.Sprintf("server.DecodeFields[%s](vals.Fields, %s)", elem, f.propertiesVar(o, p))
 	case p.Content != "":
-		convert = f.decodeContent(p.ContentKind, elem, "raw", func() string { return f.propertiesVar(o, p) }, p.XML, lowerFirst(o.Name)+p.Field, "Request")
+		convert = f.decodeContent(p.ContentKind, p.Content, elem, "raw", func() string { return f.propertiesVar(o, p) }, p.XML, lowerFirst(o.Name)+p.Field, "Request")
 	case p.Object:
 		convert = fmt.Sprintf("server.DecodeFields[%s](vals.Fields, %s)", elem, f.propertiesVar(o, p))
 	case p.Array && p.ItemDelimiter != "":
@@ -1315,6 +1324,8 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 			format = "server.EncodeFormContent(%s, " + f.imp(oapiImport, "oapi") + ".Response)"
 		case h.ContentKind == "xml":
 			format = "server.EncodeXMLContent(%s, " + f.declareVar(lowerFirst(r.TypeName)+ir.GoName(h.Name)+"XMLShape", xmlNodeLiteral(h.XML)) + ", " + f.imp(oapiImport, "oapi") + ".Response)"
+		case h.ContentKind == "codec":
+			format = fmt.Sprintf("server.EncodeCodecContent(c.Codecs, %q, %%s, %s.Response)", h.Content, f.imp(oapiImport, "oapi"))
 		case h.Object:
 			format = fmt.Sprintf("server.FormatObject(%%s, %t, %s.Response)", h.Explode, f.imp(oapiImport, "oapi"))
 		case h.Array:
