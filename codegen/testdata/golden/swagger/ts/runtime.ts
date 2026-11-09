@@ -1388,11 +1388,14 @@ export interface ParamSpec {
   /** The value of the parameter when it is absent, which receivers give
    * their handlers, as Go servers do. */
   readonly default?: unknown;
+  /** The media type of codec content. */
+  readonly mediaType?: string;
   readonly schema: Schema;
 }
 
-/** How a parameter or header with content is written. */
-export type Content = "json" | "text" | "form" | "xml";
+/** How a parameter or header with content is written: codec content
+ * with the codec of its mediaType. */
+export type Content = "json" | "text" | "form" | "xml" | "codec";
 
 export interface BodyMediaSpec {
   readonly mediaType: string;
@@ -1456,6 +1459,8 @@ export interface HeaderSpec {
   readonly object?: boolean;
   readonly explode?: boolean;
   readonly content?: Content;
+  /** The media type of codec content. */
+  readonly mediaType?: string;
   readonly xml?: XMLNode;
   readonly schema: Schema;
 }
@@ -1902,9 +1907,12 @@ function itemText(p: ParamSpec, x: unknown): string {
 }
 
 // contentText writes the value of a parameter with content as its media
-// type has it (or of a response header, with dir "response").
-function contentText(p: Pick<ParamSpec, "content" | "schema" | "xml">, v: unknown, dir: Direction = "request"): string {
+// type has it (or of a response header, with dir "response"), codec
+// content with its codec of codecs.
+function contentText(p: Pick<ParamSpec, "content" | "schema" | "xml" | "mediaType">, v: unknown, dir: Direction = "request", codecs?: ReadonlyMap<string, Codec>): string {
   switch (p.content) {
+    case "codec":
+      return codecText(codecs, p.mediaType!, encode(p.schema, v, dir));
     case "text":
       return text(v);
     case "form": {
@@ -1918,9 +1926,34 @@ function contentText(p: Pick<ParamSpec, "content" | "schema" | "xml">, v: unknow
   return JSON.stringify(v);
 }
 
-function pathValue(p: ParamSpec, v: unknown): string {
+// codecText returns value written by the codec of mediaType: text, as a
+// parameter or header holds.
+function codecText(codecs: ReadonlyMap<string, Codec> | undefined, mediaType: string, value: unknown): string {
+  const codec = codecs?.get(codecKey(mediaType));
+  if (codec === undefined) {
+    throw new Error(`no codec for ${mediaType}`);
+  }
+  const out = codec.encode(value);
+  const s = typeof out === "string" ? out : new TextDecoder("utf-8", { fatal: true }).decode(out);
+  if (/[\r\n\0]/.test(s)) {
+    throw new Error(`the ${codecKey(mediaType)} codec wrote bytes that are not a line of text`);
+  }
+  return s;
+}
+
+// codecValue returns raw, the text of a parameter or header, read by the
+// codec of mediaType.
+function codecValue(codecs: ReadonlyMap<string, Codec> | undefined, mediaType: string, raw: string): unknown {
+  const codec = codecs?.get(codecKey(mediaType));
+  if (codec === undefined) {
+    throw new Error(`no codec for ${mediaType}`);
+  }
+  return codec.decode(new TextEncoder().encode(raw));
+}
+
+function pathValue(p: ParamSpec, v: unknown, codecs?: ReadonlyMap<string, Codec>): string {
   if (p.content !== undefined) {
-    return unreserved(contentText(p, v));
+    return unreserved(contentText(p, v, "request", codecs));
   }
   switch (p.style) {
     case "label":
@@ -1949,9 +1982,9 @@ function pathValue(p: ParamSpec, v: unknown): string {
   }
 }
 
-function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown): void {
+function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown, codecs?: ReadonlyMap<string, Codec>): void {
   if (p.content !== undefined) {
-    q.append(p.name, contentText(p, v));
+    q.append(p.name, contentText(p, v, "request", codecs));
     return;
   }
   if (p.style === "deepObject") {
@@ -1992,7 +2025,7 @@ function queryValue(q: URLSearchParams, p: ParamSpec, v: unknown): void {
  * it. */
 export function requestUrl(cfg: Config, op: OperationSpec, req: object): string {
   const b: Built = { path: "", query: new URLSearchParams(), headers: new Headers(), cookies: [] };
-  buildParams(op, req as Values, b);
+  buildParams(op, req as Values, b, cfg.codecs);
   return builtUrl(cfg, op, b);
 }
 
@@ -2024,12 +2057,12 @@ interface Built {
   failure?: unknown;
 }
 
-function buildParams(op: OperationSpec, req: Values, b: Built): void {
+function buildParams(op: OperationSpec, req: Values, b: Built, codecs: ReadonlyMap<string, Codec>): void {
   let path = op.path;
   for (const p of op.params) {
     const v = req[p.key];
     if (p.in === "path") {
-      path = path.replace(`{${p.name}}`, pathValue(p, v));
+      path = path.replace(`{${p.name}}`, pathValue(p, v, codecs));
       continue;
     }
     if (v === undefined) {
@@ -2037,7 +2070,7 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
     }
     switch (p.in) {
       case "query":
-        queryValue(b.query, p, v);
+        queryValue(b.query, p, v, codecs);
         break;
       case "querystring":
         if (p.content === "json" || p.content === "xml") {
@@ -2054,11 +2087,11 @@ function buildParams(op: OperationSpec, req: Values, b: Built): void {
         // Only the items of a list are quoted: a scalar, such as a Range
         // of several ranges, is sent as it is, as the Go client does.
         // Items with a delimiter of their own are not a header list.
-        b.headers.set(p.name, p.content !== undefined ? contentText(p, v) : p.shape === "scalar" ? text(v) : simple(p, v, p.delimiter === undefined ? quoteItem : (x) => x));
+        b.headers.set(p.name, p.content !== undefined ? contentText(p, v, "request", codecs) : p.shape === "scalar" ? text(v) : simple(p, v, p.delimiter === undefined ? quoteItem : (x) => x));
         break;
       case "cookie":
         if (p.content !== undefined) {
-          b.cookies.push(`${p.name}=${encodeURIComponent(contentText(p, v))}`);
+          b.cookies.push(`${p.name}=${encodeURIComponent(contentText(p, v, "request", codecs))}`);
         } else if (p.shape === "array" && Array.isArray(v) && p.explode) {
           for (const x of v) {
             b.cookies.push(`${p.name}=${encodeURIComponent(itemText(p, x))}`);
@@ -2090,6 +2123,7 @@ function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkI
   const contentType = typeof req["contentType"] === "string" ? req["contentType"] : undefined;
   const media =
     body.media.find((m) => m.mediaType === contentType) ??
+    (contentType === undefined ? undefined : body.media.find((m) => m.mediaType.includes("*") && mediaMatches(m.mediaType, codecKey(contentType)))) ??
     body.media.find((m) => req[m.key] !== undefined && contentType === undefined);
   if (media === undefined) {
     return;
@@ -2156,16 +2190,22 @@ function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkI
       b.headers.set("Content-Type", v instanceof Blob && v.type !== "" && media.mediaType.includes("*") ? v.type : media.mediaType);
       b.body = v as BodyInit;
       break;
-    case "codec":
-      // config checked that there is one.
-      b.headers.set("Content-Type", media.mediaType);
-      b.body = cfg.codecs.get(codecKey(media.mediaType))!.encode(encode(media.schema, v, "request"));
+    case "codec": {
+      // A codec's range is sent as the media type contentType names.
+      const mt = media.mediaType.includes("*") ? (contentType ?? "") : media.mediaType;
+      const codec = cfg.codecs.get(codecKey(mt));
+      if (codec === undefined) {
+        throw new Error(`no codec for ${JSON.stringify(mt)}: give contentType, a media type of ${media.mediaType} with a codec`);
+      }
+      b.headers.set("Content-Type", mt);
+      b.body = codec.encode(encode(media.schema, v, "request"));
       break;
+    }
     case "parts": {
       const spec = media.parts!;
       const boundary = newBoundary();
       const items = partItems(spec, v);
-      const chunks = items.flatMap((item, i) => partChunks(spec, item, i, boundary));
+      const chunks = items.flatMap((item, i) => partChunks(spec, item, i, boundary, "request", cfg.codecs));
       b.headers.set("Content-Type", `${media.mediaType}; boundary=${boundary}`);
       b.body = new Blob([...chunks, partsEnd(items.length, boundary)]);
       break;
@@ -2185,13 +2225,13 @@ function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkI
         return it;
       };
       if (typeof v === "object" && v !== null && Symbol.asyncIterator in v) {
-        b.body = itemStream(v as AsyncIterable<unknown>, (x, i) => joinChunks(partChunks(spec, item(x, i), i, boundary)), (e) => (b.failure = e), (n) => partsEnd(n, boundary));
+        b.body = itemStream(v as AsyncIterable<unknown>, (x, i) => joinChunks(partChunks(spec, item(x, i), i, boundary, "request", cfg.codecs)), (e) => (b.failure = e), (n) => partsEnd(n, boundary));
         b.streamed = true;
       } else {
         const chunks: BlobPart[] = [];
         let i = 0;
         for (const x of v as Iterable<unknown>) {
-          chunks.push(...partChunks(spec, item(x, i), i, boundary));
+          chunks.push(...partChunks(spec, item(x, i), i, boundary, "request", cfg.codecs));
           i++;
         }
         b.body = new Blob([...chunks, partsEnd(i, boundary)]);
@@ -2449,7 +2489,7 @@ function headerIssues(enc: PartEncoding, header: Headers | undefined, at: string
 // a response. A part has the first content type its encoding names, else
 // the file's own, text/plain or application/json, and its length, so that
 // a reader can take it before the next one.
-function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string, dir: Direction = "request"): BlobPart[] {
+function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string, dir: Direction = "request", codecs?: ReadonlyMap<string, Codec>): BlobPart[] {
   const part = item.spec.part ? (item.value as Part<unknown>) : undefined;
   const value = part !== undefined ? part.value : item.value;
   const header = new Headers(part?.header);
@@ -2478,9 +2518,19 @@ function partChunks(spec: PartsSpec, item: PartItem, i: number, boundary: string
       data = encoder.encode(text(value));
       type = "text/plain; charset=utf-8";
       break;
-    default:
-      data = encoder.encode(JSON.stringify(encode(item.spec.schema, value, dir)));
-      type = "application/json";
+    default: {
+      // A codec's part, if its encoding is of a codec's media type.
+      const ct = encodingAt(spec, i).contentTypes?.[0];
+      const codec = ct === undefined || ct.includes("*") ? undefined : codecs?.get(codecKey(ct));
+      if (codec !== undefined) {
+        const out = codec.encode(encode(item.spec.schema, value, dir));
+        data = typeof out === "string" ? encoder.encode(out) : out;
+        type = ct!;
+      } else {
+        data = encoder.encode(JSON.stringify(encode(item.spec.schema, value, dir)));
+        type = "application/json";
+      }
+    }
   }
   const declared = encodingAt(spec, i).contentTypes?.[0];
   if (declared !== undefined && !declared.includes("*")) {
@@ -2615,7 +2665,7 @@ export function config(options: ClientOptions, defaultBaseUrl: string, credentia
 // codecTypes have one.
 function codecMap(codecs: Readonly<Record<string, Codec>> | undefined, codecTypes: readonly string[]): ReadonlyMap<string, Codec> {
   const m = new Map(Object.entries(codecs ?? {}).map(([mt, c]) => [codecKey(mt), c]));
-  const missing = codecTypes.filter((mt) => !m.has(codecKey(mt)));
+  const missing = codecTypes.filter((mt) => !m.has(codecKey(mt)) && !(mt.includes("*") && [...m.keys()].some((k) => mediaMatches(mt, k))));
   if (missing.length > 0) {
     throw new Error(`no codec for ${missing.join(", ")}: give one in the codecs option`);
   }
@@ -2643,7 +2693,7 @@ export async function send(cfg: Config, op: OperationSpec, req: object, call: Ca
     checkRequest(op, values);
   }
   const b: Built = { path: "", query: new URLSearchParams(), headers: new Headers(), cookies: [] };
-  buildParams(op, values, b);
+  buildParams(op, values, b, cfg.codecs);
   buildBody(cfg, op, values, b, cfg.validateRequests);
   await authorize(op, cfg.credentials, b);
   const accept = [...new Set(op.responses.flatMap((r) => (r.mediaType ? [r.mediaType] : [])))];
@@ -2846,11 +2896,13 @@ async function unexpected(resp: Response): Promise<UnexpectedResponseError> {
   return new UnexpectedResponseError(resp.status, resp.headers, body, problem);
 }
 
-function headerValue(h: HeaderSpec, raw: string): unknown {
+function headerValue(h: HeaderSpec, raw: string, codecs?: ReadonlyMap<string, Codec>): unknown {
   if (h.object) {
     return objectHeader(h.schema, raw, h.explode === true);
   }
   switch (h.content) {
+    case "codec":
+      return withDefaults(h.schema, codecValue(codecs, h.mediaType!, raw));
     case "json":
       return JSON.parse(raw);
     case "text":
@@ -3240,7 +3292,7 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
       continue;
     }
     try {
-      headers[h.key] = headerValue(h, raw);
+      headers[h.key] = headerValue(h, raw, cfg.codecs);
     } catch (e) {
       throw new InvalidResponseError(resp.status, `header ${h.name}: ${String(e)}`);
     }
@@ -3273,9 +3325,14 @@ async function readResponse(cfg: Config, op: OperationSpec, resp: Response): Pro
     case "codec": {
       let body: unknown;
       try {
-        body = cfg.codecs.get(codecKey(spec.mediaType!))!.decode(new Uint8Array(await resp.arrayBuffer()));
+        // A codec's range is read as the media type the response has.
+        const mt = spec.mediaType!.includes("*") ? mediaType(resp) : spec.mediaType!;
+        body = withDefaults(spec.schema, cfg.codecs.get(codecKey(mt))!.decode(new Uint8Array(await resp.arrayBuffer())));
+        if (spec.mediaType!.includes("*")) {
+          out["contentType"] = mt;
+        }
       } catch (e) {
-        throw new InvalidResponseError(resp.status, `invalid ${codecKey(spec.mediaType!)}: ${String(e)}`);
+        throw new InvalidResponseError(resp.status, `invalid ${mediaType(resp)}: ${String(e)}`);
       }
       if (cfg.validateResponses && spec.schema !== undefined) {
         const issues = validate(spec.schema, body, "response");
@@ -3672,7 +3729,7 @@ function readIssues(spec: PartsSpec, raw: RawPart, i: number, dir: Direction): I
 
 // partValue returns the item a part is: a Blob (a File, if the part names
 // one), its text, or its body as JSON, in a Part if spec says.
-function partValue(spec: PartItemSpec, raw: RawPart, dir: Direction): unknown {
+function partValue(spec: PartItemSpec, raw: RawPart, dir: Direction, codecs?: ReadonlyMap<string, Codec>): unknown {
   let value: unknown;
   const utf8 = new TextDecoder();
   switch (spec.kind) {
@@ -3691,8 +3748,11 @@ function partValue(spec: PartItemSpec, raw: RawPart, dir: Direction): unknown {
     case "text":
       value = utf8.decode(raw.data);
       break;
-    default:
-      value = withDefaults(spec.schema, JSON.parse(utf8.decode(raw.data)), dir);
+    default: {
+      // A part of a codec's media type is read with the codec.
+      const codec = codecs?.get(codecKey(raw.header.get("Content-Type") ?? ""));
+      value = withDefaults(spec.schema, codec !== undefined ? codec.decode(raw.data) : JSON.parse(utf8.decode(raw.data)), dir);
+    }
   }
   return spec.part ? ({ header: raw.header, value } satisfies Part<unknown>) : value;
 }
@@ -3730,7 +3790,7 @@ function decodePart(rd: Reader, spec: PartsSpec, item: PartItemSpec, raw: RawPar
   }
   let value: unknown;
   try {
-    value = partValue(item, raw, rd.direction);
+    value = partValue(item, raw, rd.direction, rd.codecs);
   } catch (e) {
     throw fail([{ pointer: `/${i}`, message: String(e) }]);
   }
@@ -4088,7 +4148,7 @@ async function readRequest(cfg: ReceiverConfig, op: OperationSpec, request: Requ
   const claimed = new Set(op.params.filter((p) => p.in === "query").map((p) => p.name));
   for (const p of op.params) {
     try {
-      const v = paramOf(p, request, url, cookies, params, claimed);
+      const v = paramOf(p, request, url, cookies, params, claimed, cfg.codecs);
       if (v !== undefined) {
         out[p.key] = v;
       } else if (p.default !== undefined) {
@@ -4129,8 +4189,10 @@ function received(e: InvalidRequestError): InvalidRequestError {
 }
 
 // contentValue reads the value of a parameter with content.
-function contentValue(p: ParamSpec, raw: string): unknown {
+function contentValue(p: ParamSpec, raw: string, codecs?: ReadonlyMap<string, Codec>): unknown {
   switch (p.content) {
+    case "codec":
+      return withDefaults(p.schema, codecValue(codecs, p.mediaType!, raw), "request");
     case "text":
       return scalarValue(p.schema, raw);
     case "form":
@@ -4180,14 +4242,15 @@ function paramOf(
   cookies: readonly [string, string][],
   params: Readonly<Record<string, string>>,
   claimed: ReadonlySet<string>,
+  codecs: ReadonlyMap<string, Codec>,
 ): unknown {
   switch (p.in) {
     case "path": {
       const raw = params[p.name];
-      return raw === undefined ? undefined : pathParam(p, raw);
+      return raw === undefined ? undefined : pathParam(p, raw, codecs);
     }
     case "query":
-      return queryParam(p, url.searchParams, claimed);
+      return queryParam(p, url.searchParams, claimed, codecs);
     case "querystring": {
       const raw = url.search.slice(1);
       if (raw === "") {
@@ -4197,20 +4260,20 @@ function paramOf(
     }
     case "header": {
       const raw = request.headers.get(p.name);
-      return raw === null ? undefined : headerParam(p, raw);
+      return raw === null ? undefined : headerParam(p, raw, codecs);
     }
     case "cookie":
-      return cookieParam(p, cookies);
+      return cookieParam(p, cookies, codecs);
   }
   return undefined;
 }
 
 // pathParam reads a path parameter from raw, its text in the URL, whose
 // pieces are percent-encoded.
-function pathParam(p: ParamSpec, raw: string): unknown {
+function pathParam(p: ParamSpec, raw: string, codecs: ReadonlyMap<string, Codec>): unknown {
   const dec = decodeURIComponent;
   if (p.content !== undefined) {
-    return contentValue(p, dec(raw));
+    return contentValue(p, dec(raw), codecs);
   }
   let text = raw;
   let sep = p.delimiter === undefined ? "," : encodeURIComponent(p.delimiter);
@@ -4260,10 +4323,10 @@ function pathParam(p: ParamSpec, raw: string): unknown {
 }
 
 // queryParam reads a query parameter from q.
-function queryParam(p: ParamSpec, q: URLSearchParams, claimed: ReadonlySet<string>): unknown {
+function queryParam(p: ParamSpec, q: URLSearchParams, claimed: ReadonlySet<string>, codecs: ReadonlyMap<string, Codec>): unknown {
   if (p.content !== undefined) {
     const raw = q.get(p.name);
-    return raw === null ? undefined : contentValue(p, raw);
+    return raw === null ? undefined : contentValue(p, raw, codecs);
   }
   if (p.style === "deepObject") {
     const fields = [...q].filter(([k]) => k.startsWith(p.name + "["));
@@ -4301,9 +4364,9 @@ function queryParam(p: ParamSpec, q: URLSearchParams, claimed: ReadonlySet<strin
 }
 
 // headerParam reads a header parameter from raw, its value.
-function headerParam(p: ParamSpec, raw: string): unknown {
+function headerParam(p: ParamSpec, raw: string, codecs: ReadonlyMap<string, Codec>): unknown {
   if (p.content !== undefined) {
-    return contentValue(p, raw);
+    return contentValue(p, raw, codecs);
   }
   if (p.shape === "object") {
     return objectHeader(p.schema, raw, p.explode);
@@ -4316,11 +4379,11 @@ function headerParam(p: ParamSpec, raw: string): unknown {
 
 // cookieParam reads a cookie parameter from cookies, whose values are as
 // they are sent.
-function cookieParam(p: ParamSpec, cookies: readonly [string, string][]): unknown {
+function cookieParam(p: ParamSpec, cookies: readonly [string, string][], codecs: ReadonlyMap<string, Codec>): unknown {
   const dec = decodeURIComponent;
   const own = cookies.filter(([k]) => k === p.name).map(([, v]) => v);
   if (p.content !== undefined) {
-    return own.length === 0 ? undefined : contentValue(p, dec(own[0]!));
+    return own.length === 0 ? undefined : contentValue(p, dec(own[0]!), codecs);
   }
   if (p.shape === "array") {
     if (own.length === 0) {
@@ -4387,8 +4450,13 @@ async function readBody(cfg: ReceiverConfig, body: NonNullable<OperationSpec["bo
   if (media === undefined) {
     throw new RequestProblem(415, `the media type ${JSON.stringify(mt)} is not accepted; expected ${body.media.map((m) => m.mediaType).join(", ")}`);
   }
-  if (body.media.length > 1) {
-    out["contentType"] = media.mediaType;
+  const ranged = media.kind === "codec" && media.mediaType.includes("*");
+  if (ranged && !cfg.codecs.has(mt)) {
+    throw new RequestProblem(415, `the media type ${JSON.stringify(mt)} has no codec`);
+  }
+  if (body.media.length > 1 || ranged) {
+    // A codec's range is the media type sent.
+    out["contentType"] = ranged ? mt : media.mediaType;
   }
   const rd: Reader = { direction: "request", validate: cfg.validateRequests, codecs: cfg.codecs, fail: requestFailure };
   switch (media.kind) {
@@ -4413,7 +4481,7 @@ async function readBody(cfg: ReceiverConfig, body: NonNullable<OperationSpec["bo
         out[media.key] = withDefaults(media.schema, fromXML(utf8(), media.xml!), "request");
         break;
       case "codec":
-        out[media.key] = cfg.codecs.get(codecKey(media.mediaType))!.decode(data);
+        out[media.key] = withDefaults(media.schema, cfg.codecs.get(media.mediaType.includes("*") ? mt : codecKey(media.mediaType))!.decode(data), "request");
         break;
       case "form":
         out[media.key] = withDefaults(media.schema, formValue(media.schema, utf8()), "request");
@@ -4520,7 +4588,7 @@ function writeResponse(cfg: ReceiverConfig, op: OperationSpec, resp: unknown, re
     if (issues.length > 0) {
       throw invalid(`header ${h.name}`, issues);
     }
-    headers.set(h.name, headerText(h, v));
+    headers.set(h.name, headerText(h, v, cfg.codecs));
   }
   const body = r["body"];
   if (cfg.validateResponses && spec.schema !== undefined && (spec.kind === "json" || spec.kind === "xml" || spec.kind === "codec")) {
@@ -4543,7 +4611,7 @@ function writeResponse(cfg: ReceiverConfig, op: OperationSpec, resp: unknown, re
       break;
     case "codec":
       headers.set("Content-Type", mediaType);
-      out = cfg.codecs.get(codecKey(spec.mediaType!))!.encode(encode(spec.schema!, body, "response"));
+      out = cfg.codecs.get(codecKey(mediaType))!.encode(encode(spec.schema!, body, "response"));
       break;
     case "text":
       headers.set("Content-Type", mediaType.includes("charset=") ? mediaType : mediaType + "; charset=utf-8");
@@ -4567,7 +4635,7 @@ function writeResponse(cfg: ReceiverConfig, op: OperationSpec, resp: unknown, re
     case "parts": {
       const boundary = newBoundary();
       const items = partItems(spec.parts!, body);
-      const chunks = items.flatMap((item, i) => partChunks(spec.parts!, item, i, boundary, "response"));
+      const chunks = items.flatMap((item, i) => partChunks(spec.parts!, item, i, boundary, "response", cfg.codecs));
       headers.set("Content-Type", `${mediaType}; boundary=${boundary}`);
       out = new Blob([...chunks, partsEnd(items.length, boundary)]);
       break;
@@ -4582,7 +4650,7 @@ function writeResponse(cfg: ReceiverConfig, op: OperationSpec, resp: unknown, re
         if (issues.length > 0) {
           throw itemError("response", issues);
         }
-        return partChunks(parts, item, i, boundary, "response");
+        return partChunks(parts, item, i, boundary, "response", cfg.codecs);
       };
       out = streamBody(r["items"], async (x, i) => joinChunks(chunks(x, i)), onFailure, (n) => partsEnd(n, boundary));
       break;
@@ -4621,9 +4689,9 @@ function streamBody(
 }
 
 // headerText writes the value of a response header.
-function headerText(h: HeaderSpec, v: unknown): string {
+function headerText(h: HeaderSpec, v: unknown, codecs: ReadonlyMap<string, Codec>): string {
   if (h.content !== undefined) {
-    return contentText(h, v, "response");
+    return contentText(h, v, "response", codecs);
   }
   if (h.object) {
     return entries(v)
