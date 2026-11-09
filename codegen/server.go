@@ -762,20 +762,19 @@ func (f *fileGen) eventDecoder(es *ir.EventStream, dir, codecs string) string {
 // events of es, if their schemas have any.
 func (f *fileGen) eventFieldChecks(b *strings.Builder, es *ir.EventStream) {
 	srv := f.imp(serverImport, "server")
+	// The fields are checked where an event has them.
 	for _, field := range []struct {
-		ref       *ir.Ref
-		at, value string
-	}{{es.ID, "/id", "ev.ID"}, {es.Retry, "/retry", "ev.Retry"}} {
+		ref              *ir.Ref
+		at, value, given string
+	}{{es.ID, "/id", "ev.ID", `ev.ID != ""`}, {es.Retry, "/retry", "ev.Retry", "ev.Retry != 0"}} {
 		if field.ref == nil {
 			continue
 		}
 		value := field.value
-		if typ := f.goType(field.ref); field.at == "/retry" {
-			value = typ + "(" + value + ")"
-		} else if typ != "string" {
+		if typ := f.goType(field.ref); field.at == "/retry" || typ != "string" {
 			value = typ + "(" + value + ")"
 		}
-		fmt.Fprintf(b, "if validate {\nif err := %s.CheckEventField(%q, %s, %s); err != nil {\nreturn out, err\n}\n}\n", srv, field.at, value, f.itemValidation(field.ref))
+		fmt.Fprintf(b, "if validate && %s {\nif err := %s.CheckEventField(%q, %s, %s); err != nil {\nreturn out, err\n}\n}\n", field.given, srv, field.at, value, f.itemValidation(field.ref))
 	}
 }
 

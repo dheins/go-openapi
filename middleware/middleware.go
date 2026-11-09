@@ -158,7 +158,7 @@ func Validate(spec *loader.Spec, opts ...Option) (func(http.Handler) http.Handle
 	if err != nil {
 		return nil, fmt.Errorf("middleware: %w", err)
 	}
-	b := &builder{spec: spec, set: set}
+	b := &builder{spec: spec, set: set, codecs: cfg.Codecs}
 	var ops []*operation
 	for _, o := range model.Operations {
 		op, err := b.operation(o)
@@ -277,6 +277,8 @@ type media struct {
 type builder struct {
 	spec *loader.Spec
 	set  *schemas.Set
+	// codecs read the data of events of codecs' media types.
+	codecs map[string]server.Codec
 }
 
 func (b *builder) operation(o *ir.Operation) (*operation, error) {

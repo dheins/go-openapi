@@ -26,7 +26,7 @@ type EventMedia struct {
 // located in the event, as "/data/name", as EventData's.
 func EventValue[T any](ev Event, m EventMedia, dir oapi.Direction, validate bool, check func(T) error) (T, error) {
 	var v T
-	doc, err := eventJSON(ev.Data, m)
+	doc, err := EventJSON(ev.Data, m)
 	if err == nil {
 		err = oapi.DecodeValue(doc, &v, dir)
 	}
@@ -41,8 +41,9 @@ func EventValue[T any](ev Event, m EventMedia, dir oapi.Direction, validate bool
 	return v, nil
 }
 
-// eventJSON returns data, the data of an event written as m says, as JSON.
-func eventJSON(data string, m EventMedia) ([]byte, error) {
+// EventJSON returns data, the data of an event written as m says, as
+// JSON.
+func EventJSON(data string, m EventMedia) ([]byte, error) {
 	switch m.Kind {
 	case "text":
 		return oapi.AppendString(nil, data), nil
