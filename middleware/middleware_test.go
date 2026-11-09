@@ -76,6 +76,18 @@ paths:
                     data: {type: string, maxLength: 3}
       responses:
         "204": {description: ok}
+  /coded:
+    put:
+      operationId: coded
+      parameters:
+        - name: where
+          in: query
+          content: {application/x-json: {x-goapi-codec: true, schema: {type: object, required: [near], properties: {near: {type: string}}}}}
+      requestBody:
+        content:
+          application/x-json: {x-goapi-codec: true, schema: {$ref: "#/components/schemas/Pet"}}
+      responses:
+        "204": {description: ok}
   /files/{name}.{ext}:
     get:
       operationId: getFile
@@ -376,5 +388,41 @@ func TestRouting(t *testing.T) {
 	}
 	if res := send(h, httptest.NewRequest("GET", "/open", nil)); res.status != 204 || got.op == nil || got.op.ID != "open" {
 		t.Errorf("base path \"\": %d", res.status)
+	}
+}
+
+// jsonCodec stands in for a codec of a format goapi does not know; its
+// encoding is JSON.
+type jsonCodec struct{}
+
+func (jsonCodec) Marshal(v any) ([]byte, error)      { return json.Marshal(v) }
+func (jsonCodec) Unmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }
+
+func TestCodecs(t *testing.T) {
+	put := func(h http.Handler, query, body string) result {
+		r := httptest.NewRequest("PUT", "/v1/coded?"+query, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-json")
+		return send(h, r)
+	}
+	// With the codec, bodies and parameters are checked as it reads them.
+	h, got := newHandler(t, WithCodec("application/x-json", jsonCodec{}))
+	if res := put(h, `where={"near":"park"}`, `{"name":"Rex"}`); res.status != 204 {
+		t.Errorf("valid: %d %q", res.status, res.errors)
+	}
+	if b, _ := json.Marshal(got.op.Body); string(b) != `{"name":"Rex"}` {
+		t.Errorf("body = %s", b)
+	}
+	res := put(h, `where={}`, `{"name":""}`)
+	slices.Sort(res.errors)
+	if want := []string{"body /name: minLength: got 0, want 1", "query where /near: required property is missing"}; res.status != 400 || !slices.Equal(res.errors, want) {
+		t.Errorf("invalid: %d %q, want %q", res.status, res.errors, want)
+	}
+	if res := put(h, "", "{"); res.status != 400 || len(res.errors) != 1 || !strings.HasPrefix(res.errors[0], "body : invalid application/x-json") {
+		t.Errorf("undecodable: %d %q", res.status, res.errors)
+	}
+	// Without it, only their media types are.
+	h, _ = newHandler(t)
+	if res := put(h, `where={}`, `{"name":""}`); res.status != 204 {
+		t.Errorf("unchecked: %d %q", res.status, res.errors)
 	}
 }

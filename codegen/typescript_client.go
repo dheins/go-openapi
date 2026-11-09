@@ -240,10 +240,10 @@ func (g *tsGen) requestTypeOf(o *ir.Operation, received bool) (string, bool) {
 			}
 			fmt.Fprintf(&b, "  %s%s: %s;\n", key, q, types[i])
 		}
-		if len(media) > 1 {
+		if len(media) > 1 || o.Body.MediaTypeField {
 			var mts []string
 			for _, m := range media {
-				mts = append(mts, jsString(m.MediaType))
+				mts = append(mts, tsMediaType(m.MediaType))
 			}
 			if received {
 				b.WriteString("  /** The media type the body was sent as. */\n")
@@ -255,6 +255,18 @@ func (g *tsGen) requestTypeOf(o *ir.Operation, received bool) (string, bool) {
 	}
 	b.WriteString("}")
 	return b.String(), optional
+}
+
+// tsMediaType returns the type of a media type a body may be sent as: the
+// literal, or for a range (application/*) the media types in it.
+func tsMediaType(mt string) string {
+	switch {
+	case mt == "*/*":
+		return "string"
+	case strings.HasSuffix(mt, "/*"):
+		return "`" + strings.TrimSuffix(mt, "*") + "${string}`"
+	}
+	return jsString(mt)
 }
 
 func paramText(p *ir.Param) string {
@@ -606,6 +618,9 @@ func (g *tsGen) operationSpecOf(o *ir.Operation, scopes bool) (string, bool) {
 			jsString(keys[p]), jsString(p.Name), p.In, jsString(p.Style), p.Explode, shape)
 		if p.Content != "" {
 			s += fmt.Sprintf(", content: %q", p.ContentKind)
+			if p.ContentKind == "codec" {
+				s += ", mediaType: " + jsString(p.Content)
+			}
 		}
 		if p.Delimiter != "" {
 			s += ", delimiter: " + jsString(p.Delimiter)
@@ -713,6 +728,9 @@ func (g *tsGen) operationSpecOf(o *ir.Operation, scopes bool) (string, bool) {
 				}
 				if h.Content != "" {
 					hdr += fmt.Sprintf(", content: %q", h.ContentKind)
+					if h.ContentKind == "codec" {
+						hdr += ", mediaType: " + jsString(h.Content)
+					}
 				}
 				if h.XML != nil {
 					hdr += ", xml: " + tsXMLNode(h.XML)

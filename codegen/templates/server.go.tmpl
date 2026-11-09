@@ -97,7 +97,7 @@ type {{.RequestType}} struct {
 {{bodyDoc $body .}}
 	{{.Name}} {{goType .Type}}
 {{- end}}
-{{- if gt (len .Media) 1}}
+{{- if .MediaTypeField}}
 	// ContentType is the media type the body was sent as: one of
 	// {{range $i, $m := .Media}}{{if $i}}, {{end}}{{printf "%q" $m.MediaType}}{{end}}.
 	ContentType string

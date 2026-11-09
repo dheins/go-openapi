@@ -37,6 +37,9 @@ type settings struct {
 	server      []server.Option
 	passThrough bool
 	responses   ResponseMode
+	// codecs are the media types WithCodec registers, which the document
+	// reads as codecs' as goapi generate -codec does.
+	codecs []string
 }
 
 // WithBasePath serves the operations below prefix, such as "/v1"; by
@@ -62,6 +65,18 @@ func WithErrorHandler(h func(w http.ResponseWriter, r *http.Request, err error))
 // are answered with 413.
 func WithMaxBodyBytes(n int64) Option {
 	return func(s *settings) { s.server = append(s.server, server.WithMaxBodyBytes(n)) }
+}
+
+// WithCodec registers the codec of a media type goapi does not know, as
+// server.WithCodec does for generated servers, and as goapi generate
+// -codec declares it: bodies, parameters and headers of that type are
+// then checked against their schemas, decoded as the codec reads them.
+// Without it, only their media types are checked.
+func WithCodec(mediaType string, codec server.Codec) Option {
+	return func(s *settings) {
+		s.server = append(s.server, server.WithCodec(mediaType, codec))
+		s.codecs = append(s.codecs, mediaType)
+	}
 }
 
 // WithPassThrough hands requests the document has no operation for to the
@@ -137,7 +152,7 @@ func Validate(spec *loader.Spec, opts ...Option) (func(http.Handler) http.Handle
 	for _, opt := range opts {
 		opt(&s)
 	}
-	model := ir.Build(spec, ir.Options{Operations: true})
+	model := ir.Build(spec, ir.Options{Operations: true, Codecs: s.codecs})
 	cfg := server.NewConfig(append([]server.Option{server.WithBasePath(model.BasePath)}, s.server...)...)
 	set, err := schemas.New(spec, schemas.JSONStrings())
 	if err != nil {
@@ -517,7 +532,7 @@ func (op *operation) handler(cfg *server.Config, set *schemas.Set, mode Response
 		var b server.Binder
 		query := server.ParseQuery(r)
 		for _, p := range op.params {
-			p.bind(set, r, query, path, &b, &out.Params)
+			p.bind(set, cfg.Codecs, r, query, path, &b, &out.Params)
 		}
 		if op.body != nil {
 			out.Body = op.body.bind(cfg, set, w, r, &b)
@@ -566,7 +581,7 @@ func requirements(r *http.Request, security [][]*ir.SecurityUse) []server.Requir
 
 // bind reads and checks the parameter, recording problems on b and its
 // value in params.
-func (p *param) bind(set *schemas.Set, r *http.Request, query server.Query, path map[string]string, b *server.Binder, params *Params) {
+func (p *param) bind(set *schemas.Set, codecs map[string]server.Codec, r *http.Request, query server.Query, path map[string]string, b *server.Binder, params *Params) {
 	in, name := p.ir.In, p.ir.Name
 	var data []byte
 	var err error
@@ -576,7 +591,7 @@ func (p *param) bind(set *schemas.Set, r *http.Request, query server.Query, path
 		var raw string
 		raw, present, err = server.QueryString(r)
 		if err == nil && present {
-			data, err = p.content(raw)
+			data, err = p.content(codecs, raw)
 		}
 	case p.ir.Content != "":
 		var raw string
@@ -586,7 +601,12 @@ func (p *param) bind(set *schemas.Set, r *http.Request, query server.Query, path
 			raw, present = server.ContentValue(r, query, in, name)
 		}
 		if present {
-			data, err = p.content(raw)
+			data, err = p.content(codecs, raw)
+			if errors.Is(err, errNoCodec) {
+				// Present, but not checked.
+				params.set(in, name, raw)
+				return
+			}
 		}
 	default:
 		var vals server.Values
@@ -624,9 +644,12 @@ func (p *param) bind(set *schemas.Set, r *http.Request, query server.Query, path
 
 // content converts the text of a parameter with content to JSON, by its
 // media type: as it is (JSON), as a value of its type (text), as form
-// fields, or as an XML document.
-func (p *param) content(raw string) ([]byte, error) {
+// fields, as an XML document, or as its codec reads it (errNoCodec
+// without one).
+func (p *param) content(codecs map[string]server.Codec, raw string) ([]byte, error) {
 	switch p.ir.ContentKind {
+	case "codec":
+		return codecJSON(codecs, p.ir.Content, []byte(raw))
 	case "text":
 		return server.ValuesJSON(server.Values{Items: []string{raw}}, server.Scalar, p.prop)
 	case "form":
@@ -725,8 +748,24 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 		doc, _, err = server.MultipartJSON(data, r.Header.Get("Content-Type"), m.prop)
 	case "xml":
 		doc, err = server.XMLToJSON(data, m.xml)
+	case "codec":
+		mt := m.ir.MediaType
+		if strings.Contains(mt, "*") {
+			// A codec's range: the codec of the media type sent, a 415
+			// without one, unless no codecs are registered at all.
+			if len(cfg.Codecs) == 0 {
+				return nil
+			}
+			var ok bool
+			if mt, ok = cfg.BodyCodec(b, r, mt); !ok {
+				return nil
+			}
+		}
+		if doc, err = codecJSON(cfg.Codecs, mt, data); errors.Is(err, errNoCodec) {
+			return nil
+		}
 	default:
-		// Bytes, positional parts and codecs are not checked.
+		// Bytes and positional parts are not checked.
 		return nil
 	}
 	if err != nil {
@@ -739,6 +778,27 @@ func (bd *body) bind(cfg *server.Config, set *schemas.Set, w http.ResponseWriter
 		return nil
 	}
 	return value
+}
+
+// errNoCodec says a codec's body or parameter has no codec registered,
+// and is not checked.
+var errNoCodec = errors.New("no codec registered")
+
+// codecJSON returns data, of a codec's media type, as JSON, or errNoCodec.
+func codecJSON(codecs map[string]server.Codec, mediaType string, data []byte) ([]byte, error) {
+	codec, ok := codecs[server.CodecKey(mediaType)]
+	if !ok {
+		return nil, errNoCodec
+	}
+	var v any
+	if err := codec.Unmarshal(data, &v); err != nil {
+		return nil, &oapi.ValidationError{Message: fmt.Sprintf("invalid %s: %v", server.CodecKey(mediaType), err)}
+	}
+	doc, err := server.CodecJSON(v)
+	if err != nil {
+		return nil, &oapi.ValidationError{Message: fmt.Sprintf("invalid %s: %v", server.CodecKey(mediaType), err)}
+	}
+	return doc, nil
 }
 
 // isStream reports whether a body kind is read item by item.

@@ -31,7 +31,7 @@ test("responses a codec cannot decode, or that are invalid, are errors", async (
 });
 
 test("a client needs the codecs it declares", () => {
-  assert.throws(() => new Client({ baseUrl: "http://pets.test" }), /no codec for application\/x-tc, application\/x-tc2: give one in the codecs option/);
+  assert.throws(() => new Client({ baseUrl: "http://pets.test" }), /no codec for application\/x-tc, application\/x-tc2, application\/\*: give one in the codecs option/);
   // Media types match without case or parameters.
   const tc = codecs["application/x-tc"];
   assert.ok(new Client({ baseUrl: "http://pets.test", codecs: { "Application/X-TC": tc, "application/x-tc2; v=1": tc } }));

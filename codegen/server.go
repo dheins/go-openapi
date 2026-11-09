@@ -271,9 +271,9 @@ func codecs(ops []*ir.Operation) string {
 	return strings.Join(out, ", ")
 }
 
-// codecMediaTypes returns the media types the bodies and responses of ops
-// (those generated) encode and decode with codecs, as server.CodecKey has
-// them, in the order they are first used.
+// codecMediaTypes returns the media types the bodies, responses,
+// parameters and headers of ops (those generated) encode and decode with
+// codecs, as server.CodecKey has them, in the order they are first used.
 func codecMediaTypes(ops []*ir.Operation) []string {
 	var out []string
 	add := func(kind, mt string) {
@@ -286,13 +286,28 @@ func codecMediaTypes(ops []*ir.Operation) []string {
 		if o.Unsupported != "" {
 			continue
 		}
+		for _, p := range o.Params {
+			add(p.ContentKind, p.Content)
+		}
+		addParts := func(p *ir.Parts) {
+			if p != nil {
+				for _, mt := range p.Codecs {
+					add("codec", mt)
+				}
+			}
+		}
 		if o.Body != nil {
 			for _, m := range o.Body.Media {
 				add(m.Kind, m.MediaType)
+				addParts(m.Parts)
 			}
 		}
 		for _, r := range o.Responses {
 			add(r.Kind, r.MediaType)
+			addParts(r.Parts)
+			for _, h := range r.Headers {
+				add(h.ContentKind, h.Content)
+			}
 		}
 	}
 	return out
@@ -543,7 +558,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 		// for the other media types.
 		w(1, "if mediaType, ok := %s.BodyMediaType(r, &b, %s, %t); ok {", cfg, stringSlice(mediaTypes), body.Required)
 	}
-	if len(body.Media) > 1 {
+	if body.MediaTypeField {
 		w(2, "req.ContentType = mediaType")
 	}
 	if streamed {
@@ -558,7 +573,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 				w(3, "req.%s = server.JSONLinesBody(%s, r, %s)", m.Field.Name, cfg, f.itemValidation(m.Field.Value.Elem))
 			case m.Kind == "partstream":
 				_, sub, _ := strings.Cut(m.MediaType, "/")
-				parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+				parts := f.partsVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", m.Parts)
 				w(3, "req.%s = server.PartStreamBody(%s, r, %s, %s)", m.Field.Name, cfg, parts, f.itemValidation(m.Field.Value.Elem))
 			case m.Events != nil:
 				w(3, "req.%s = server.TypedEventsBody(%s, r, %s)", m.Field.Name, cfg, f.eventDecoder(m.Events, "Request"))
@@ -598,7 +613,7 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			pw(3, "}")
 		case "parts":
 			_, sub, _ := strings.Cut(m.MediaType, "/")
-			parts := f.declareVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", f.partsLiteral(m.Parts))
+			parts := f.partsVar(lowerFirst(o.Name)+ir.GoName(sub)+"Parts", m.Parts)
 			if m.Field.Value.Kind == ir.Tuple {
 				pw(3, "if v, err := server.DecodeTuple[%s](body, r.Header.Get(\"Content-Type\"), %s, %s.Request); err != nil {", elem(), parts, f.imp(oapiImport, "oapi"))
 				pw(4, "b.Body(err)")
@@ -616,6 +631,19 @@ func (f *fileGen) bindBody(w func(int, string, ...any), o *ir.Operation, body *i
 			validate(4)
 			pw(3, "}")
 		case "codec":
+			if strings.Contains(m.MediaType, "*") {
+				// The codec is that of the media type the body was sent as.
+				pw(3, "if mt, ok := c.BodyCodec(&b, r, %q); ok {", m.MediaType)
+				pw(4, "req.ContentType = mt")
+				pw(4, "if v, err := server.DecodeCodec[%s](c, mt, body); err != nil {", elem())
+				pw(5, "b.Body(err)")
+				pw(4, "} else {")
+				pw(5, "%s = %s", field, wrapValue(f, m.Field.Type, "v"))
+				validate(5)
+				pw(4, "}")
+				pw(3, "}")
+				break
+			}
 			pw(3, "if v, err := server.DecodeCodec[%s](c, %q, body); err != nil {", elem(), m.MediaType)
 			pw(4, "b.Body(err)")
 			pw(3, "} else {")
@@ -831,6 +859,17 @@ func (f *fileGen) tupleDecls(o *ir.Operation) string {
 
 // partsLiteral renders how positional parts are read and written as a
 // server.Parts.
+// partsVar declares the server.Parts of p as name, and returns it, with
+// the codecs of c, the server's or client's configuration, if parts use
+// them.
+func (f *fileGen) partsVar(name string, p *ir.Parts) string {
+	v := f.declareVar(name, f.partsLiteral(p))
+	if len(p.Codecs) > 0 {
+		return v + ".WithCodecs(c.Codecs)"
+	}
+	return v
+}
+
 func (f *fileGen) partsLiteral(p *ir.Parts) string {
 	rule := func(r ir.ParamProperty) string {
 		var fields []string
@@ -989,9 +1028,12 @@ func (f *fileGen) partHeaders(headers []*ir.Header) string {
 // with content of kind, into a typ, in direction dir: a form needs the
 // object's properties, which form returns, and XML the document's shape,
 // declared under hint.
-func (f *fileGen) decodeContent(kind, typ, raw string, form func() string, xml *ir.XMLNode, hint, dir string) string {
+func (f *fileGen) decodeContent(kind, mediaType, typ, raw string, form func() string, xml *ir.XMLNode, hint, dir string) string {
 	dir = f.imp(oapiImport, "oapi") + "." + dir
 	switch kind {
+	case "codec":
+		// c is the server's or the client's configuration, where this is.
+		return fmt.Sprintf("server.DecodeCodecContent[%s](c.Codecs, %q, %s, %s)", typ, mediaType, raw, dir)
 	case "text":
 		return fmt.Sprintf("server.DecodeTextContent[%s](%s)", typ, raw)
 	case "form":
@@ -1023,7 +1065,7 @@ func (f *fileGen) partHeaderCheck(h *ir.Header) string {
 	switch {
 	case h.Content != "":
 		hint := "partHeader" + ir.GoName(h.Name)
-		parse = f.decodeContent(h.ContentKind, f.goType(h.Type), "vals[0]", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Request")
+		parse = f.decodeContent(h.ContentKind, h.Content, f.goType(h.Type), "vals[0]", func() string { return f.headerFields(h, hint) }, h.XML, hint, "Request")
 	case h.Object:
 		props := f.headerFields(h, "partHeader"+ir.GoName(h.Name))
 		parse = fmt.Sprintf("server.ParseObjectHeader[%s](vals, %t, %s, %s.Request)", f.goType(h.Type), h.Explode, props, f.imp(oapiImport, "oapi"))
@@ -1104,7 +1146,7 @@ func (f *fileGen) bindParam(w func(int, string, ...any), o *ir.Operation, p *ir.
 	case p.In == "querystring" && p.Object:
 		convert = fmt.Sprintf("server.DecodeFields[%s](vals.Fields, %s)", elem, f.propertiesVar(o, p))
 	case p.Content != "":
-		convert = f.decodeContent(p.ContentKind, elem, "raw", func() string { return f.propertiesVar(o, p) }, p.XML, lowerFirst(o.Name)+p.Field, "Request")
+		convert = f.decodeContent(p.ContentKind, p.Content, elem, "raw", func() string { return f.propertiesVar(o, p) }, p.XML, lowerFirst(o.Name)+p.Field, "Request")
 	case p.Object:
 		convert = fmt.Sprintf("server.DecodeFields[%s](vals.Fields, %s)", elem, f.propertiesVar(o, p))
 	case p.Array && p.ItemDelimiter != "":
@@ -1277,7 +1319,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 		stmts := f.validation("r.Body", r.Body, 2)
 		if r.Kind == "parts" && r.Parts.HasHeaders() {
 			// Reading the parts checks their headers; writing them does not.
-			parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+			parts := f.partsVar(lowerFirst(r.TypeName)+"Parts", r.Parts)
 			check := "CheckParts"
 			if r.Body.Kind == ir.Tuple {
 				check = "CheckTuple"
@@ -1315,6 +1357,8 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 			format = "server.EncodeFormContent(%s, " + f.imp(oapiImport, "oapi") + ".Response)"
 		case h.ContentKind == "xml":
 			format = "server.EncodeXMLContent(%s, " + f.declareVar(lowerFirst(r.TypeName)+ir.GoName(h.Name)+"XMLShape", xmlNodeLiteral(h.XML)) + ", " + f.imp(oapiImport, "oapi") + ".Response)"
+		case h.ContentKind == "codec":
+			format = fmt.Sprintf("server.EncodeCodecContent(c.Codecs, %q, %%s, %s.Response)", h.Content, f.imp(oapiImport, "oapi"))
 		case h.Object:
 			format = fmt.Sprintf("server.FormatObject(%%s, %t, %s.Response)", h.Explode, f.imp(oapiImport, "oapi"))
 		case h.Array:
@@ -1343,7 +1387,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "json":
 		w(1, "return c.WriteJSON(w, %s, %s, r.Body, %s)", status, contentType, header)
 	case "parts":
-		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+		parts := f.partsVar(lowerFirst(r.TypeName)+"Parts", r.Parts)
 		write := "WriteParts"
 		if r.Body.Kind == ir.Tuple {
 			write = "WriteTuple"
@@ -1369,7 +1413,7 @@ func (f *fileGen) writeStmts(r *ir.Response) string {
 	case "jsonl":
 		w(1, "return server.WriteJSONLines(c, w, req, %s, %s, r.Items, %s)", status, contentType, header)
 	case "partstream":
-		parts := f.declareVar(lowerFirst(r.TypeName)+"Parts", f.partsLiteral(r.Parts))
+		parts := f.partsVar(lowerFirst(r.TypeName)+"Parts", r.Parts)
 		w(1, "return server.WritePartStream(c, w, req, %s, %s, r.Items, %s, %s)", status, contentType, parts, header)
 	case "sse":
 		if r.Events != nil {

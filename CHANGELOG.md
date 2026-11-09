@@ -4,6 +4,16 @@
 
 ### Added
 
+- Codecs for parameters and headers (`content` of a codec's media type),
+  positional parts and streams of parts whose encoding is a codec's, and
+  ranges (`application/*` with `x-goapi-codec`, or `-codec
+  application/*`) decoded with the codec of the media type sent, in Go
+  and TypeScript servers, clients and receivers.
+  `server.DecodeCodecContent`, `server.EncodeCodecContent`,
+  `server.EncodeCodec`, `server.CodecJSON`, `server.CodecValue`,
+  `server.Parts.WithCodecs`, `server.Config.BodyCodec`,
+  `client.CodecContentParam`, `client.MediaPattern` and
+  `middleware.WithCodec` are new.
 - XML bodies, parameters and headers whose schemas have maps of arrays
   (an element per item, named by its key), unions of string, number,
   boolean and object variants (`server.XMLNode` type `union`, with
@@ -569,6 +579,8 @@
 
 ### Fixed
 
+- Codecs encoded `oapi.Optional` properties and unions as the structs
+  they are in Go: they now get the value as JSON has it.
 - TypeScript clients wrote an array of arrays in a form or `deepObject`
   parameter as a JSON string per item, which servers did not read.
 - TypeScript clients validated a binary body against its `format: binary`
@@ -622,6 +634,11 @@
 
 ### Changed
 
+- A codec decodes into an `any` and is given plain values to encode, not
+  the generated types, and its bodies are decoded with the JSON
+  decoder's rules: required properties, read-only and write-only ones,
+  defaults and JSON pointers. Objects reach a codec as maps, so their
+  properties come in its order.
 - Closing the body of a Go request with a streamed body no longer stops
   its producer, since the request may be sent again; the call's end does
   (an error, closing the response body, or the context).

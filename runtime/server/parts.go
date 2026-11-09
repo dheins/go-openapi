@@ -39,6 +39,17 @@ type Parts struct {
 	// declare and the headers it must carry.
 	Prefix []Property
 	Rest   Property
+	// Codecs encode and decode the json parts whose content types they
+	// are registered for; see WithCodecs.
+	Codecs map[string]Codec
+}
+
+// WithCodecs returns p with codecs, those of a server's or client's
+// configuration: a json part of a content type one is registered for is
+// read and written with it, as the codec's bodies are.
+func (p Parts) WithCodecs(codecs map[string]Codec) Parts {
+	p.Codecs = codecs
+	return p
 }
 
 // encoding returns the encoding of the part at index i.
@@ -47,6 +58,19 @@ func (p Parts) encoding(i int) Property {
 		return p.Prefix[i]
 	}
 	return p.Rest
+}
+
+// codec returns the media type the json part at index i is encoded in by
+// a codec, the first its encoding declares, or "" if it has none.
+func (p Parts) codec(i int) string {
+	cts := p.encoding(i).ContentTypes
+	if len(cts) == 0 || strings.Contains(cts[0], "*") {
+		return ""
+	}
+	if _, ok := p.Codecs[CodecKey(cts[0])]; !ok {
+		return ""
+	}
+	return cts[0]
 }
 
 // kind returns how the part at index i of a tuple becomes an item.
@@ -80,7 +104,7 @@ func DecodePartsAs[T any](body []byte, contentType string, p Parts, dir oapi.Dir
 			return
 		}
 		var item T
-		errs.Nested(path, decodeItem(&item, p.Item, part, data, dir))
+		errs.Nested(path, decodeItem(&item, p.Item, part, data, dir, p.Codecs))
 		items = append(items, item)
 	})
 	if err != nil {
@@ -131,7 +155,7 @@ func DecodeTuple[T any](body []byte, contentType string, p Parts, dir oapi.Direc
 			errs.Add(path, fmt.Sprintf("unexpected part: the body has at most %d", len(prefix)))
 			return
 		}
-		errs.Nested(path, decodeItem(dst.Addr().Interface(), p.kind(i), part, data, dir))
+		errs.Nested(path, decodeItem(dst.Addr().Interface(), p.kind(i), part, data, dir, p.Codecs))
 	})
 	if err != nil {
 		return v, err
@@ -171,7 +195,7 @@ func eachPart(body []byte, contentType string, fn func(i int, part *multipart.Pa
 // decodeItem decodes a part into dst, a pointer, as kind says: the part
 // itself for a file (dst is an *oapi.File), its text, or its body as JSON.
 // An oapi.Part keeps the part's headers next to its value.
-func decodeItem(dst any, kind string, part *multipart.Part, data []byte, dir oapi.Direction) error {
+func decodeItem(dst any, kind string, part *multipart.Part, data []byte, dir oapi.Direction, codecs map[string]Codec) error {
 	if mp, ok := dst.(oapi.MIMEPart); ok && kind != "file" {
 		var header *textproto.MIMEHeader
 		header, dst = mp.MIMEPart()
@@ -191,6 +215,15 @@ func decodeItem(dst any, kind string, part *multipart.Part, data []byte, dir oap
 		}
 		// Through JSON too, where bytes are base64, for types of their own.
 		return oapi.DecodeValue(oapi.AppendString(nil, base64.StdEncoding.EncodeToString(raw)), dst, dir)
+	}
+	if ct := part.Header.Get("Content-Type"); ct != "" {
+		if _, ok := codecs[CodecKey(ct)]; ok {
+			doc, err := codecJSON(codecs, ct, data)
+			if err != nil {
+				return err
+			}
+			data = doc
+		}
 	}
 	return oapi.DecodeValue(data, dst, dir)
 }
@@ -439,7 +472,7 @@ func (pw *PartWriter) Close() error {
 }
 
 func (pw *PartWriter) write(item partItem) error {
-	h, data, partType, err := encodeItem(item.ptr, item.kind, pw.dir)
+	h, data, partType, err := encodeItem(item.ptr, item.kind, pw.dir, pw.p.Codecs, pw.p.codec(pw.n))
 	if err != nil {
 		return fmt.Errorf("part %d: %w", pw.n, err)
 	}
@@ -511,7 +544,7 @@ func ScanParts[T any](body io.Reader, contentType string, p Parts, dir oapi.Dire
 			if msg := checkPart(part.Header, p.encoding(i)); msg != "" {
 				errs.Add(path, msg)
 			} else {
-				errs.Nested(path, decodeItem(&item, p.Item, part, data, dir))
+				errs.Nested(path, decodeItem(&item, p.Item, part, data, dir, p.Codecs))
 			}
 			if err := errs.Err(); err != nil {
 				yield(zero, err)
@@ -652,8 +685,9 @@ func WritePartStream[T any](c *Config, w http.ResponseWriter, r *http.Request, s
 
 // encodeItem encodes the item ptr points to as a part of kind: its
 // headers (a file's own, or an oapi.Part's), its data, and the content
-// type it has unless its encoding names one.
-func encodeItem(ptr any, kind string, dir oapi.Direction) (textproto.MIMEHeader, []byte, string, error) {
+// type it has unless its encoding names one. A json part is encoded with
+// the codec of codec, a media type of codecs, if it is not "".
+func encodeItem(ptr any, kind string, dir oapi.Direction, codecs map[string]Codec, codec string) (textproto.MIMEHeader, []byte, string, error) {
 	h := textproto.MIMEHeader{}
 	src := ptr
 	if mp, ok := ptr.(oapi.MIMEPart); ok && kind != "file" {
@@ -694,6 +728,13 @@ func encodeItem(ptr any, kind string, dir oapi.Direction) (textproto.MIMEHeader,
 		}
 		h.Set("Content-Transfer-Encoding", "base64")
 		return h, base64Lines(raw), "application/octet-stream", nil
+	}
+	if codec != "" {
+		data, err := EncodeCodec(codecs, codec, src, dir)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return h, data, codec, nil
 	}
 	data, err := oapi.EncodeValue(src, dir)
 	if err != nil {

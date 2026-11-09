@@ -338,6 +338,17 @@ func (r *Request) FormContentParam(in, name string, v any) {
 	r.setContent(in, name, text)
 }
 
+// CodecContentParam sets a parameter serialized with the codec of
+// mediaType, which must write text.
+func (r *Request) CodecContentParam(c *Config, in, name, mediaType string, v any) {
+	text, err := server.EncodeCodecContent(c.Codecs, mediaType, v, oapi.Request)
+	if err != nil {
+		r.fail(fmt.Errorf("%s parameter %q: %w", in, name, err))
+		return
+	}
+	r.setContent(in, name, text)
+}
+
 // XMLContentParam sets a parameter serialized as the XML document root
 // describes.
 func (r *Request) XMLContentParam(in, name string, v any, root *server.XMLNode) {

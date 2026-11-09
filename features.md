@@ -64,10 +64,10 @@ shipped in.
 - Decoding union variants without their text: an untagged union decodes
   each variant from it, and a discriminated one reads it twice (the
   discriminator may come last). — later
-- Codecs of parameters, headers and positional parts, of wildcard media
-  types, and of streams; and decoding codec bodies with the JSON
-  decoder's rules (required properties, read-only and write-only ones,
-  defaults, pointers). — later
+- Codecs of JSON Lines and server-sent event streams, of part headers,
+  and codecs keeping values JSON cannot (keys that are not strings,
+  byte strings apart from base64 strings), which go through JSON values.
+  — later
 - `middleware.Validate`: checking binary bodies, positional parts (as
   bodies or streams) and codec bodies against their schemas (only their
   media types are), response headers holding objects in other styles
@@ -145,6 +145,12 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Codecs everywhere: codec bodies decoded and encoded through JSON
+  values with the JSON decoder's rules, and codecs for parameters,
+  headers, positional parts and streams of them, and ranges
+  (`application/*`), in Go and TypeScript servers, clients, receivers
+  and `middleware.Validate`. (f7d343a, 851cfb8, ffc9d14, 1b7c80b,
+  e6ab35e, 3b1e5a3)
 - [x] XML for maps of arrays, unions of string, number, boolean and
   object variants, and objects with typed `additionalProperties` next to
   their properties, in Go and TypeScript servers, clients, receivers,

@@ -918,6 +918,27 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M59 – Codecs everywhere ✅
+- [x] Codec values through JSON (`server.CodecJSON`, `server.CodecValue`),
+  so the JSON decoder's rules apply; `FuzzCodecValue`
+- [x] Codec parameters and headers, positional parts and streams of
+  parts, and ranges with the codec of the media type sent, in ir, the Go
+  runtime, codegen and `middleware.Validate` (`WithCodec`)
+- [x] TypeScript: the same, with `mediaType` on parameter and header specs
+- [x] End to end: getCoded, putCoded and postCodedParts in petserver
+
+**How it went**
+- *Through JSON*: decoding a codec's value straight into the generated
+  types skipped the JSON decoder and handed codecs `oapi.Optional` and
+  unions as structs; going through a JSON value fixes both, at the cost
+  of a conversion and of property order.
+- *Ranges*: a codec is registered for one media type, so a range needs
+  the media type a body was sent as, which requests now carry in
+  ContentType, as wildcard binary responses already did.
+- *Order of phases*: TypeScript came before the fixture, since the
+  fixture's TypeScript client could not be type-checked without it.
+- *Not done*: see [features.md](../features.md).
+
 ### M58 – XML maps of arrays, scalar unions and additional properties ✅
 - [x] ir: `XMLNode.Values` arrays, `Additional`, and `union` nodes with
   `Scalars`, where the three shapes were refused

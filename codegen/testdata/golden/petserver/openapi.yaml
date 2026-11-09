@@ -1270,6 +1270,78 @@ paths:
       responses:
         "204":
           description: Stored.
+  /coded:
+    get:
+      operationId: getCoded
+      description: Parameters and a header with content of a codec's media type.
+      parameters:
+        - name: where
+          in: query
+          required: true
+          content:
+            application/x-tc2:
+              schema:
+                $ref: "#/components/schemas/Size"
+        - name: X-Meta
+          in: header
+          content:
+            application/x-tc2:
+              schema:
+                $ref: "#/components/schemas/Size"
+      responses:
+        "204":
+          description: Seen.
+          headers:
+            X-Page:
+              content:
+                application/x-tc2:
+                  schema:
+                    $ref: "#/components/schemas/Size"
+    put:
+      operationId: putCoded
+      description: A body of any codec's media type, echoed in one the handler picks.
+      requestBody:
+        required: true
+        content:
+          application/*:
+            x-goapi-codec: true
+            schema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "200":
+          description: The pet.
+          content:
+            application/*:
+              x-goapi-codec: true
+              schema:
+                $ref: "#/components/schemas/Pet"
+    post:
+      operationId: postCodedParts
+      description: Pets as parts of a codec's media type, and a stream of them.
+      requestBody:
+        required: true
+        content:
+          multipart/mixed:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Pet"
+            itemEncoding:
+              contentType: application/x-tc2
+          multipart/related:
+            itemSchema:
+              $ref: "#/components/schemas/Pet"
+            itemEncoding:
+              contentType: application/x-tc2
+      responses:
+        "200":
+          description: Their names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
   /labels:
     put:
       operationId: putLabels

@@ -1213,14 +1213,66 @@ components:
 	for _, r := range o.Responses {
 		responses = append(responses, r.MediaType+"="+r.Kind+":"+r.TypeName)
 	}
-	if got := strings.Join(responses, " "); got != "application/cbor=codec:A200CborResponse application/*=binary:A200ApplicationResponse" {
+	// A codec's range decodes with the codec of the media type sent, named
+	// in a ContentType field.
+	if got := strings.Join(responses, " "); got != "application/cbor=codec:A200CborResponse application/*=codec:A200ApplicationResponse" {
 		t.Errorf("responses = %s", got)
+	}
+	if r := o.Responses[1]; !r.ContentTypeField {
+		t.Errorf("application/* has no ContentType field")
+	}
+	if !o.Body.MediaTypeField {
+		t.Errorf("the request has no ContentType field")
+	}
+}
+
+func TestCodecContent(t *testing.T) {
+	m := build(t, `openapi: 3.2.0
+info: {title: t, version: v}
+paths:
+  /a:
+    get:
+      operationId: a
+      parameters:
+        - name: filter
+          in: query
+          content: {application/x-yaml: {schema: {type: object, properties: {name: {type: string}}}}}
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Page:
+              content: {application/x-yaml: {x-goapi-codec: true, schema: {type: object, properties: {next: {type: string}}}}}
+  /b:
+    post:
+      operationId: b
+      requestBody:
+        content:
+          multipart/mixed:
+            schema: {type: array, items: {type: object, properties: {name: {type: string}}}}
+            itemEncoding:
+              contentType: application/x-yaml
+              headers:
+                X-Meta: {content: {application/x-yaml: {schema: {type: string}}}}
+      responses:
+        "204": {description: ok}
+`, Options{Operations: true, Codecs: []string{"application/x-yaml"}})
+	a := operationNamed(t, m, "A")
+	if p := a.Params[0]; p.ContentKind != "codec" || p.Content != "application/x-yaml" {
+		t.Errorf("filter = %q %q", p.Content, p.ContentKind)
+	}
+	if h := a.Responses[0].Headers[0]; h.ContentKind != "codec" {
+		t.Errorf("X-Page = %q", h.ContentKind)
+	}
+	// The JSON parts of a codec's content type are its.
+	if p := operationNamed(t, m, "B").Body.Media[0].Parts; p == nil || strings.Join(p.Codecs, " ") != "application/x-yaml" {
+		t.Errorf("parts = %+v", p)
 	}
 	all := ""
 	for _, w := range m.Warnings {
 		all += w.Message + "\n"
 	}
-	if want := "application/* is a wildcard and cannot have a codec, which is registered for one media type"; !strings.Contains(all, want) {
+	if want := `part header "X-Meta" has content of type application/x-yaml, which only a codec reads; only its presence is checked`; !strings.Contains(all, want) {
 		t.Errorf("no warning %q in:\n%s", want, all)
 	}
 }

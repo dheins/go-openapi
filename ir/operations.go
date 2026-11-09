@@ -176,7 +176,11 @@ type Body struct {
 	Required bool
 	// Media are the accepted media types.
 	Media []*BodyMedia
-	Doc   string
+	// MediaTypeField says the request has a ContentType field, the media
+	// type its body was sent as: with several media types, or a codec's
+	// range (application/*).
+	MediaTypeField bool
+	Doc            string
 	// Value is the type of the first media type's body, and Type the type
 	// of the Body field: Value, made optional if the body is not required.
 	Value, Type *Ref
@@ -551,12 +555,14 @@ func (b *builder) param(o *Operation, p *oas.Parameter, fields namespace) (*Para
 	schema := p.Schema
 	if p.Content.Len() > 0 || p.In == "querystring" {
 		// The value is serialized as a whole with a media type.
+		var media *oas.MediaType
 		for mt, m := range p.Content.All() {
 			param.Content = strings.ToLower(mt)
-			schema = m.Deref().Schema
+			media = m.Deref()
+			schema = media.Schema
 			break
 		}
-		param.ContentKind = contentKind(param.Content)
+		param.ContentKind = b.contentKind(param.Content, media)
 		if param.ContentKind == "" || p.In == "querystring" && param.ContentKind != "json" && param.ContentKind != "form" {
 			return nil, fmt.Sprintf("parameter %q has content of type %q, which is not supported yet", p.Name, param.Content)
 		}
@@ -959,8 +965,8 @@ func structured(kind string) bool {
 
 // codecKind returns "codec" when a body of media type mt decodes with a
 // codec, by Options.Codecs or x-goapi-codec on its media type object m,
-// and kind otherwise. A wildcard cannot have a codec, which is
-// registered for one media type.
+// and kind otherwise. A wildcard (application/*) decodes with whichever
+// registered codec its value's media type has.
 func (b *builder) codecKind(kind, mt string, m *oas.MediaType) string {
 	declared := slices.ContainsFunc(b.opts.Codecs, func(c string) bool { return mediaBase(c) == mediaBase(mt) })
 	if !declared && m != nil && m.Extensions != nil {
@@ -970,10 +976,6 @@ func (b *builder) codecKind(kind, mt string, m *oas.MediaType) string {
 		}
 	}
 	if !declared {
-		return kind
-	}
-	if strings.Contains(mt, "*") {
-		b.warnAt(m, nil, fmt.Sprintf("%s is a wildcard and cannot have a codec, which is registered for one media type", mt))
 		return kind
 	}
 	return "codec"
@@ -1094,6 +1096,9 @@ func (b *builder) body(o *Operation, op *oas.Operation, rb *oas.RequestBody, fie
 		}
 	}
 	body.Value, body.Type = body.Fields[0].Value, body.Fields[0].Type
+	body.MediaTypeField = len(body.Media) > 1 || slices.ContainsFunc(body.Media, func(m *BodyMedia) bool {
+		return m.Kind == "codec" && strings.Contains(m.MediaType, "*")
+	})
 	return body
 }
 
@@ -1309,6 +1314,9 @@ func (b *builder) encodingRules(enc *oas.Encoding, hint string) (contentTypes []
 			continue
 		}
 		header, why := b.typedHeader(http.CanonicalHeaderKey(hname), h.Deref(), hint+GoName(hname))
+		if why == "" && header.ContentKind == "codec" {
+			why = fmt.Sprintf("has content of type %s, which only a codec reads", header.Content)
+		}
 		if why != "" {
 			// Its presence is still checked.
 			b.warnAt(h, nil, fmt.Sprintf("part header %q %s; only its presence is checked", hname, why))
@@ -1332,6 +1340,9 @@ type Parts struct {
 	Kinds  []string
 	Prefix []ParamProperty
 	Rest   ParamProperty
+	// Codecs are the media types of the encodings a codec encodes: their
+	// JSON parts are read and written with it.
+	Codecs []string
 }
 
 // TupleType is the struct generated for a body of positional parts with
@@ -1389,6 +1400,13 @@ func (b *builder) parts(value *Ref, m *oas.MediaType, hint string) *Parts {
 	}
 	if m.Encoding.Len() > 0 {
 		b.warnAt(m, []string{"encoding"}, "encoding by name applies to multipart/form-data only; use prefixEncoding and itemEncoding for positional parts")
+	}
+	for _, rule := range append(slices.Clone(p.Prefix), p.Rest) {
+		for _, ct := range rule.ContentTypes {
+			if !strings.Contains(ct, "*") && b.codecKind("", ct, nil) == "codec" && !slices.Contains(p.Codecs, ct) {
+				p.Codecs = append(p.Codecs, ct)
+			}
+		}
 	}
 	return p
 }
@@ -1665,8 +1683,12 @@ func (b *builder) response(o *Operation, status string, resp *oas.Response) []*R
 			suffix = "JSON"
 		case "codec":
 			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
+			v.ContentTypeField = strings.Contains(mt, "*")
 			_, sub, _ := strings.Cut(mediaBase(mt), "/")
 			suffix = GoName(sub)
+			if sub == "*" {
+				suffix = GoName(strings.TrimSuffix(mediaBase(mt), "/*"))
+			}
 		case "xml":
 			v.Body = b.use(media.Schema, o.Name+statusName+"ResponseBody", nil)
 			node, why := b.xmlRoot(v.Body, media.Schema)
@@ -1760,13 +1782,15 @@ func (h *Header) String() string { return h.Name }
 func (b *builder) typedHeader(name string, h *oas.Header, hint string) (*Header, string) {
 	header := &Header{Name: name, Doc: strings.TrimSpace(h.Description), Required: h.Required}
 	schema := h.Schema
+	var media *oas.MediaType
 	for mt, m := range h.Content.All() {
-		header.Content, schema = strings.ToLower(mt), m.Deref().Schema
+		media = m.Deref()
+		header.Content, schema = strings.ToLower(mt), media.Schema
 		break
 	}
 	ref := stripNullable(b.use(schema, hint, nil))
 	if header.Content != "" {
-		if header.ContentKind = contentKind(header.Content); header.ContentKind == "" {
+		if header.ContentKind = b.contentKind(header.Content, media); header.ContentKind == "" {
 			// Another media type's value is taken as its text.
 			if jsonType(ref) != "string" {
 				return nil, fmt.Sprintf("with content of type %s is not a string, which it is read as", header.Content)
@@ -1829,6 +1853,16 @@ func flatObject(obj ParamProperty) bool {
 		}
 	}
 	return true
+}
+
+// contentKind classifies the media type mt of a parameter or header with
+// content, m in the document: codec, if a codec encodes it, else as
+// contentKind does.
+func (b *builder) contentKind(mt string, m *oas.MediaType) string {
+	if !strings.Contains(mt, "*") && b.codecKind("", mt, m) == "codec" {
+		return "codec"
+	}
+	return contentKind(mt)
 }
 
 // contentKind classifies the media type of a parameter or header with
