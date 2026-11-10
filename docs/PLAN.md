@@ -918,6 +918,25 @@ Exit met: every official example (JSON and YAML) loads, validates and round-trip
   credentials added when sending.
 - *Not done*: see [features.md](../features.md).
 
+### M60 – Typed server-sent events beyond 3.2 ✅
+- [x] ir: unnamed kinds, `EventMedia` of a kind's data, and the checks
+  of `id` and `retry`
+- [x] Go runtime and codegen: `server.EventValue`, `EncodeEventValue`,
+  `CheckEventField`, `NoEventKind`; decoders trying the unnamed kinds
+- [x] `middleware.Validate`'s stream checks, through `server.EventJSON`
+- [x] TypeScript: `EventsSpec` with `unnamed`, media, `id` and `retry`
+- [x] End to end: petEvents in petserver, every kind both ways
+
+**How it went**
+- *Trying each kind*: deciding an unnamed kind by decoding the data as
+  each in turn and checking it works for every data format the same
+  way, discriminators included, since their const properties fail the
+  other kinds' checks.
+- *Absent fields*: `id` and `retry` are checked only where an event has
+  them; checking an absent id as "" was caught by the middleware's tests
+  and fixed in the generated decoders too.
+- *Not done*: see [features.md](../features.md).
+
 ### M59 – Codecs everywhere ✅
 - [x] Codec values through JSON (`server.CodecJSON`, `server.CodecValue`),
   so the JSON decoder's rules apply; `FuzzCodecValue`

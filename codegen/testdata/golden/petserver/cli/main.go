@@ -17,6 +17,8 @@ import (
 	"github.com/dheins/go-openapi/runtime/server"
 )
 
+var paramPattern = oapi.MustCompilePattern("^[0-9]+$")
+
 // petserverctl is a command-line client of Pet server: a command per
 // operation, sent with the generated client. Run petserverctl help for them.
 func main() {
@@ -694,6 +696,124 @@ var app = cli.App[*client.Client]{
 			ContentType:  "ContentType",
 			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
 				return c.PostCodedParts(ctx, req.(*api.PostCodedPartsRequest))
+			},
+		},
+		{
+			Name: "pet-events", Summary: "Events of every kind, told apart by name or by their data, echoed back.", Tag: "",
+			Request: func() any { return new(api.PetEventsRequest) },
+			Media: []cli.Media{
+				{MediaType: "text/event-stream", Kind: "sse", Field: "Body",
+					Stream: func(r io.Reader) any {
+						return cli.TypedEvents(r, func(ev server.Event, validate bool) (server.TypedEvent[model.PetEventsRequestEventData], error) {
+							out := server.TypedEvent[model.PetEventsRequestEventData]{ID: ev.ID, Event: ev.Event, Retry: ev.Retry}
+							if validate && ev.ID != "" {
+								if err := server.CheckEventField("/id", ev.ID, func(item string) error {
+									var errs oapi.ValidationErrors
+									if err := paramPattern.Check(item); err != nil {
+										errs.Add("", err.Error())
+									}
+									return errs.Err()
+								}); err != nil {
+									return out, err
+								}
+							}
+							if validate && ev.Retry != 0 {
+								if err := server.CheckEventField("/retry", int64(ev.Retry), func(item int64) error {
+									var errs oapi.ValidationErrors
+									if item > 60000 {
+										errs.Add("", "must be at most 60000")
+									}
+									return errs.Err()
+								}); err != nil {
+									return out, err
+								}
+							}
+							switch ev.Event {
+							case "added":
+								data, err := server.EventData(ev, oapi.Request, validate, func(item model.Pet) error {
+									var errs oapi.ValidationErrors
+									errs.Nested("", item.Validate())
+									return errs.Err()
+								})
+								if err != nil {
+									return out, err
+								}
+								out.Data = model.NewPetEventsRequestEventData(data)
+							case "card":
+								data, err := server.EventValue(ev, server.EventMedia{Kind: "xml", XML: &server.XMLNode{Name: "card", Namespace: "urn:example:pets", Prefix: "p", Type: "object", Properties: []server.XMLProperty{{Name: "id", Node: &server.XMLNode{Name: "id", Kind: "attribute", Type: "integer"}}, {Name: "name", Node: &server.XMLNode{Name: "name", Namespace: "urn:example:pets", Prefix: "p", Type: "string"}}, {Name: "nicknames", Node: &server.XMLNode{Name: "nicknames", Type: "array", Wrapped: true, Items: &server.XMLNode{Name: "nickname", Type: "string"}}}, {Name: "vets", Node: &server.XMLNode{Name: "vets", Type: "array", Items: &server.XMLNode{Name: "vet", Type: "object", Properties: []server.XMLProperty{{Name: "name", Node: &server.XMLNode{Name: "name", Kind: "text", Type: "string"}}, {Name: "phone", Node: &server.XMLNode{Name: "phone", Kind: "attribute", Type: "string"}}}}}}, {Name: "note", Node: &server.XMLNode{Name: "remark", Type: "object", Properties: []server.XMLProperty{{Name: "lang", Node: &server.XMLNode{Name: "lang", Kind: "attribute", Type: "string"}}, {Name: "text", Node: &server.XMLNode{Name: "text", Kind: "cdata", Type: "string"}}}}}, {Name: "secret", Node: &server.XMLNode{Name: "secret", Type: "string"}}}}}, oapi.Request, validate, func(item model.Card) error {
+									var errs oapi.ValidationErrors
+									errs.Nested("", item.Validate())
+									return errs.Err()
+								})
+								if err != nil {
+									return out, err
+								}
+								out.Data = model.NewPetEventsRequestEventData(data)
+							case "size":
+								data, err := server.EventValue(ev, server.EventMedia{Kind: "form", Form: server.Property{Type: "object", Properties: map[string]server.Property{"w": {Type: "integer"}, "h": {Type: "integer"}}}}, oapi.Request, validate, func(item model.Size) error {
+									var errs oapi.ValidationErrors
+									errs.Nested("", item.Validate())
+									return errs.Err()
+								})
+								if err != nil {
+									return out, err
+								}
+								out.Data = model.NewPetEventsRequestEventData(data)
+							case "count":
+								data, err := server.EventValue(ev, server.EventMedia{Kind: "scalar", Type: "integer"}, oapi.Request, validate, func(item int64) error {
+									var errs oapi.ValidationErrors
+									if item < 0 {
+										errs.Add("", "must be at least 0")
+									}
+									return errs.Err()
+								})
+								if err != nil {
+									return out, err
+								}
+								out.Data = model.NewPetEventsRequestEventData(model.PetEventsRequestEventDataInteger(data))
+							case "coded":
+								data, err := server.EventValue(ev, server.EventMedia{Kind: "codec", MediaType: "application/x-tc2", Codecs: nil}, oapi.Request, validate, func(item model.Size) error {
+									var errs oapi.ValidationErrors
+									errs.Nested("", item.Validate())
+									return errs.Err()
+								})
+								if err != nil {
+									return out, err
+								}
+								out.Data = model.NewPetEventsRequestEventData(model.PetEventsRequestEventDataSize2(data))
+							default:
+								found := 0
+								if data, err := server.EventData(ev, oapi.Request, true, func(item model.Toy) error {
+									var errs oapi.ValidationErrors
+									errs.Nested("", item.Validate())
+									return errs.Err()
+								}); err == nil {
+									out.Data = model.NewPetEventsRequestEventData(data)
+									found++
+								}
+								if data, err := server.EventData(ev, oapi.Request, true, func(item model.Treat) error {
+									var errs oapi.ValidationErrors
+									errs.Nested("", item.Validate())
+									return errs.Err()
+								}); err == nil {
+									out.Data = model.NewPetEventsRequestEventData(data)
+									found++
+								}
+								switch found {
+								case 0:
+									return out, server.NoEventKind(ev.Event, "added", "card", "size", "count", "coded")
+								case 1:
+								default:
+									return out, server.EventKinds()
+								}
+							}
+							return out, nil
+						})
+					}},
+			},
+			BodyRequired: true,
+			Call: func(ctx context.Context, c *client.Client, req any) (any, error) {
+				return c.PetEvents(ctx, req.(*api.PetEventsRequest))
 			},
 		},
 		{

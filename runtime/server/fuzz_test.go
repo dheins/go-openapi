@@ -243,6 +243,8 @@ func FuzzStreamBodies(f *testing.F) {
 	f.Add([]byte("{\"a\":1}\n\n[1,2]\n\"x\"\n"))
 	f.Add([]byte("event: a\r\ndata: 1\rdata: 2\n\n: c\nretry: 30\nid: 7\ndata\n\n"))
 	f.Add([]byte("event: added\ndata: {\"a\":\ndata: [1,2]}\n\nid: x\ndata: \"s\"\n\n"))
+	f.Add([]byte("event: card\ndata: <p:card xmlns:p=\"urn:x\" id=\"3\"><p:name>Kit</p:name></p:card>\n\nevent: size\ndata: w=2&h=3\n\n"))
+	f.Add([]byte("id: 7\nretry: 100\ndata: TC{\"w\":5}\n\nevent: count\ndata: 4\n\n"))
 	c := NewConfig(WithMaxBodyBytes(1 << 10))
 	// What is written back is read with a larger limit: escaping (of & as
 	// \u0026, for one) can make a line longer than it was.

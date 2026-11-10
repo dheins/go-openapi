@@ -1124,6 +1124,24 @@ func (c *Client) PostCodedParts(ctx context.Context, req *api.PostCodedPartsRequ
 	return api.ReadPostCodedPartsResponse(c.cfg, resp)
 }
 
+// PetEvents calls POST /pets/events. A nil req sends no parameters or body.
+//
+// Events of every kind, told apart by name or by their data, echoed back.
+func (c *Client) PetEvents(ctx context.Context, req *api.PetEventsRequest) (api.PetEventsResponse, error) {
+	if req == nil {
+		req = &api.PetEventsRequest{}
+	}
+	hreq, err := api.NewPetEventsRequest(ctx, c.cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.cfg.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReadPetEventsResponse(c.cfg, resp)
+}
+
 // PutLabels calls PUT /labels. A nil req sends no parameters or body.
 //
 // Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.

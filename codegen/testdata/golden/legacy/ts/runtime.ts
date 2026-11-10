@@ -1445,9 +1445,32 @@ export interface PartsSpec {
 /** The data of typed server-sent events: of one schema, or of one per
  * kind of event, which the event's name selects. Data is JSON, or text
  * for a kind marked so. */
-export type EventsSpec =
-  | { readonly data: Schema }
-  | { readonly kinds: { readonly [event: string]: { readonly schema: Schema; readonly text?: boolean } } };
+export type EventsSpec = (
+  | ({ readonly data: Schema } & Omit<EventKindSpec, "schema">)
+  | {
+      readonly kinds: { readonly [event: string]: EventKindSpec };
+      /** The kinds without a name, which an event of no named kind is the
+       * one of its data is (with anyOf, the first). */
+      readonly unnamed?: readonly EventKindSpec[];
+      readonly anyOf?: boolean;
+    }
+) & {
+  /** The schemas of the id and retry fields, checked where they are. */
+  readonly id?: Schema;
+  readonly retry?: Schema;
+};
+
+/** A kind of event: the schema of its data, which is JSON unless it is
+ * text, or media says another way: the text of a number, boolean or enum
+ * (scalar), an XML document (xml), form fields (form) or a codec's
+ * mediaType (codec). */
+export interface EventKindSpec {
+  readonly schema: Schema;
+  readonly text?: boolean;
+  readonly media?: "scalar" | "xml" | "form" | "codec";
+  readonly xml?: XMLNode;
+  readonly mediaType?: string;
+}
 
 export interface HeaderSpec {
   readonly key: string;
@@ -2244,7 +2267,7 @@ function buildBody(cfg: Config, op: OperationSpec, req: Values, b: Built, checkI
       const line =
         media.kind === "jsonl"
           ? jsonLine(media.schema, checkItems)
-          : (ev: unknown, i: number) => eventText(media.events === undefined ? (ev as ServerEvent) : typedEvent(media.events, ev as ServerEvent<unknown>, i, checkItems));
+          : (ev: unknown, i: number) => eventText(media.events === undefined ? (ev as ServerEvent) : typedEvent(media.events, ev as ServerEvent<unknown>, i, checkItems, "request", cfg.codecs));
       if (typeof v === "object" && v !== null && Symbol.asyncIterator in v) {
         b.body = itemStream(v as AsyncIterable<unknown>, line, (e) => (b.failure = e));
         b.streamed = true;
@@ -2285,32 +2308,98 @@ function itemError(dir: Direction, issues: readonly Issue[]): Error {
   return new Error("invalid response: " + issues.map((x) => `${x.pointer}: ${x.message}`).join("; "));
 }
 
-// eventsSchema returns the schema of the data of ev and whether that data
-// is text, or why it has none.
-function eventsSchema(spec: EventsSpec, name: string | undefined): { schema: Schema; text: boolean } | string {
+// eventKinds returns the kinds an event of name may be: its named kind,
+// or the unnamed ones, the data telling which; or why it has none.
+function eventKinds(spec: EventsSpec, name: string | undefined): readonly EventKindSpec[] | string {
   if ("data" in spec) {
-    return { schema: spec.data, text: false };
+    return [{ ...spec, schema: spec.data }];
   }
-  const kind = name === undefined ? undefined : spec.kinds[name];
-  if (kind === undefined) {
-    return `unknown event ${JSON.stringify(name ?? "")}; expected ${Object.keys(spec.kinds).map((k) => JSON.stringify(k)).join(", ")}`;
+  const kind = name === undefined || name === "" ? undefined : spec.kinds[name];
+  if (kind !== undefined) {
+    return [kind];
   }
-  return { schema: kind.schema, text: kind.text === true };
+  if (spec.unnamed !== undefined && spec.unnamed.length > 0) {
+    return spec.unnamed;
+  }
+  return `unknown event ${JSON.stringify(name ?? "")}; expected ${Object.keys(spec.kinds).map((k) => JSON.stringify(k)).join(", ")}`;
+}
+
+// eventValue reads raw, the data of an event of kind, as its media says.
+function eventValue(kind: EventKindSpec, raw: string, dir: Direction, codecs: ReadonlyMap<string, Codec> | undefined): unknown {
+  if (kind.text === true) {
+    return raw;
+  }
+  switch (kind.media) {
+    case "scalar":
+      return scalarValue(kind.schema, raw.trim());
+    case "xml":
+      return withDefaults(kind.schema, fromXML(raw, kind.xml!), dir);
+    case "form":
+      return withDefaults(kind.schema, formValue(kind.schema, raw), dir);
+    case "codec":
+      return withDefaults(kind.schema, codecValue(codecs, kind.mediaType!, raw), dir);
+  }
+  return withDefaults(kind.schema, JSON.parse(raw), dir);
+}
+
+// eventDataText writes data, of kind, as the data of an event.
+function eventDataText(kind: EventKindSpec, data: unknown, dir: Direction, codecs: ReadonlyMap<string, Codec> | undefined): string {
+  if (kind.text === true) {
+    return text(data);
+  }
+  switch (kind.media) {
+    case "scalar":
+      return text(data);
+    case "xml":
+      return xmlContent(encode(kind.schema, data, dir), kind.xml!);
+    case "form": {
+      const out: [string, string][] = [];
+      fields(encode(kind.schema, data, dir), "", out);
+      return new URLSearchParams(out).toString();
+    }
+    case "codec": {
+      const codec = codecs?.get(codecKey(kind.mediaType!));
+      if (codec === undefined) {
+        throw new Error(`no codec for ${kind.mediaType!}`);
+      }
+      const out = codec.encode(encode(kind.schema, data, dir));
+      return typeof out === "string" ? out : new TextDecoder("utf-8", { fatal: true }).decode(out);
+    }
+  }
+  return JSON.stringify(encode(kind.schema, data, dir));
+}
+
+// eventFieldIssues returns the issues of the id and retry fields of ev,
+// the i-th event, where it has them.
+function eventFieldIssues(spec: EventsSpec, ev: ServerEvent<unknown>, i: number, dir: Direction): Issue[] {
+  const issues: Issue[] = [];
+  if (spec.id !== undefined && ev.id !== undefined && ev.id !== "") {
+    issues.push(...validate(spec.id, ev.id, dir, `/${i}/id`));
+  }
+  if (spec.retry !== undefined && ev.retry !== undefined && ev.retry !== 0) {
+    issues.push(...validate(spec.retry, ev.retry, dir, `/${i}/retry`));
+  }
+  return issues;
 }
 
 // typedEvent returns ev, the i-th event of a request (or with dir
-// "response", of a response), with its data written as its kind says,
-// validating it first if checkItems is set.
-function typedEvent(spec: EventsSpec, ev: ServerEvent<unknown>, i: number, checkItems: boolean, dir: Direction = "request"): ServerEvent {
-  const kind = eventsSchema(spec, ev.event);
-  if (typeof kind === "string") {
-    throw itemError(dir, [{ pointer: `/${i}/event`, message: kind }]);
+// "response", of a response), with its data written as its kind says: an
+// unnamed kind's, the first whose schema the data is. It validates it
+// first if checkItems is set.
+function typedEvent(spec: EventsSpec, ev: ServerEvent<unknown>, i: number, checkItems: boolean, dir: Direction = "request", codecs?: ReadonlyMap<string, Codec>): ServerEvent {
+  const kinds = eventKinds(spec, ev.event);
+  if (typeof kinds === "string") {
+    throw itemError(dir, [{ pointer: `/${i}/event`, message: kinds }]);
   }
-  const issues = checkItems ? validate(kind.schema, ev.data, dir, `/${i}/data`) : [];
+  const kind = kinds.length === 1 ? kinds[0]! : kinds.find((k) => validate(k.schema, ev.data, dir).length === 0);
+  if (kind === undefined) {
+    throw itemError(dir, [{ pointer: `/${i}/data`, message: "the data is no kind of event of the stream" }]);
+  }
+  const issues = checkItems ? [...eventFieldIssues(spec, ev, i, dir), ...validate(kind.schema, ev.data, dir, `/${i}/data`)] : [];
   if (issues.length > 0) {
     throw itemError(dir, issues);
   }
-  return { ...ev, data: kind.text ? text(ev.data) : JSON.stringify(encode(kind.schema, ev.data, dir)) };
+  return { ...ev, data: eventDataText(kind, ev.data, dir, codecs) };
 }
 
 // eventText writes an event in the text/event-stream format. Line ends in
@@ -3470,23 +3559,53 @@ async function* serverEvents(body: ReadableStream<Uint8Array<ArrayBuffer>> | nul
 async function* typedEvents(rd: Reader, spec: EventsSpec, body: ReadableStream<Uint8Array<ArrayBuffer>> | null): AsyncGenerator<ServerEvent<unknown>> {
   let i = 0;
   for await (const ev of serverEvents(body)) {
-    const kind = eventsSchema(spec, ev.event);
-    if (typeof kind === "string") {
-      throw rd.fail(`event ${i}: ${kind}`, [{ pointer: `/${i}/event`, message: kind }]);
+    const kinds = eventKinds(spec, ev.event);
+    if (typeof kinds === "string") {
+      throw rd.fail(`event ${i}: ${kinds}`, [{ pointer: `/${i}/event`, message: kinds }]);
     }
     let data: unknown = ev.data;
-    if (!kind.text) {
+    if (kinds.length === 1) {
+      const kind = kinds[0]!;
       try {
-        data = withDefaults(kind.schema, JSON.parse(ev.data), rd.direction);
+        data = eventValue(kind, ev.data, rd.direction, rd.codecs);
       } catch (e) {
         throw rd.fail(`event ${i}: ${String(e)}`, [{ pointer: `/${i}/data`, message: String(e) }]);
       }
-    }
-    if (rd.validate) {
-      const issues = validate(kind.schema, data, rd.direction, `/${i}/data`);
-      if (issues.length > 0) {
-        throw rd.fail(issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+      if (rd.validate) {
+        const issues = [...eventFieldIssues(spec, ev, i, rd.direction), ...validate(kind.schema, data, rd.direction, `/${i}/data`)];
+        if (issues.length > 0) {
+          throw rd.fail(issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+        }
       }
+    } else {
+      // The unnamed kind the data is: always checked, as that is how the
+      // kinds are told apart.
+      const found: unknown[] = [];
+      for (const kind of kinds) {
+        try {
+          const v = eventValue(kind, ev.data, rd.direction, rd.codecs);
+          if (validate(kind.schema, v, rd.direction).length === 0) {
+            found.push(v);
+            if ("anyOf" in spec && spec.anyOf === true) {
+              break;
+            }
+          }
+        } catch {
+          // Not this kind.
+        }
+      }
+      const many = found.length > 1 && !("anyOf" in spec && spec.anyOf === true);
+      if (found.length === 0 || many) {
+        const message = many ? "the data is more than one kind of event of the stream" : "the data is no kind of event of the stream";
+        throw rd.fail(`event ${i}: ${message}`, [{ pointer: `/${i}/data`, message }]);
+      }
+      if (rd.validate) {
+        const issues = eventFieldIssues(spec, ev, i, rd.direction);
+        if (issues.length > 0) {
+          throw rd.fail(issues.map((x) => `${x.pointer}: ${x.message}`).join("; "), issues);
+        }
+      }
+      data = found[0];
     }
     yield { ...ev, data };
     i++;
@@ -4663,7 +4782,7 @@ function writeResponse(cfg: ReceiverConfig, op: OperationSpec, resp: unknown, re
       headers.set("Content-Type", mediaType);
       headers.set("Cache-Control", "no-cache");
       const events = spec.events;
-      out = streamBody(r["events"], (ev, i) => eventText(events === undefined ? (ev as ServerEvent) : typedEvent(events, ev as ServerEvent<unknown>, i, cfg.validateResponses, "response")), onFailure);
+      out = streamBody(r["events"], (ev, i) => eventText(events === undefined ? (ev as ServerEvent) : typedEvent(events, ev as ServerEvent<unknown>, i, cfg.validateResponses, "response", cfg.codecs)), onFailure);
       break;
     }
   }

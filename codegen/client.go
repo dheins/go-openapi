@@ -1037,7 +1037,7 @@ func (f *fileGen) requestBody(w func(int, string, ...any), o *ir.Operation, body
 		case "sse":
 			stmt = fmt.Sprintf("r.EventsBody(%s)", value)
 			if m.Events != nil {
-				stmt = fmt.Sprintf("client.TypedEventsBody(c, r, %s, %s, %s)", value, f.eventEncoder(m.Events, "Request"), f.itemValidation(m.Events.Data))
+				stmt = fmt.Sprintf("client.TypedEventsBody(c, r, %s, %s, %s)", value, f.eventEncoder(m.Events, "Request", "c.Codecs"), f.itemValidation(m.Events.Data))
 			}
 		}
 		guarded(w, depth, cond, stmt)
@@ -1170,7 +1170,7 @@ func (f *fileGen) readVariant(w func(int, string, ...any), r *ir.Response) {
 		w(2, "v.Items = client.PartStream[%s](c, resp, %s)", f.goType(r.Item), parts)
 	case "sse":
 		if r.Events != nil {
-			w(2, "v.Events = client.TypedEvents(c, resp, %s)", f.eventDecoder(r.Events, "Response"))
+			w(2, "v.Events = client.TypedEvents(c, resp, %s)", f.eventDecoder(r.Events, "Response", "c.Codecs"))
 			break
 		}
 		w(2, "v.Events = client.Events(resp)")

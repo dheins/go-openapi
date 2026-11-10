@@ -4,6 +4,15 @@
 
 ### Added
 
+- Typed server-sent events beyond the 3.2 shapes: kinds without a const
+  event name, told apart by their data (the one matching for `oneOf`,
+  the first for `anyOf`); data of XML, form fields, codecs and numbers or
+  booleans as text, by the kind's `contentMediaType`
+  (`server.EventMedia`, `server.EventValue`, `server.EncodeEventValue`,
+  `server.EventJSON`); and the constraints of `id` and `retry`, checked
+  where events have them (`server.CheckEventField`). Go and TypeScript
+  servers, clients and receivers, and `middleware.Validate`, read and
+  write them.
 - Codecs for parameters and headers (`content` of a codec's media type),
   positional parts and streams of parts whose encoding is a codec's, and
   ranges (`application/*` with `x-goapi-codec`, or `-codec
@@ -634,6 +643,9 @@
 
 ### Changed
 
+- An event kind whose data has a `contentSchema` of a media type goapi
+  does not read (such as `image/png`) leaves the events untyped, with a
+  warning, rather than taking its data as text.
 - A codec decodes into an `any` and is given plain values to encode, not
   the generated types, and its bodies are decoded with the JSON
   decoder's rules: required properties, read-only and write-only ones,

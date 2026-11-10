@@ -57,6 +57,7 @@ Version `1.0`
   - [`GET` `/coded`](#get-coded)
   - [`PUT` `/coded`](#put-coded)
   - [`POST` `/coded`](#post-coded)
+  - [`POST` `/pets/events`](#post-petsevents)
   - [`PUT` `/labels`](#put-labels)
   - [`POST` `/trees`](#post-trees)
   - [`GET` `/public`](#get-public)
@@ -66,6 +67,8 @@ Version `1.0`
   - [`POST` webhook `petPhoto`](#post-webhook-petphoto)
   - [`POST` webhook `petFeed`](#post-webhook-petfeed)
 - [Schemas](#schemas)
+  - [Toy](#toy)
+  - [Treat](#treat)
   - [Labels](#labels)
   - [Amount](#amount)
   - [Order](#order)
@@ -1271,6 +1274,36 @@ Pets as parts of a codec's media type, and a stream of them.
 
 - `application/json`: array of string
 
+### `POST` `/pets/events`
+
+Events of every kind, told apart by name or by their data, echoed back.
+
+- Operation ID: `petEvents`
+
+**Request body** (required)
+
+- `text/event-stream`: a stream of one of object with `event`, `data`, object with `data`, object with `data`, object with `event`, `data`, object with `event`, `data`, object with `event`, `data`, object with `event`, `data`
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | no | pattern: `^[0-9]+$` |
+| `retry` | integer | no | maximum: `60000` |
+
+**Responses**
+
+| Status | Description |
+| --- | --- |
+| `200` | The events back, a pet's with its id. |
+
+`200`:
+
+- `text/event-stream`: a stream of one of object with `event`, `data`, object with `data`, object with `data`, object with `event`, `data`, object with `event`, `data`, object with `event`, `data`, object with `event`, `data`
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | no | pattern: `^[0-9]+$` |
+| `retry` | integer | no | maximum: `60000` |
+
 ### `PUT` `/labels`
 
 Labels as XML, echoed, with a map of arrays, a union of scalars and an object, and typed additional properties.
@@ -1568,6 +1601,20 @@ The API streams the pets it adds; the consumer answers with an event per pet as 
 - `text/event-stream`
 
 ## Schemas
+
+### Toy
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | const `"toy"` | yes |  |
+| `name` | string | yes |  |
+
+### Treat
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | const `"treat"` | yes |  |
+| `calories` | integer | yes | minimum: `0` |
 
 ### Labels
 

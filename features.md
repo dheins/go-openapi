@@ -27,10 +27,10 @@ shipped in.
 
 ## Server
 
-- Typed server-sent events beyond the two shapes the 3.2 spec uses (one
-  kind, or a oneOf of kinds with a const event name): kinds told apart by
-  other fields, `id` and `retry` schemas, and data of other media
-  types than JSON and text. — later
+- Typed server-sent events: `id` fields of a type of their own (they
+  are strings, checked against their schemas), kinds told apart by `id`
+  or `retry`, data of other media types (binary ones, positional parts),
+  and codec kinds in generated CLIs. — later
 - Streamed request bodies longer than the replay limit sent again
   (keeping them on disk rather than in memory). — later
 - XML for unions with arrays among their variants, additional
@@ -145,6 +145,11 @@ server is an `http.Handler`, so mount it, e.g. `r.Mount("/", api.NewServer(h))`.
 
 Unreleased:
 
+- [x] Typed server-sent events beyond the 3.2 shapes: kinds without a
+  name told apart by their data, data of XML, form fields, codecs and
+  numbers as text, and `id` and `retry` constraints, in Go and TypeScript
+  servers, clients, receivers and `middleware.Validate`. (1300932,
+  81e5ff3, af8e94d, d67baee, 1c7584a)
 - [x] Codecs everywhere: codec bodies decoded and encoded through JSON
   values with the JSON decoder's rules, and codecs for parameters,
   headers, positional parts and streams of them, and ranges

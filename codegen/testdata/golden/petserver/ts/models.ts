@@ -2,6 +2,22 @@
 
 import { ref as $ref, type Schema as $Schema } from "./runtime.ts";
 
+export interface Toy {
+  kind: string;
+  name: string;
+}
+
+/** The schema of Toy, for validation and encoding. */
+export const ToySchema: $Schema = { kind: "object", properties: { kind: { schema: { kind: "string" }, required: true }, name: { schema: { kind: "string" }, required: true } } };
+
+export interface Treat {
+  kind: string;
+  calories: number;
+}
+
+/** The schema of Treat, for validation and encoding. */
+export const TreatSchema: $Schema = { kind: "object", properties: { kind: { schema: { kind: "string" }, required: true }, calories: { schema: { kind: "integer", minimum: 0 }, required: true } } };
+
 export interface Labels {
   name: string;
   tags?: { [key: string]: string[] };
@@ -356,6 +372,16 @@ export interface PutLinesRequestBody {
 
 /** The schema of PutLinesRequestBody, for validation and encoding. */
 export const PutLinesRequestBodySchema: $Schema = { kind: "object", properties: { lines: { schema: { kind: "array", items: $ref(() => OrderLineSchema) }, required: true }, receipt: { schema: { kind: "file" } } } };
+
+export type PetEventsRequestEventData = Pet | Toy | Treat | Card | Size | number | Size;
+
+/** The schema of PetEventsRequestEventData, for validation and encoding. */
+export const PetEventsRequestEventDataSchema: $Schema = { kind: "union", oneOf: true, variants: [$ref(() => PetSchema), $ref(() => ToySchema), $ref(() => TreatSchema), $ref(() => CardSchema), $ref(() => SizeSchema), { kind: "integer", minimum: 0 }, $ref(() => SizeSchema)] };
+
+export type PetEvents200EventData = Pet | Toy | Treat | Card | Size | number | Size;
+
+/** The schema of PetEvents200EventData, for validation and encoding. */
+export const PetEvents200EventDataSchema: $Schema = { kind: "union", oneOf: true, variants: [$ref(() => PetSchema), $ref(() => ToySchema), $ref(() => TreatSchema), $ref(() => CardSchema), $ref(() => SizeSchema), { kind: "integer", minimum: 0 }, $ref(() => SizeSchema)] };
 
 export interface SubscribeRequestBody {
   url: string;

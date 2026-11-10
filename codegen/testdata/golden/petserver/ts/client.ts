@@ -910,6 +910,23 @@ const postCodedPartsSpec: OperationSpec = {
   responses: [{ status: "200", mediaType: "application/json", kind: "json", schema: { kind: "array", items: { kind: "string" } } }],
 };
 
+/** The inputs of petEvents. */
+export interface PetEventsRequest {
+  body: Iterable<NamedEvent<"added", $m.Pet> | ServerEvent<$m.Toy> | ServerEvent<$m.Treat> | NamedEvent<"card", $m.Card> | NamedEvent<"size", $m.Size> | NamedEvent<"count", number> | NamedEvent<"coded", $m.Size>> | AsyncIterable<NamedEvent<"added", $m.Pet> | ServerEvent<$m.Toy> | ServerEvent<$m.Treat> | NamedEvent<"card", $m.Card> | NamedEvent<"size", $m.Size> | NamedEvent<"count", number> | NamedEvent<"coded", $m.Size>>;
+}
+
+/** The responses of petEvents. */
+export type PetEventsResponse =
+  | { status: 200; events: AsyncIterable<(NamedEvent<"added", $m.Pet> | ServerEvent<$m.Toy> | ServerEvent<$m.Treat> | NamedEvent<"card", $m.Card> | NamedEvent<"size", $m.Size> | NamedEvent<"count", number> | NamedEvent<"coded", $m.Size>)> };
+
+const petEventsSpec: OperationSpec = {
+  method: "POST",
+  path: "/pets/events",
+  params: [],
+  body: { required: true, media: [{ mediaType: "text/event-stream", kind: "sse", key: "body", schema: { kind: "any" }, events: { kinds: { "added": { schema: $ref(() => $m.PetSchema) }, "card": { schema: $ref(() => $m.CardSchema), media: "xml", xml: { name: "card", namespace: "urn:example:pets", prefix: "p", type: "object", properties: [{ name: "id", node: { name: "id", kind: "attribute", type: "integer" } }, { name: "name", node: { name: "name", namespace: "urn:example:pets", prefix: "p", type: "string" } }, { name: "nicknames", node: { name: "nicknames", type: "array", wrapped: true, items: { name: "nickname", type: "string" } } }, { name: "vets", node: { name: "vets", type: "array", items: { name: "vet", type: "object", properties: [{ name: "name", node: { name: "name", kind: "text", type: "string" } }, { name: "phone", node: { name: "phone", kind: "attribute", type: "string" } }] } } }, { name: "note", node: { name: "remark", type: "object", properties: [{ name: "lang", node: { name: "lang", kind: "attribute", type: "string" } }, { name: "text", node: { name: "text", kind: "cdata", type: "string" } }] } }, { name: "secret", node: { name: "secret", type: "string" } }] } }, "size": { schema: $ref(() => $m.SizeSchema), media: "form" }, "count": { schema: { kind: "integer", minimum: 0 }, media: "scalar" }, "coded": { schema: $ref(() => $m.SizeSchema), media: "codec", mediaType: "application/x-tc2" } }, unnamed: [{ schema: $ref(() => $m.ToySchema) }, { schema: $ref(() => $m.TreatSchema) }], id: { kind: "string", pattern: "^[0-9]+$" }, retry: { kind: "integer", maximum: 60000 } } }] },
+  responses: [{ status: "200", mediaType: "text/event-stream", kind: "sse", events: { kinds: { "added": { schema: $ref(() => $m.PetSchema) }, "card": { schema: $ref(() => $m.CardSchema), media: "xml", xml: { name: "card", namespace: "urn:example:pets", prefix: "p", type: "object", properties: [{ name: "id", node: { name: "id", kind: "attribute", type: "integer" } }, { name: "name", node: { name: "name", namespace: "urn:example:pets", prefix: "p", type: "string" } }, { name: "nicknames", node: { name: "nicknames", type: "array", wrapped: true, items: { name: "nickname", type: "string" } } }, { name: "vets", node: { name: "vets", type: "array", items: { name: "vet", type: "object", properties: [{ name: "name", node: { name: "name", kind: "text", type: "string" } }, { name: "phone", node: { name: "phone", kind: "attribute", type: "string" } }] } } }, { name: "note", node: { name: "remark", type: "object", properties: [{ name: "lang", node: { name: "lang", kind: "attribute", type: "string" } }, { name: "text", node: { name: "text", kind: "cdata", type: "string" } }] } }, { name: "secret", node: { name: "secret", type: "string" } }] } }, "size": { schema: $ref(() => $m.SizeSchema), media: "form" }, "count": { schema: { kind: "integer", minimum: 0 }, media: "scalar" }, "coded": { schema: $ref(() => $m.SizeSchema), media: "codec", mediaType: "application/x-tc2" } }, unnamed: [{ schema: $ref(() => $m.ToySchema) }, { schema: $ref(() => $m.TreatSchema) }], id: { kind: "string", pattern: "^[0-9]+$" }, retry: { kind: "integer", maximum: 60000 } } }],
+};
+
 /** The inputs of putLabels. */
 export interface PutLabelsRequest {
   body: $m.Labels;
@@ -1407,6 +1424,15 @@ export class Client {
    */
   postCodedParts(req: PostCodedPartsRequest = {}, call?: CallOptions): Promise<PostCodedPartsResponse> {
     return send(this.#cfg, postCodedPartsSpec, req, call) as Promise<PostCodedPartsResponse>;
+  }
+
+  /**
+   * POST /pets/events.
+   *
+   * Events of every kind, told apart by name or by their data, echoed back.
+   */
+  petEvents(req: PetEventsRequest, call?: CallOptions): Promise<PetEventsResponse> {
+    return send(this.#cfg, petEventsSpec, req, call) as Promise<PetEventsResponse>;
   }
 
   /**

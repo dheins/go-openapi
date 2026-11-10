@@ -25,15 +25,21 @@ type stream struct {
 	item *jsonschema.Schema
 	// kinds check the data of events by the event's name, or of every
 	// event under "" for a stream of one kind; names are the names, in
-	// document order, for the error of an unknown one.
-	kinds map[string]eventKind
-	names []string
+	// document order, for the error of an unknown one. unnamed are the
+	// kinds without a name, which an event of another name is the one of
+	// (anyOf: the first).
+	kinds   map[string]eventKind
+	names   []string
+	unnamed []eventKind
+	anyOf   bool
+	// id and retry check those fields of events, or are nil.
+	id, retry *jsonschema.Schema
 }
 
-// eventKind checks the data of a kind of event: as JSON, or as text.
+// eventKind checks the data of a kind of event, written as media says.
 type eventKind struct {
 	schema *jsonschema.Schema
-	text   bool
+	media  server.EventMedia
 }
 
 // stream returns how to check a stream body of kind (jsonl or sse), of
@@ -54,27 +60,58 @@ func (b *builder) stream(kind string, m *oas.MediaType, events *ir.EventStream) 
 		if events == nil || item == nil {
 			return nil
 		}
-		s := &stream{events: true, kinds: map[string]eventKind{}}
-		if len(events.Kinds) == 0 {
-			s.kinds[""] = eventKind{schema: b.set.Compile(eventData(item).ContentSchema)}
-			return s
-		}
+		s := &stream{events: true, kinds: map[string]eventKind{}, anyOf: events.AnyOf}
 		members := item.OneOf
 		if len(members) == 0 {
 			members = item.AnyOf
 		}
+		s.id, s.retry = b.eventField(item, members, "id"), b.eventField(item, members, "retry")
+		if len(events.Kinds) == 0 {
+			s.kinds[""] = b.eventKind(eventData(item), events.Media)
+			return s
+		}
 		// The IR types the events only if every member is a kind, so
 		// they are in the order of its kinds.
 		for i, k := range events.Kinds {
-			data := eventData(deref(members[i]))
-			schema := data.ContentSchema
-			if k.Text {
-				schema = data
+			kind := b.eventKind(eventData(deref(members[i])), k.Media)
+			if k.Name == "" {
+				s.unnamed = append(s.unnamed, kind)
+				continue
 			}
-			s.kinds[k.Name] = eventKind{schema: b.set.Compile(schema), text: k.Text}
+			s.kinds[k.Name] = kind
 			s.names = append(s.names, k.Name)
 		}
 		return s
+	}
+	return nil
+}
+
+// eventKind returns how to check the data of a kind of event, of schema
+// data, written as m says.
+func (b *builder) eventKind(data *oas.Schema, m ir.EventMedia) eventKind {
+	schema := data
+	if data.ContentSchema != nil {
+		schema = data.ContentSchema
+	}
+	if m.Kind == "text" {
+		schema = data
+	}
+	media := server.EventMedia{Kind: m.Kind, Type: m.Type, MediaType: m.MediaType, XML: xmlNode(m.XML), Codecs: b.codecs}
+	if m.Form != nil {
+		media.Form = objectProperty(m.Form.Properties, m.Form.Additional, m.Form.Shape)
+	}
+	return eventKind{schema: b.set.Compile(schema), media: media}
+}
+
+// eventField returns the schema of the field name (id or retry) of
+// events of item, or of its kinds, members, compiled, or nil.
+func (b *builder) eventField(item *oas.Schema, members []*oas.Schema, name string) *jsonschema.Schema {
+	for _, s := range append([]*oas.Schema{item}, members...) {
+		if s = deref(s); s != nil && s.Properties != nil {
+			if f, ok := s.Properties.Get(name); ok && deref(f) != nil {
+				return b.set.Compile(f)
+			}
+		}
 	}
 	return nil
 }
@@ -112,25 +149,68 @@ func (s *stream) check(set *schemas.Set, raw []byte, index int, dir schemas.Dire
 		if scanErr != nil {
 			return true, scanErr
 		}
-		kind, ok := s.kinds[""]
-		if len(s.names) > 0 {
-			if kind, ok = s.kinds[ev.Event]; !ok {
-				return true, nested(index, server.UnknownEvent(ev.Event, s.names...))
+		if err := s.checkFields(set, ev, dir); err != nil {
+			return true, nested(index, err)
+		}
+		if kind, ok := s.kinds[ev.Event]; ok || len(s.names) == 0 && len(s.unnamed) == 0 {
+			if !ok {
+				kind = s.kinds[""]
+			}
+			return true, nested(index, kind.check(set, ev, dir))
+		}
+		if len(s.unnamed) == 0 {
+			return true, nested(index, server.UnknownEvent(ev.Event, s.names...))
+		}
+		// The unnamed kind the data is.
+		found := 0
+		for _, kind := range s.unnamed {
+			if kind.check(set, ev, dir) == nil {
+				found++
+				if s.anyOf {
+					break
+				}
 			}
 		}
-		data := []byte(ev.Data)
-		if kind.text {
-			data, _ = json.Marshal(ev.Data)
+		switch {
+		case found == 0:
+			return true, nested(index, server.NoEventKind(ev.Event, s.names...))
+		case found > 1 && !s.anyOf:
+			return true, nested(index, server.EventKinds())
 		}
-		_, err = check(set, kind.schema, data, dir)
-		if err != nil {
-			var errs oapi.ValidationErrors
-			errs.Nested("/data", err)
-			err = errs.Err()
-		}
-		return true, nested(index, err)
+		return true, nil
 	}
 	return false, nil
+}
+
+// checkFields checks the id and retry fields of ev.
+func (s *stream) checkFields(set *schemas.Set, ev server.Event, dir schemas.Direction) error {
+	var errs oapi.ValidationErrors
+	// The fields are checked where an event has them.
+	if s.id != nil && ev.ID != "" {
+		data, _ := json.Marshal(ev.ID)
+		_, err := check(set, s.id, data, dir)
+		errs.Nested("/id", err)
+	}
+	if s.retry != nil && ev.Retry != 0 {
+		_, err := check(set, s.retry, []byte(strconv.Itoa(ev.Retry)), dir)
+		errs.Nested("/retry", err)
+	}
+	return errs.Err()
+}
+
+// check returns what is wrong with the data of ev, of kind k, at
+// "/data".
+func (k eventKind) check(set *schemas.Set, ev server.Event, dir schemas.Direction) error {
+	data, err := server.EventJSON(ev.Data, k.media)
+	if err == nil {
+		_, err = check(set, k.schema, data, dir)
+	}
+	if err != nil {
+		var errs oapi.ValidationErrors
+		errs.Nested("/data", err)
+		return errs.Err()
+	}
+	return nil
 }
 
 // nested locates err at the item index of a stream.

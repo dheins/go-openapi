@@ -471,6 +471,10 @@ func (g *tsGen) eventType(es *ir.EventStream) string {
 	}
 	var kinds []string
 	for _, k := range es.Kinds {
+		if k.Name == "" {
+			kinds = append(kinds, fmt.Sprintf("ServerEvent<%s>", g.tsType(k.Variant.Type)))
+			continue
+		}
 		kinds = append(kinds, fmt.Sprintf("NamedEvent<%s, %s>", jsString(k.Name), g.tsType(k.Variant.Type)))
 	}
 	return strings.Join(kinds, " | ")
@@ -478,18 +482,51 @@ func (g *tsGen) eventType(es *ir.EventStream) string {
 
 // eventsSpec renders the EventsSpec of es.
 func (g *tsGen) eventsSpec(es *ir.EventStream) string {
-	if len(es.Kinds) == 0 {
-		return "{ data: " + g.schema(es.Data) + " }"
+	var fields []string
+	if es.ID != nil {
+		fields = append(fields, "id: "+g.schema(es.ID))
 	}
-	var kinds []string
+	if es.Retry != nil {
+		fields = append(fields, "retry: "+g.schema(es.Retry))
+	}
+	if len(es.Kinds) == 0 {
+		return "{ " + strings.Join(append([]string{"data: " + g.schema(es.Data) + g.eventMediaSpec(es.Media)}, fields...), ", ") + " }"
+	}
+	var kinds, unnamed []string
 	for _, k := range es.Kinds {
-		s := fmt.Sprintf("%s: { schema: %s", jsString(k.Name), g.schema(k.Variant.Type))
+		s := "{ schema: " + g.schema(k.Variant.Type)
 		if k.Text {
 			s += ", text: true"
 		}
-		kinds = append(kinds, s+" }")
+		s += g.eventMediaSpec(k.Media) + " }"
+		if k.Name == "" {
+			unnamed = append(unnamed, s)
+			continue
+		}
+		kinds = append(kinds, jsString(k.Name)+": "+s)
 	}
-	return "{ kinds: { " + strings.Join(kinds, ", ") + " } }"
+	out := []string{"kinds: { " + strings.Join(kinds, ", ") + " }"}
+	if len(unnamed) > 0 {
+		out = append(out, "unnamed: ["+strings.Join(unnamed, ", ")+"]")
+	}
+	if es.AnyOf {
+		out = append(out, "anyOf: true")
+	}
+	return "{ " + strings.Join(append(out, fields...), ", ") + " }"
+}
+
+// eventMediaSpec renders how the data of events of media m is written, as
+// fields of an EventKindSpec: none for JSON and text.
+func (g *tsGen) eventMediaSpec(m ir.EventMedia) string {
+	switch m.Kind {
+	case "scalar", "form":
+		return fmt.Sprintf(", media: %q", m.Kind)
+	case "xml":
+		return `, media: "xml", xml: ` + tsXMLNode(m.XML)
+	case "codec":
+		return `, media: "codec", mediaType: ` + jsString(m.MediaType)
+	}
+	return ""
 }
 
 // responseType renders the union of the response variants of o, as a

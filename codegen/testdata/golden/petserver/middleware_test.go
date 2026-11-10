@@ -157,7 +157,8 @@ func TestMiddlewareResponses(t *testing.T) {
 	}
 	var log bytes.Buffer
 	mw, err := middleware.Validate(spec, middleware.WithResponseValidation(middleware.RejectResponses),
-		middleware.WithLogger(slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelWarn}))))
+		middleware.WithLogger(slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelWarn}))),
+		middleware.WithCodec("application/x-tc", tcCodec{}), middleware.WithCodec("application/x-tc2", tcCodec{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +185,7 @@ func TestMiddlewareResponses(t *testing.T) {
 		{"POST", "/events/typed", "text/event-stream", "data: {\"name\":\"Rex\"}\n\n", nil},
 		{"POST", "/pets/lines", "application/jsonl", "{\"name\":\"Rex\"}\n", nil},
 		{"PUT", "/labels", "application/xml", labelsDoc, nil},
+		{"POST", "/pets/events", "text/event-stream", petEventsDoc, nil},
 	} {
 		log.Reset()
 		want := do(t, plain, tt.method, tt.target, tt.contentType, tt.body, tt.headers...)

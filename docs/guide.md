@@ -887,8 +887,42 @@ return api.Feed200EventsResponse{Events: func(yield func(server.TypedEvent[model
   unknown event name with one at `/2/event`. Generated clients end the
   loop with a `*client.InvalidResponse` (constraints are checked with
   response validation), and check request events before sending them.
-- An `itemSchema` with a kind that has no `const` event name, or two kinds
-  of one name, gets a warning, and its events stay `server.Event`s.
+- **Unnamed kinds:** a kind without a `const` event name is told apart by
+  its data. An event whose name is none of the named kinds' (or that has
+  none) is read as each unnamed kind in turn, its data checked, and is
+  the one it matches: with `oneOf` exactly one, with `anyOf` the first.
+  Otherwise it is an error at `/2/data` (and `/2/event`, for a name no
+  kind has). An unnamed kind is written without an `event:` line.
+
+  ```yaml
+  itemSchema:
+    oneOf:
+      - properties: {event: {const: added}, data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Pet"}}}
+      - properties: {data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Toy"}}}    # kind: toy
+      - properties: {data: {contentMediaType: application/json, contentSchema: {$ref: "#/components/schemas/Treat"}}}  # kind: treat
+  ```
+- **Data formats:** a kind's `contentMediaType` says how its data is
+  written:
+  - JSON (`application/json`, `+json`);
+  - an XML document (`application/xml`, `+xml`), as the schema's `xml`
+    objects describe it;
+  - form fields of an object (`application/x-www-form-urlencoded`);
+  - a codec's media type (`-codec`, or `x-goapi-codec: true` on the data
+    schema), with the server's or client's codec;
+  - the text of a number, boolean or enum (`data: {type: integer}`, or
+    `text/plain` with such a `contentSchema`);
+  - and text otherwise.
+
+  Data is still one event's, so a format that writes several lines is
+  sent as several `data:` lines. Generated CLIs have no codecs to read
+  codec kinds with.
+- **`id` and `retry`:** the constraints of the `itemSchema`'s `id` and
+  `retry` properties (a `pattern` or `format`, a `maximum`) are checked
+  where an event has them, at `/2/id` and `/2/retry`. `ID` stays a
+  `string` and `Retry` an `int`.
+- Two kinds of one name, data of other media types, or data that is an
+  object or array without a `contentSchema` get a warning, and their
+  events stay `server.Event`s.
 
 ### XML
 
@@ -1835,7 +1869,7 @@ if (resp.status === 200) {
   - It checks requests before sending them (`validateRequests: false` turns that off), and responses with `validateResponses: true`.
 - **Responses** are unions on `status`, with `contentType` when a status has several media types. JSON Lines and streamed parts are `items` and server-sent events `events`, all `AsyncIterable`s that stop the stream when you `break`. A `multipart/byteranges` body is a `ByteRange[]`, `{ start, end, size, contentType, data }`. The parts of a response are checked against their encodings as they are read.
 - **Links** are followed as in Go: `await api.followCreatePetGetPet(created, req)` sends the request the link builds from the response and the request it answers, and rejects for a response without the link. `$url` is the URL the request was sent to, built again (`requestUrl`), and embedded text and expressions inside constants are read and filled in as Go clients do. A value that is not there is left out, for the request's validation to report if it is required.
-- **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent.
+- **Typed events** are `ServerEvent<T>`, or for named kinds a union of `NamedEvent<"added", Pet> | NamedEvent<"ping", string> | ...`, which `switch (ev.event)` narrows; unnamed kinds are `ServerEvent<T>` members of the union. Their data is parsed as it arrives (and validated with `validateResponses`), and validated and encoded when sent, in every data format the Go runtime writes; an unnamed kind is sent as the first whose schema its data is.
 - **Errors:** an undeclared status or media type is an `UnexpectedResponseError` (with `problem` for a problem+json body). The others are `InvalidRequestError` (with its `issues`), `InvalidResponseError` and `NoCredentialsError`.
 - **Options:** `baseUrl` (the document's server by default), `operationServers` (as `client.WithOperationServers` in Go: operations with servers of their own are sent there while `baseUrl` is not given), `fetch` (to add retries, logging or test doubles), `headers`, `replayLimit`, and per call `signal`, `headers` and `server` (as `client.WithServer`; following a link that names a server sets it). A call's headers win, so `{ headers: { Accept: "text/csv" } }` asks for another media type.
 - **Retrying streams:** a streamed request body is iterated once, and up to `replayLimit` bytes (1 MiB by default, 0 for none) of it are kept: each read of `init.body` is a new stream from the start, so a `fetch` wrapper retries by calling `fetch(url, init)` again. Past the limit the call rejects with `NotReplayableError`.
